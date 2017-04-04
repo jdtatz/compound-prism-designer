@@ -115,7 +115,6 @@ def process():
             break
         glass, n = p
         outQueue.put((glass, cmpnd(np.array(n), w)))
-        items.task_done()
     outQueue.put(None)
 
 for t in map(lambda x: Thread(target=x), (putter, *repeat(process, thread_count))):
