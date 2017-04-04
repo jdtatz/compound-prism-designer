@@ -82,7 +82,7 @@ class CompoundPrism(namedtuple("Prism", 'prism, error, snell, merit_functions, w
     def __call__(self, *args, **kwargs):
         return self.prism(*args, **kwargs)
 
-base = {'tir': 0.1, 'valid': 1, 'crit_angle': 1, 'thin': 0.25, 'dev': 1, 'disp': 1}
+base = {'tir': 0.1, 'valid': 1, 'crit_angle': 1, 'thin': 0.25, 'deviation': 1, 'dispersion': 1}
 
 default = {
     'linearity': {'NL': 25},
@@ -120,16 +120,16 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
     @jit
     def linearity(angles, n, delta_spectrum, thetas):
         """Linearity merit function"""
-        deltaC_err = weights.dev * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
-        deltaT_err = weights.disp * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
+        deltaC_err = weights.deviation * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
+        deltaT_err = weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
         NL_err = weights.NL * nonlinearity_error(delta_spectrum)
         return deltaC_err + deltaT_err + NL_err
 
     @jit
     def beam_comp(angles, n, delta_spectrum, thetas):
         """Beam Compression and Linearity merit function"""
-        deltaC_err = weights.dev * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
-        deltaT_err = weights.disp * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
+        deltaC_err = weights.deviation * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
+        deltaT_err = weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
         NL_err = weights.NL * nonlinearity_error(delta_spectrum)
         K = beam_compression(thetas, nwaves)
         K_err = weights.K * (K - 1.0) ** 2
@@ -138,23 +138,23 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
     @jit
     def chromaticity(angles, n, delta_spectrum, thetas):
         """Chromaticity merit function"""
-        deltaC_err = weights.dev * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
+        deltaC_err = weights.deviation * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
         chromat = weights.chromat * np.abs(delta_spectrum.max() - delta_spectrum.min())
         return deltaC_err + chromat
 
     @jit
     def thinness(angles, n, delta_spectrum, thetas):
         """Thinness merit function"""
-        deltaC_err = weights.dev * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
-        deltaT_err = weights.disp * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
+        deltaC_err = weights.deviation * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
+        deltaT_err = weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
         anglesum = weights.anglesum * deltaT_target * np.sum(angles ** 2)
         return deltaC_err + deltaT_err + anglesum
 
     @jit
     def second_order(angles, n, delta_spectrum, thetas):
         """Second Order Error merit function"""
-        deltaC_err = weights.dev * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
-        deltaT_err = weights.disp * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
+        deltaC_err = weights.deviation * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
+        deltaT_err = weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
         coeffs, remainder = get_poly_coeffs(delta_spectrum, 2)
         secondorder = weights.secondorder / coeffs[2] ** 2
         return deltaC_err + deltaT_err + secondorder
@@ -173,13 +173,16 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
         alphas = angles[glass_indices]
         beta = np.sum(alphas[:prism_count // 2]) + alphas[prism_count // 2] / 2
         gamma = np.sum(alphas[prism_count // 2 + 1:]) + alphas[prism_count // 2] / 2
-        ns = np.vstack((n[glass_indices], np.ones((1, nwaves))))
+        ns = n[glass_indices]
 
         thetas[0] = theta0 + beta  # theta 1
         np.arcsin((1.0 / ns[0]) * np.sin(theta0 + beta), thetas[1])  # theta 1 prime
         for i in range(1, prism_count + 1):
             thetas[2 * i] = thetas[2 * i - 1] - alphas[i - 1]  # theta i
-            np.arcsin(ns[i - 1] / ns[i] * np.sin(thetas[2 * i]), thetas[2 * i + 1])  # theta i prime
+            if i < prism_count:
+                np.arcsin(ns[i - 1] / ns[i] * np.sin(thetas[2 * i]), thetas[2 * i + 1])  # theta i prime
+            else:
+                np.arcsin(ns[i - 1] * np.sin(thetas[2 * i]), thetas[2 * i + 1])  # theta (n-1) prime
         thetas[-1] = thetas[-2] + gamma  # theta n
 
         delta_spectrum = theta0 - thetas[-1]
@@ -236,6 +239,7 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
         chromat = 100.0 * abs(delta_spectrum.max() - delta_spectrum.min()) * 180.0 / pi
         delta1 *= 2.0 * 180.0 / pi
         delta2 *= 2.0 * 180.0 / pi
+        # T = transmission(thetas, n, nwaves)
 
         return alphas, merr, deltaC, deltaT, NL, SSR, K, deltaM, delta1, delta2, nonlin, chromat
 
