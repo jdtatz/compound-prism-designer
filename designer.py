@@ -3,7 +3,6 @@ from multiprocessing import cpu_count
 from threading import Thread, Lock
 import time, sys, json, sqlite3
 from prisms import prism_setup
-from queue import Queue
 from uuid import uuid4
 from math import pi
 import numpy as np
@@ -62,7 +61,7 @@ print('thread count:', thread_count, '\n')
 cmpnd = prism_setup(prism_count, count, indices, deltaC_target, deltaT_target, merit, weights,
                     nwaves, sampling_domain, theta0, initial_angles, angle_limit * pi / 180.0)
 
-conn = sqlite3.connect(database_file)
+conn = sqlite3.connect(database_file, check_same_thread=False)
 c = conn.cursor()
 
 c.execute("""CREATE TABLE IF NOT EXISTS setups (
@@ -98,39 +97,35 @@ c.execute("""CREATE TABLE {} (
                 (count * "alpha{} REAL, ").format(*range(1, count + 1))))
 
 t1 = time.time()
-outQueue = Queue()
 items = glass_combos(gcat, count, w, wavemin, wavemax)
-lock = Lock()
+itemLock, outputLock = Lock(), Lock()
+insert_stmt = "INSERT INTO {} VALUES ({} ?)".format(table_name, "?, " * (2 * count + 10))
+amounts = []
 
 
 def process():
+    count = 0
     while True:
         try:
-            with lock:
+            with itemLock:
                 p = next(items)
         except StopIteration:
             break
         glass, n = p
-        outQueue.put((glass, cmpnd(np.array(n), w)))
-    outQueue.put(None)
-
-for t in (Thread(target=process) for _ in range(thread_count)):
-    t.start()
-
-insert_stmt = "INSERT INTO {} VALUES ({} ?)".format(table_name, "?, " * (2 * count + 10))
-amount, ncount = 0, 0
-while ncount < thread_count:
-    item = outQueue.get()
-    if item is None:
-        ncount += 1
-    else:
-        gls, data = item
+        data = cmpnd(np.array(n), w)
         if data is not None:
-            c.execute(insert_stmt, (*gls, *data[0], *data[1:]))
-        amount += 1
-    if amount % 500000 == 0:
-        conn.commit()
-        print("Saved at", amount, "items")
+            count += 1
+            insert = *glass, *data[0], *data[1:]
+            with outputLock:
+                c.execute(insert_stmt, insert)
+    amounts.append(count)
+
+threads = [Thread(target=process) for _ in range(thread_count)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+amount = sum(amounts)
 
 dt = time.time() - t1
 print('Total glass combinations considered =', amount)
