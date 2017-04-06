@@ -1,4 +1,4 @@
-import numba
+import numba as nb
 import numpy as np
 from numpy import pi
 from fallbacks import gradient, setup_nelder_mead
@@ -8,7 +8,7 @@ from functools import partial
 """
 Utility Functions
 """
-jit = partial(numba.jit, nopython=True, nogil=True, cache=True)
+jit = partial(nb.jit, nopython=True, nogil=True, cache=True)
 
 
 @jit
@@ -215,7 +215,7 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
     # another function factory, that takes the place of scipy.optimize.fmin
     minimizer = setup_nelder_mead(merit_error, 200, 200)
 
-    @jit
+    @jit((nb.f8[:, :], nb.f8[:]))
     def prism(n, w):
         init = np.array(initial_angles)
         angles = minimizer(init, n)

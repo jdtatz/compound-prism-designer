@@ -1,9 +1,8 @@
 from glasscat import calc_w, read_glasscat, glass_combos
 from multiprocessing import cpu_count
-from itertools import repeat, chain
+from threading import Thread, Lock
 import time, sys, json, sqlite3
 from prisms import prism_setup
-from threading import Thread
 from queue import Queue
 from uuid import uuid4
 from math import pi
@@ -100,24 +99,22 @@ c.execute("""CREATE TABLE {} (
 
 t1 = time.time()
 outQueue = Queue()
-items = Queue(1000)
-
-
-def putter():
-    for p in chain(glass_combos(gcat, count, w, wavemin, wavemax), repeat(None, thread_count)):
-        items.put(p)
+items = glass_combos(gcat, count, w, wavemin, wavemax)
+lock = Lock()
 
 
 def process():
     while True:
-        p = items.get()
-        if p is None:
+        try:
+            with lock:
+                p = next(items)
+        except StopIteration:
             break
         glass, n = p
         outQueue.put((glass, cmpnd(np.array(n), w)))
     outQueue.put(None)
 
-for t in map(lambda x: Thread(target=x), (putter, *repeat(process, thread_count))):
+for t in (Thread(target=process) for _ in range(thread_count)):
     t.start()
 
 insert_stmt = "INSERT INTO {} VALUES ({} ?)".format(table_name, "?, " * (2 * count + 10))
@@ -131,7 +128,6 @@ while ncount < thread_count:
         if data is not None:
             c.execute(insert_stmt, (*gls, *data[0], *data[1:]))
         amount += 1
-    outQueue.task_done()
     if amount % 500000 == 0:
         conn.commit()
         print("Saved at", amount, "items")
