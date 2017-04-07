@@ -3,6 +3,7 @@ from multiprocessing import cpu_count
 from threading import Thread, Lock
 import time, sys, json, sqlite3
 from prisms import prism_setup
+from itertools import repeat
 from uuid import uuid4
 from math import pi
 import numpy as np
@@ -56,7 +57,7 @@ deltaT_target = dispersion_target * pi / 180.0
 
 print('table:', table_name)
 print('# glasses =', nglass)
-print('targets: deltaC = %5.2f deg, deltaT = %5.2f deg' % (deviation_target, dispersion_target))
+print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
 print('thread count:', thread_count, '\n')
 cmpnd = prism_setup(prism_count, count, indices, deltaC_target, deltaT_target, merit, weights,
                     nwaves, sampling_domain, theta0, initial_angles, angle_limit * pi / 180.0)
@@ -78,9 +79,9 @@ c.execute("""CREATE TABLE IF NOT EXISTS setups (
     catalog TEXT
     )""")
 
-c.execute("""CREATE TABLE {} (
-    {}
-    {}
+c.execute(f"""CREATE TABLE {table_name} (
+    {", ".join(f"glass{i} TEXT" for i in range(1, count+1))},
+    {", ".join(f"alpha{i} REAL" for i in range(1, count+1))},
     meritError REAL,
     deviation REAL,
     dispersion REAL,
@@ -92,18 +93,16 @@ c.execute("""CREATE TABLE {} (
     delta2 REAL,
     nonlin REAL,
     chromat REAL
-    )""".format(table_name,
-                (count * "glass{} TEXT, ").format(*range(1, count + 1)),
-                (count * "alpha{} REAL, ").format(*range(1, count + 1))))
+    )""")
 
 t1 = time.time()
 items = glass_combos(gcat, count, w, wavemin, wavemax)
 itemLock, outputLock = Lock(), Lock()
-insert_stmt = "INSERT INTO {} VALUES ({} ?)".format(table_name, "?, " * (2 * count + 10))
+insert_stmt = f"INSERT INTO {table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
 amounts = []
 
 
-def process():
+def process(tid):
     count = 0
     while True:
         try:
@@ -118,9 +117,11 @@ def process():
             insert = *glass, *data[0], *data[1:]
             with outputLock:
                 c.execute(insert_stmt, insert)
+                if count % 10000 == 0 and tid == 0:
+                    conn.commit()
     amounts.append(count)
 
-threads = [Thread(target=process) for _ in range(thread_count)]
+threads = [Thread(target=process, args=(i,)) for i in range(thread_count)]
 for t in threads:
     t.start()
 for t in threads:
