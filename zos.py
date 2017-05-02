@@ -1,5 +1,6 @@
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import CastTo, constants
+from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import numpy as np
 import math
@@ -133,6 +134,13 @@ wdata = np.array(wdata)
 np.savetxt(outFile, wdata, fmt=('%g', '%u', '%g'), delimiter=',', newline='\r\n', header='wavelength(nm),field#,pmt position(mm)', comments='')
 
 # PMT bins
+interpolated = interp1d(wdata[:, 2], wdata[:, 0], 'cubic')
+with open("pmtBins.txt", 'w') as fp:
+    fp.write("Bin# (pos1(mm), pos2(mm)): from wave1(nm) to wave2(nm)\n")
+    for i, b in enumerate(range(-16, 16)):
+        w0, wl = interpolated(b+0.1), interpolated(b+0.9)
+        fp.write(f"Bin{i+1} ({b+0.1:.1f}, {b+0.9:.1f}): from {w0:.1f} to {wl:.1f}\n")
+'''
 bins = np.arange(math.floor(wdata[:, 2].min()), math.ceil(wdata[:, 2].max()))
 digi = np.digitize(wdata[:, 2], bins, right=True)
 binned = {b: wdata[digi==i+1, ::2] for i, b in enumerate(bins)}
@@ -142,7 +150,7 @@ with open("pmtBins.txt", 'w') as fp:
     for i, b in enumerate(range(-16, 16)):
         w0, wl = inbin[b][[0, -1], 0]
         fp.write(f"Bin{i+1} ({b+0.1:.1f}, {b+0.9:.1f}): from {wl:.1f} to {w0:.1f}\n")
-
+'''
 # Save and close
 system.Save()
 application.CloseApplication()
