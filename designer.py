@@ -65,18 +65,13 @@ cmpnd = prism_setup(prism_count, count, indices, deltaC_target, deltaT_target, m
 conn = sqlite3.connect(database_file, check_same_thread=False)
 c = conn.cursor()
 
-c.execute("""CREATE TABLE IF NOT EXISTS setups (
+c.execute("""CREATE TABLE IF NOT EXISTS runs (
     "table id" TEXT PRIMARY KEY,
     "prism name" TEXT,
     "merit function" TEXT,
     "deviation target" REAL,
     "dispersion target" REAL,
-    "sampling domain" TEXT,
-    "wave minimum" REAL,
-    "wave maximum" REAL,
-    "number of waves" INTEGER,
-    "angle limit" REAL,
-    catalog TEXT
+    json TEXT
     )""")
 
 c.execute(f"""CREATE TABLE {table_name} (
@@ -119,6 +114,7 @@ def process(tid):
                 c.execute(insert_stmt, insert)
                 if count % 10000 == 0 and tid == 0:
                     conn.commit()
+                    print("Saved")
     amounts.append(count)
 
 threads = [Thread(target=process, args=(i,)) for i in range(thread_count)]
@@ -133,8 +129,7 @@ print('Total glass combinations considered =', amount)
 print('Elapsed time for solution search in the full catalog =', dt, 'sec')
 print('Elapsed time per glass combination =', 1000 * dt / amount, 'ms')
 
-c.execute("INSERT INTO setups VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          (table_name, prism_name, merit, deviation_target, dispersion_target,
-           sampling_domain, wavemin, wavemax, nwaves, angle_limit, catalog_filename))
+c.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+          (table_name, prism_name, merit, deviation_target, dispersion_target, str(settings)))
 conn.commit()
 conn.close()
