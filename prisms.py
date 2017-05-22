@@ -1,14 +1,12 @@
 import numba as nb
 import numpy as np
 from numpy import pi
-from fallbacks import gradient, setup_nelder_mead
+from utils import jit, cfunc, gradient, vec_ptr, minimizer
 from collections import namedtuple
-from functools import partial
 
 """
 Utility Functions
 """
-jit = partial(nb.jit, nopython=True, nogil=True, cache=True)
 
 
 @jit
@@ -212,14 +210,17 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
 
         return merit_err + merit_func(angles, n, delta_spectrum, thetas)
 
-    # another function factory, that takes the place of scipy.optimize.fmin
-    minimizer = setup_nelder_mead(merit_error, 200, 200)
+    @cfunc(nb.float64(nb.types.voidptr, nb.types.voidptr))
+    def prep(a0, n0):
+        angles = nb.carray(vec_ptr(a0, 0), (glass_count,), np.float64)
+        n = nb.carray(n0, (glass_count, nwaves), np.float64)
+        return merit_error(angles, n)
+    prep = prep.address
 
     @jit((nb.f8[:, :], nb.f8[:]))
     def prism(n, w):
         init = np.array(initial_angles)
-        angles = minimizer(init, n)
-
+        angles = minimizer(prep, init, n)
         merr = merit_error(angles, n)
         delta_spectrum, thetas = snells(angles, n)
         if np.any(np.isnan(thetas)):
