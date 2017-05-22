@@ -82,8 +82,9 @@ def minimizer(func, x0, params):
     x_out = np.empty(size, dtype=np.float64)
     for i in range(size):
         x_out[i] = vec_get(x, i)
+    merr = getmin_fmin(mini)
     free_fmin(mini)
     vec_free(x_vec)
     vec_free(step_vec)
     free(fn)
-    return x_out
+    return x_out, merr

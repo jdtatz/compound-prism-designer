@@ -220,8 +220,7 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
     @jit((nb.f8[:, :], nb.f8[:]))
     def prism(n, w):
         init = np.array(initial_angles)
-        angles = minimizer(prep, init, n)
-        merr = merit_error(angles, n)
+        angles, merr = minimizer(prep, init, n)
         delta_spectrum, thetas = snells(angles, n)
         if np.any(np.isnan(thetas)):
             return
