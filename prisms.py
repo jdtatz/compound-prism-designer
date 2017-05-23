@@ -1,6 +1,5 @@
 import numba as nb
 import numpy as np
-from numpy import pi
 from utils import *
 from collections import namedtuple
 
@@ -41,10 +40,10 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
         initial_angles[1::2] *= -1
         initial_angles += np.ones((glass_count,)) * deltaC_target / (2 ** glass_count)
     else:
-        initial_angles = np.array(initial_angles) * pi / 180
+        initial_angles = np.array(initial_angles) * np.pi / 180
     initial_angles = tuple(initial_angles)
-    MeritWeights = namedtuple('MeritWeights', [*base, *default[merit]])
-    weights = MeritWeights(**{**base, **default[merit], **weights})
+    MeritWeights = namedtuple('MeritWeights', [*default[merit]])
+    weights = MeritWeights(**{**default[merit], **weights})
 
     """
     Merit Functions
@@ -134,13 +133,13 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
         alphas = angles[glass_indices]
         refracted = thetas[refracted_indices]
         refs = np.abs(alphas) + refracted.T * np.sign(alphas)
-        merit_err = weights.valid * np.sum(np.greater(refs, pi / 2)) / (prism_count * nwaves)
+        merit_err = weights.valid * np.sum(np.greater(refs, np.pi / 2)) / (prism_count * nwaves)
         # critical angle prevention
         incident = thetas[incident_indices]
         merit_err += weights.crit_angle * np.sum(np.greater(np.abs(incident), angle_limit)) / nwaves
         # Punish if the prism gets too small to be usable
         too_thin = np.abs(angles) - 1.0
-        too_thin[np.where(np.abs(angles) > pi / 180.0)[0]] = 0.0
+        too_thin[np.where(np.abs(angles) > np.pi / 180.0)[0]] = 0.0
         merit_err += weights.thin * np.sum(too_thin ** 2)
 
         return merit_err + merit_func(angles, n, delta_spectrum, thetas)
@@ -161,19 +160,19 @@ def prism_setup(prism_count, glass_count, glass_indices, deltaC_target, deltaT_t
             return
 
         (delta0, delta1, delta2), remainder = get_poly_coeffs(delta_spectrum, 2)
-        deltaM = np.mean(delta_spectrum) * 180.0 / pi
-        deltaC = delta_spectrum[nwaves // 2] * 180.0 / pi
-        deltaT = (delta_spectrum.max() - delta_spectrum.min()) * 180.0 / pi
-        alphas = angles * 180.0 / pi
+        deltaM = np.mean(delta_spectrum) * 180.0 / np.pi
+        deltaC = delta_spectrum[nwaves // 2] * 180.0 / np.pi
+        deltaT = (delta_spectrum.max() - delta_spectrum.min()) * 180.0 / np.pi
+        alphas = angles * 180.0 / np.pi
         NL = 10000.0 * nonlinearity(delta_spectrum)
         SSR = spectral_sampling_ratio(w, delta_spectrum, sampling_domain_is_wavenumber)
         K = beam_compression(thetas, nwaves)
         _, remainder = get_poly_coeffs(delta_spectrum, 1)
         dw = np.abs(np.mean(gradient(w)))
-        nonlin = np.sqrt(remainder) * dw * 180.0 / pi
-        chromat = 100.0 * abs(delta_spectrum.max() - delta_spectrum.min()) * 180.0 / pi
-        delta1 *= 2.0 * 180.0 / pi
-        delta2 *= 2.0 * 180.0 / pi
+        nonlin = np.sqrt(remainder) * dw * 180.0 / np.pi
+        chromat = 100.0 * abs(delta_spectrum.max() - delta_spectrum.min()) * 180.0 / np.pi
+        delta1 *= 2.0 * 180.0 / np.pi
+        delta2 *= 2.0 * 180.0 / np.pi
         # T = transmission(thetas, n, nwaves)
 
         return alphas, merr, deltaC, deltaT, NL, SSR, K, deltaM, delta1, delta2, nonlin, chromat
