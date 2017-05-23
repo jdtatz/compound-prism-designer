@@ -8,6 +8,11 @@ jit = partial(nb.jit, nopython=True, nogil=True, cache=True)
 cfunc = partial(nb.cfunc, nopython=True, nogil=True, cache=True)
 
 
+"""
+Utility Functions
+"""
+
+
 @jit
 def gradient(f: np.ndarray):
     """
@@ -18,6 +23,72 @@ def gradient(f: np.ndarray):
     out[0] = (f[1] - f[0])
     out[-1] = (f[-1] - f[-2])
     return out
+
+
+@jit
+def get_poly_coeffs(g, n):
+    """Get the polynomial coefficients and remainder when treating the input as a n-polynomial function"""
+    x = np.linspace(1.0, -1.0, g.size)
+    poly = np.empty((g.size, n + 1))
+    for i in range(n + 1):
+        poly[:, i] = x ** i
+    coeffs = np.linalg.pinv(poly) @ g
+    remainder = np.sum((g - poly @ coeffs) ** 2)
+    return coeffs, remainder
+
+
+@jit
+def nonlinearity(x):
+    """Calculate the nonlinearity of the given delta spectrum"""
+    g = gradient(gradient(x))
+    return np.sqrt(np.sum(g ** 2))
+
+
+@jit
+def nonlinearity_error(x):
+    """Calculate the nonlinearity error of the given delta spectrum"""
+    grad = gradient(x)
+    if np.max(grad) < 0.0 or np.min(grad) < 0.0:
+        grad -= np.min(grad)
+    return np.sum(gradient(grad) ** 2)
+
+
+@jit
+def beam_compression(thetas, nwaves):
+    """Calculate the beam compression of the path taken by the central ray of light"""
+    ts = np.abs(np.cos(thetas))
+    K = np.prod(ts[1::2, nwaves//2]) / np.prod(ts[:-1:2, nwaves//2])
+    return K
+
+
+@jit
+def spectral_sampling_ratio(w, delta_spectrum, sampling_domain_is_wavenumber):
+    """Calculate the SSR of the given delta spectrum"""
+    if sampling_domain_is_wavenumber:
+        w = 1000.0 / w
+    grad = gradient(delta_spectrum) / gradient(w)
+    maxval, minval = np.max(grad), np.min(grad)
+    # If both maxval and minval are negative, then we should swap the ratio to
+    # get SSR > 1.
+    return minval / maxval if abs(maxval) < abs(minval) else maxval / minval
+
+
+@jit
+def transmission(thetas, n, nwaves):
+    """Calculate transmission percentage using Fresnel equations, unfinished"""
+    ns = np.vstack((np.ones((1, nwaves)), n, np.ones((1, nwaves))))[:, nwaves//2]
+    n1 = ns[:-1]
+    n2 = ns[1:]
+    # return 100 - 100*np.abs((n1 - n2) / (n1 + n2))**2
+    ci = np.cos(thetas[:-1:2, nwaves // 2])
+    ct = np.cos(thetas[1::2, nwaves // 2])
+    rs = np.abs((n1*ci-n2*ct)/(n1*ci+n2*ct))**2
+    rp = np.abs((n1*ct-n2*ci)/(n1*ct+n2*ci))**2
+    return 100*np.prod(1 - (rs + rp) / 2)
+
+"""
+Ctypes Stuff
+"""
 
 
 def libfunc(lib, name, ret, *args):
@@ -49,23 +120,20 @@ getsize_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_size', c_double, c_void_
 
 nsimplex = c_void_p.in_dll(libgsl, 'gsl_multimin_fminimizer_nmsimplex2').value
 
-gsl_multimin_function = type("gsl_multimin_function", (ctypes.Structure,),
-    {"_fields_": [("f", c_void_p), ("n", c_size_t), ("params", c_void_p)]})
 
-
-@CFUNCTYPE(c_void_p, c_void_p, c_size_t, c_void_p)
-def create_func(f, n, p):
-    buf = cast(malloc(sizeof(gsl_multimin_function)), POINTER(gsl_multimin_function))
-    buf.contents.f = f
-    buf.contents.n = n
-    buf.contents.params = p
-    return cast(buf, c_void_p).value
+class gsl_multimin_function(ctypes.Structure):
+    _fields_ = [("f", c_void_p), ("n", c_size_t), ("params", c_void_p)]
+fsize = ctypes.sizeof(gsl_multimin_function)
 
 
 @jit
 def minimizer(func, x0, params):
     size = x0.size
-    fn = create_func(func, size, params.ctypes.data)
+    fn = malloc(fsize)
+    buffer = nb.carray(fn, (3,), np.uintp)
+    buffer[0] = func
+    buffer[1] = size
+    buffer[2] = params.ctypes.data
     x_vec, step_vec = vec_alloc(size), vec_alloc(size)
     for i in range(size):
         vec_set(x_vec, i, x0[i])
