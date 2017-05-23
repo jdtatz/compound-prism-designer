@@ -1,5 +1,5 @@
 import ctypes
-from ctypes import c_void_p, c_size_t, c_int, c_double, cast, sizeof, POINTER, CFUNCTYPE
+from ctypes import c_void_p, c_size_t, c_int, c_double, POINTER
 import numba as nb
 import numpy as np
 from functools import partial
@@ -15,9 +15,7 @@ Utility Functions
 
 @jit
 def gradient(f: np.ndarray):
-    """
-    the gradient of a 1-dim numpy array
-    """
+    """the gradient of a 1-dim numpy array"""
     out = np.empty(f.shape)
     out[1:-1] = (f[2:] - f[:-2])/2.0
     out[0] = (f[1] - f[0])
