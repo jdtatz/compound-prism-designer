@@ -1,13 +1,14 @@
 import ctypes
 from ctypes import c_void_p, c_size_t, c_int, c_double, POINTER
 import numba as nb
+import numba.extending
 import numpy as np
 from functools import partial
 
-__all__ = ["jit", "gradient", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio", "transmission"]
+__all__ = ["jit", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio", "transmission"]
 
-jit = partial(nb.jit, nopython=True, nogil=True, cache=True)
-cfunc = partial(nb.cfunc, nopython=True, nogil=True, cache=True)
+jit = partial(nb.jit, nopython=True, nogil=True, cache=False)
+cfunc = partial(nb.cfunc, nopython=True, cache=True)
 
 
 """
@@ -15,14 +16,16 @@ Utility Functions
 """
 
 
-@jit
-def gradient(f: np.ndarray):
-    """the gradient of a 1-dim numpy array"""
-    out = np.empty(f.shape)
-    out[1:-1] = (f[2:] - f[:-2])/2.0
-    out[0] = (f[1] - f[0])
-    out[-1] = (f[-1] - f[-2])
-    return out
+@nb.extending.overload(np.gradient)
+def np_gradient(arr):
+    if isinstance(arr, nb.types.Array) and arr.ndim == 1:
+        def gradient(f):
+            out = np.empty_like(f)
+            out[1:-1] = (f[2:] - f[:-2])/2.0
+            out[0] = (f[1] - f[0])
+            out[-1] = (f[-1] - f[-2])
+            return out
+        return gradient
 
 
 @jit
@@ -40,17 +43,17 @@ def get_poly_coeffs(g, n):
 @jit
 def nonlinearity(x):
     """Calculate the nonlinearity of the given delta spectrum"""
-    g = gradient(gradient(x))
+    g = np.gradient(np.gradient(x))
     return np.sqrt(np.sum(g ** 2))
 
 
 @jit
 def nonlinearity_error(x):
     """Calculate the nonlinearity error of the given delta spectrum"""
-    grad = gradient(x)
+    grad = np.gradient(x)
     if np.max(grad) < 0.0 or np.min(grad) < 0.0:
         grad -= np.min(grad)
-    return np.sum(gradient(grad) ** 2)
+    return np.sum(np.gradient(grad) ** 2)
 
 
 @jit
@@ -66,7 +69,7 @@ def spectral_sampling_ratio(w, delta_spectrum, sampling_domain_is_wavenumber):
     """Calculate the SSR of the given delta spectrum"""
     if sampling_domain_is_wavenumber:
         w = 1000.0 / w
-    grad = gradient(delta_spectrum) / gradient(w)
+    grad = np.gradient(delta_spectrum) / np.gradient(w)
     maxval, minval = np.max(grad), np.min(grad)
     # If both maxval and minval are negative, then we should swap the ratio to
     # get SSR > 1.
