@@ -4,6 +4,8 @@ import numba as nb
 import numpy as np
 from functools import partial
 
+__all__ = ["jit", "gradient", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio", "transmission"]
+
 jit = partial(nb.jit, nopython=True, nogil=True, cache=True)
 cfunc = partial(nb.cfunc, nopython=True, nogil=True, cache=True)
 
@@ -125,13 +127,13 @@ fsize = ctypes.sizeof(gsl_multimin_function)
 
 
 @jit
-def minimizer(func, x0, params):
+def minimizer(func, x0, modelPtr):
     size = x0.size
     fn = malloc(fsize)
     buffer = nb.carray(fn, (3,), np.uintp)
     buffer[0] = func
     buffer[1] = size
-    buffer[2] = params.ctypes.data
+    buffer[2] = modelPtr
     x_vec, step_vec = vec_alloc(size), vec_alloc(size)
     for i in range(size):
         vec_set(x_vec, i, x0[i])
