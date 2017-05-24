@@ -220,7 +220,7 @@ def prism(model):
     SSR = spectral_sampling_ratio(model.w, delta_spectrum, model.sampling_domain_is_wavenumber)
     K = beam_compression(thetas, model.nwaves)
     _, remainder = get_poly_coeffs(delta_spectrum, 1)
-    dw = np.abs(np.mean(gradient(model.w)))
+    dw = np.abs(np.mean(np.gradient(model.w)))
     nonlin = np.sqrt(remainder) * dw * 180.0 / np.pi
     chromat = 100.0 * abs(delta_spectrum.max() - delta_spectrum.min()) * 180.0 / np.pi
     delta1 *= 2.0 * 180.0 / np.pi
