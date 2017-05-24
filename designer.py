@@ -2,7 +2,7 @@ from glasscat import calc_w, read_glasscat, glass_combos
 from multiprocessing import cpu_count
 from threading import Thread, Lock
 import time, sys, json, sqlite3
-from prisms import prism_setup
+from prisms import create_model
 from itertools import repeat
 from uuid import uuid4
 from math import pi
@@ -27,15 +27,15 @@ with open(sys.argv[1], 'r') as f:
     dispersion_target = settings.get("dispersion target", 1.0)
     angle_limit = settings.get("incident angle limit", 65.0)
     theta0 = settings.get("theta0", 0.0)
-    initial_angles = settings.get("initial angles", None)
+    iangles = settings.get("initial angles", None)
     database_file = settings.get("database file", "prism.db")
     table_name = settings.get("table name", "t" + uuid4().hex)
     thread_count = settings.get("thread count", cpu_count())
 
-if count == 0:
+if indices is not None:
     count = max(indices) + 1
     prism_count = len(indices)
-elif indices is None:
+elif count > 0:
     prism_count = count
     indices = tuple(range(count))
 else:
@@ -54,13 +54,14 @@ nglass = len(gcat)
 # in radians
 deltaC_target = deviation_target * pi / 180.0
 deltaT_target = dispersion_target * pi / 180.0
+angle_limit *= pi / 180.0
 
 print('table:', table_name)
 print('# glasses =', nglass)
 print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
 print('thread count:', thread_count, '\n')
-cmpnd = prism_setup(prism_count, count, indices, deltaC_target, deltaT_target, merit, weights,
-                    nwaves, sampling_domain, theta0, initial_angles, angle_limit * pi / 180.0)
+cmpnd = create_model(merit)
+model = cmpnd.create(indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_limit, w)
 
 conn = sqlite3.connect(database_file, check_same_thread=False)
 c = conn.cursor()
@@ -106,7 +107,7 @@ def process(tid):
         except StopIteration:
             break
         glass, n = p
-        data = cmpnd(np.array(n), w)
+        data = cmpnd(model._replace(n=np.array(n)))
         if data is not None:
             count += 1
             insert = *glass, *data[0], *data[1:]
