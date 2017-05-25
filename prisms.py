@@ -10,44 +10,35 @@ Merit Functions
 
 def linearity(model, angles, delta_spectrum, thetas):
     """Linearity merit function"""
-    deltaC_err = model.weights.deviation * (delta_spectrum[model.nwaves // 2] - model.deltaC_target) ** 2
-    deltaT_err = model.weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - model.deltaT_target) ** 2
     NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
-    return deltaC_err + deltaT_err + NL_err
+    return NL_err
 
 
 def beam_comp(model, angles, delta_spectrum, thetas):
     """Beam Compression and Linearity merit function"""
-    deltaC_err = model.weights.deviation * (delta_spectrum[model.nwaves // 2] - model.deltaC_target) ** 2
-    deltaT_err = model.weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - model.deltaT_target) ** 2
     NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
     K = beam_compression(thetas, model.nwaves)
     K_err = model.weights.K * (K - 1.0) ** 2
-    return deltaC_err + deltaT_err + NL_err + K_err
+    return NL_err + K_err
 
 
 def chromaticity(model, angles, delta_spectrum, thetas):
     """Chromaticity merit function"""
-    deltaC_err = model.weights.deviation * (delta_spectrum[model.nwaves // 2] - model.deltaC_target) ** 2
     chromat = model.weights.chromat * np.abs(delta_spectrum.max() - delta_spectrum.min())
-    return deltaC_err + chromat
+    return chromat
 
 
 def thinness(model, angles, delta_spectrum, thetas):
     """Thinness merit function"""
-    deltaC_err = model.weights.deviation * (delta_spectrum[model.nwaves // 2] - model.deltaC_target) ** 2
-    deltaT_err = model.weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - model.deltaT_target) ** 2
     anglesum = model.weights.anglesum * model.deltaT_target * np.sum(angles ** 2)
-    return deltaC_err + deltaT_err + anglesum
+    return anglesum
 
 
 def second_order(model, angles, delta_spectrum, thetas):
     """Second Order Error merit function"""
-    deltaC_err = model.weights.deviation * (delta_spectrum[model.nwaves // 2] - model.deltaC_target) ** 2
-    deltaT_err = model.weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - model.deltaT_target) ** 2
     coeffs, remainder = get_poly_coeffs(delta_spectrum, 2)
     secondorder = model.weights.secondorder / coeffs[2] ** 2
-    return deltaC_err + deltaT_err + secondorder
+    return secondorder
 
 
 merit_funcs = {'linearity': linearity, 'beam compression': beam_comp, 'chromaticity': chromaticity,
@@ -101,6 +92,9 @@ def merit_error(model, angles):
     too_thin = np.abs(angles) - 1.0
     too_thin[np.where(np.abs(angles) > np.pi / 180.0)[0]] = 0.0
     merit_err += model.weights.thin * np.sum(too_thin ** 2)
+    # deltaC and deltaT errors
+    merit_err += model.weights.deviation * (delta_spectrum[model.nwaves // 2] - model.deltaC_target) ** 2
+    merit_err += model.weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - model.deltaT_target) ** 2
 
     return merit_err + merit(model, angles, delta_spectrum, thetas)
 
@@ -229,60 +223,50 @@ def prism(model):
 
     return alphas, merr, deltaC, deltaT, NL, SSR, K, deltaM, delta1, delta2, nonlin, chromat
 
-
-class CompoundPrism:
-    """ Class to contain Compound Prism functionality """
-    def __init__(self, prism, error, merit, create):
-        self.prism = prism
-        self.error = error
-        self.merit = merit
-        self.create = create
-
-    def __call__(self, model):
-        return self.prism(model)
-
 base = {'tir': 0.1, 'valid': 1.0, 'crit_angle': 1.0, 'thin': 0.25, 'deviation': 1.0, 'dispersion': 1.0}
 
 default = {
     'linearity': {'NL': 25},
     'beam compression': {'NL': 25, 'K': 0.0025},
-    'chromaticity': {'chromat': 1},
+    'chromaticity': {'chromat': 1, 'dispersion': 0},
     'thinness': {'anglesum': 0.001},
     'second-order': {'secondorder': 0.001}
 }
 
 
-def create_model(merit_func, default_weights=None):
-    global merit, prism, MeritWeights, Model
-    if isinstance(merit_func, str):
-        default_weights = default[merit_func]
-        merit_func = merit_funcs[merit_func]
-    merit = jit()(merit_func)
-    default_weights = {**base, **default_weights} if default_weights else base
-    MeritWeights = namedtuple('MeritWeights', default_weights.keys())
-    MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(default_weights), MeritWeights)
-    modelSpec = OrderedDict(
-        prism_count=nb.int64,
-        glass_count=nb.int64,
-        glass_indices=nb.types.Array(nb.int64, 1, 'C'),
-        incident_indices=nb.types.Array(nb.int64, 1, 'C'),
-        refracted_indices=nb.types.Array(nb.int64, 1, 'C'),
-        deltaC_target=nb.float64,
-        deltaT_target=nb.float64,
-        weights=MeritWeightType,
-        nwaves=nb.int64,
-        sampling_domain_is_wavenumber=nb.boolean,
-        theta0=nb.float64,
-        initial_angles=nb.types.Array(nb.float64, 1, 'C'),
-        angle_limit=nb.float64,
-        w=nb.types.Array(nb.float64, 1, 'C'),
-        n=nb.types.Array(nb.float64, 2, 'C')
-    )
-    Model = namedtuple("Model", modelSpec.keys())
-    ModelType = nb.types.NamedTuple(modelSpec.values(), Model)
-    prism = jit((ModelType,))(prism)
+class CompoundPrism:
+    """ Class to contain Compound Prism functionality """
+    def __init__(self, merit_func, default_weights=None):
+        global merit, prism, MeritWeights, Config
+        if isinstance(merit_func, str):
+            default_weights = default[merit_func]
+            merit_func = merit_funcs[merit_func]
+        self.merit = merit = jit()(merit_func)
+        self.default_weights = {**base, **default_weights} if default_weights else base
+        self.MeritWeights = MeritWeights = namedtuple('MeritWeights', self.default_weights.keys())
+        MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(self.default_weights), MeritWeights)
+        spec = OrderedDict(
+            prism_count=nb.int64,
+            glass_count=nb.int64,
+            glass_indices=nb.types.Array(nb.int64, 1, 'C'),
+            incident_indices=nb.types.Array(nb.int64, 1, 'C'),
+            refracted_indices=nb.types.Array(nb.int64, 1, 'C'),
+            deltaC_target=nb.float64,
+            deltaT_target=nb.float64,
+            weights=MeritWeightType,
+            nwaves=nb.int64,
+            sampling_domain_is_wavenumber=nb.boolean,
+            theta0=nb.float64,
+            initial_angles=nb.types.Array(nb.float64, 1, 'C'),
+            angle_limit=nb.float64,
+            w=nb.types.Array(nb.float64, 1, 'C'),
+            n=nb.types.Array(nb.float64, 2, 'C')
+        )
+        self.Config = Config = namedtuple("Config", spec.keys())
+        ConfigType = nb.types.NamedTuple(spec.values(), Config)
+        self.prism = prism = jit((ConfigType,))(prism)
 
-    def create(glass_indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, initial_angles, angle_limit, w, n=None):
+    def configure(self, glass_indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, initial_angles, angle_limit, w, n=None):
         nwaves = w.size
         sampling_domain_is_wavenumber = sampling_domain == 'wavenumber'
         glass_indices = np.array(glass_indices)
@@ -295,7 +279,8 @@ def create_model(merit_func, default_weights=None):
             initial_angles += np.ones((glass_count,)) * deltaC_target / (2 ** glass_count)
         else:
             initial_angles = np.array(initial_angles) * np.pi / 180
-        weights = MeritWeights(**{k: float(v) for k, v in {**default_weights, **weights}.items()})
-        return Model(prism_count, glass_count, glass_indices, incident_indices, refracted_indices, deltaC_target, deltaT_target, weights, nwaves, sampling_domain_is_wavenumber, theta0, initial_angles, angle_limit, w, n)
+        weights = self.MeritWeights(**{k: float(v) for k, v in {**self.default_weights, **weights}.items()})
+        return self.Config(prism_count, glass_count, glass_indices, incident_indices, refracted_indices, deltaC_target, deltaT_target, weights, nwaves, sampling_domain_is_wavenumber, theta0, initial_angles, angle_limit, w, n)
 
-    return CompoundPrism(prism, merit_error, merit, create)
+    def __call__(self, model):
+        return self.prism(model)

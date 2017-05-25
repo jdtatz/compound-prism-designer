@@ -2,7 +2,7 @@ from glasscat import calc_w, read_glasscat, glass_combos
 from multiprocessing import cpu_count
 from threading import Thread, Lock
 import time, sys, json, sqlite3
-from prisms import create_model
+from prisms import CompoundPrism
 from itertools import repeat
 from uuid import uuid4
 from math import pi
@@ -25,7 +25,7 @@ with open(sys.argv[1], 'r') as f:
     w = settings.get("w", None)
     deviation_target = settings.get("deviation target", 0.0)
     dispersion_target = settings.get("dispersion target", 1.0)
-    angle_limit = settings.get("incident angle limit", 65.0)
+    angle_lim = settings.get("incident angle limit", 65.0)
     theta0 = settings.get("theta0", 0.0)
     iangles = settings.get("initial angles", None)
     database_file = settings.get("database file", "prism.db")
@@ -54,14 +54,14 @@ nglass = len(gcat)
 # in radians
 deltaC_target = deviation_target * pi / 180.0
 deltaT_target = dispersion_target * pi / 180.0
-angle_limit *= pi / 180.0
+angle_lim *= pi / 180.0
 
 print('table:', table_name)
 print('# glasses =', nglass)
 print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
 print('thread count:', thread_count, '\n')
-cmpnd = create_model(merit)
-model = cmpnd.create(indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_limit, w)
+cmpnd = CompoundPrism(merit)
+model = cmpnd.configure(indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_lim, w)
 
 conn = sqlite3.connect(database_file, check_same_thread=False)
 c = conn.cursor()
