@@ -6,12 +6,16 @@ from collections import namedtuple, OrderedDict
 """
 Merit Functions
 """
+base_weights = {'tir': 0.1, 'valid': 1.0, 'crit_angle': 1.0, 'thin': 0.25, 'deviation': 1.0, 'dispersion': 1.0}
+merit_funcs, merit_weights = {}, {}
 
 
 def linearity(model, angles, delta_spectrum, thetas):
     """Linearity merit function"""
     NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
     return NL_err
+merit_funcs['linearity'] = linearity
+merit_weights['linearity'] = {'NL': 25}
 
 
 def beam_comp(model, angles, delta_spectrum, thetas):
@@ -20,18 +24,24 @@ def beam_comp(model, angles, delta_spectrum, thetas):
     K = beam_compression(thetas, model.nwaves)
     K_err = model.weights.K * (K - 1.0) ** 2
     return NL_err + K_err
+merit_funcs['beam compression'] = beam_comp
+merit_weights['beam compression'] = {'NL': 25, 'K': 0.0025}
 
 
 def chromaticity(model, angles, delta_spectrum, thetas):
     """Chromaticity merit function"""
     chromat = model.weights.chromat * np.abs(delta_spectrum.max() - delta_spectrum.min())
     return chromat
+merit_funcs['chromaticity'] = chromaticity
+merit_weights['chromaticity'] = {'chromat': 1, 'dispersion': 0}
 
 
 def thinness(model, angles, delta_spectrum, thetas):
     """Thinness merit function"""
     anglesum = model.weights.anglesum * model.deltaT_target * np.sum(angles ** 2)
     return anglesum
+merit_funcs['thinness'] = thinness
+merit_weights['thinness'] = {'anglesum': 0.001}
 
 
 def second_order(model, angles, delta_spectrum, thetas):
@@ -39,10 +49,8 @@ def second_order(model, angles, delta_spectrum, thetas):
     coeffs, remainder = get_poly_coeffs(delta_spectrum, 2)
     secondorder = model.weights.secondorder / coeffs[2] ** 2
     return secondorder
-
-
-merit_funcs = {'linearity': linearity, 'beam compression': beam_comp, 'chromaticity': chromaticity,
-               'thinness': thinness, 'second-order': second_order}
+merit_funcs['second-order'] = second_order
+merit_weights['second-order'] = {'secondorder': 0.001}
 
 """
 Prism Code
@@ -219,19 +227,9 @@ def prism(model):
     chromat = 100.0 * abs(delta_spectrum.max() - delta_spectrum.min()) * 180.0 / np.pi
     delta1 *= 2.0 * 180.0 / np.pi
     delta2 *= 2.0 * 180.0 / np.pi
-    # T = transmission(thetas, n, nwaves)
+    # T = transmission(thetas, model.n, model.nwaves)
 
     return alphas, merr, deltaC, deltaT, NL, SSR, K, deltaM, delta1, delta2, nonlin, chromat
-
-base = {'tir': 0.1, 'valid': 1.0, 'crit_angle': 1.0, 'thin': 0.25, 'deviation': 1.0, 'dispersion': 1.0}
-
-default = {
-    'linearity': {'NL': 25},
-    'beam compression': {'NL': 25, 'K': 0.0025},
-    'chromaticity': {'chromat': 1, 'dispersion': 0},
-    'thinness': {'anglesum': 0.001},
-    'second-order': {'secondorder': 0.001}
-}
 
 
 class CompoundPrism:
@@ -239,10 +237,10 @@ class CompoundPrism:
     def __init__(self, merit_func, default_weights=None):
         global merit, prism, MeritWeights, Config
         if isinstance(merit_func, str):
-            default_weights = default[merit_func]
+            default_weights = merit_weights[merit_func]
             merit_func = merit_funcs[merit_func]
-        self.merit = merit = jit()(merit_func)
-        self.default_weights = {**base, **default_weights} if default_weights else base
+        merit = jit()(merit_func)
+        self.default_weights = {**base_weights, **default_weights} if default_weights else base_weights
         self.MeritWeights = MeritWeights = namedtuple('MeritWeights', self.default_weights.keys())
         MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(self.default_weights), MeritWeights)
         spec = OrderedDict(
