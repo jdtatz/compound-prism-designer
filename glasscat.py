@@ -2,16 +2,6 @@ from itertools import permutations, starmap
 import numpy as np
 
 
-def calc_w(wavemin, wavemax, nwaves, sampling_domain='wavelength'):
-    if sampling_domain == 'wavelength':
-        return wavemin + (wavemax - wavemin) * np.arange(nwaves) / (nwaves - 1.0)
-    elif sampling_domain == 'wavenumber':
-        sigma_min = 1.0 / wavemax
-        sigma_max = 1.0 / wavemin
-        s = sigma_min + (sigma_max - sigma_min) * np.arange(nwaves) / (nwaves - 1.0)
-        return 1.0 / s
-
-
 def calc_n(glass_dict, wm):
     dispform = glass_dict['dispform']
     cd = glass_dict['cd']
@@ -66,7 +56,7 @@ def read_glasscat(catalog_filename):
     return glasscat
 
 
-def glass_combos(gcat, count, w, wavemin, wavemax):
-    transmission = lambda g: (gcat[g]['ld'][0] < wavemin / 1000.0) and (gcat[g]['ld'][1] > wavemax / 1000.0)
+def glass_combos(gcat, count, w):
+    transmission = lambda g: (gcat[g]['ld'][0] < w.min() / 1000.0) and (gcat[g]['ld'][1] > w.max() / 1000.0)
     glasses = list(map(lambda g: (g, calc_n(gcat[g], w)), filter(transmission, gcat)))
     return starmap(zip, permutations(glasses, count))

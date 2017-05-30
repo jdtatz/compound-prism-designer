@@ -267,7 +267,7 @@ class CompoundPrism:
     def configure(self, glass_indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, initial_angles, angle_limit, w, n=None):
         nwaves = w.size
         sampling_domain_is_wavenumber = sampling_domain == 'wavenumber'
-        glass_indices = np.array(glass_indices)
+        glass_indices = np.asarray(glass_indices, np.int64)
         prism_count, glass_count = len(glass_indices), glass_indices.max() + 1
         incident_indices = np.arange(0, glass_count * 2 + 1, 2)
         refracted_indices = np.arange(1, prism_count * 2 + 1, 2)
@@ -276,7 +276,7 @@ class CompoundPrism:
             initial_angles[1::2] *= -1
             initial_angles += np.ones((glass_count,)) * deltaC_target / (2 ** glass_count)
         else:
-            initial_angles = np.array(initial_angles) * np.pi / 180
+            initial_angles = np.asarray(initial_angles, np.float64) * np.pi / 180
         weights = self.MeritWeights(**{k: float(v) for k, v in {**self.default_weights, **weights}.items()})
         return self.Config(prism_count, glass_count, glass_indices, incident_indices, refracted_indices, deltaC_target, deltaT_target, weights, nwaves, sampling_domain_is_wavenumber, theta0, initial_angles, angle_limit, w, n)
 
