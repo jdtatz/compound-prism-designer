@@ -1,14 +1,11 @@
-import ctypes
-from ctypes import c_void_p, c_size_t, c_int, c_double, POINTER
 import numba as nb
 import numba.extending
 import numpy as np
 from functools import partial
 
-__all__ = ["jit", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio", "transmission"]
+__all__ = ["jit", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio"]
 
 jit = partial(nb.jit, nopython=True, nogil=True, cache=False)
-cfunc = partial(nb.cfunc, nopython=True, cache=True)
 
 
 """
@@ -32,6 +29,7 @@ def np_gradient(arr):
 def get_poly_coeffs(g, n):
     """Get the polynomial coefficients and remainder when treating the input as a n-polynomial function"""
     x = np.linspace(1.0, -1.0, g.size)
+    # poly = np.power.outer(x, np.arange(n + 1))
     poly = np.empty((g.size, n + 1))
     for i in range(n + 1):
         poly[:, i] = x ** i
@@ -61,6 +59,8 @@ def beam_compression(thetas, nwaves):
     """Calculate the beam compression of the path taken by the central ray of light"""
     ts = np.abs(np.cos(thetas))
     K = np.prod(ts[1::2, nwaves//2]) / np.prod(ts[:-1:2, nwaves//2])
+    # K = np.prod(ts[1::2], 0) / np.prod(ts[:-1:2], 0)
+    # K = np.multiply.reduce(ts[1::2]) / np.multiply.reduce(ts[:-1:2])
     return K
 
 
@@ -94,68 +94,8 @@ Ctypes Stuff
 """
 
 
-def libfunc(lib, name, ret, *args):
+def loadlibfunc(lib, name, ret, *args):
     func = getattr(lib, name)
     func.argtypes = args
     func.restype = ret
     return func
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libgslcblas = ctypes.CDLL('libgslcblas.so', mode=ctypes.RTLD_GLOBAL)
-libgsl = ctypes.CDLL('libgsl.so')
-
-malloc = libfunc(libc, 'malloc', c_void_p, c_size_t)
-free = libfunc(libc, 'free', None, c_void_p)
-
-vec_alloc = libfunc(libgsl, 'gsl_vector_alloc', c_void_p, c_size_t)
-vec_free = libfunc(libgsl, 'gsl_vector_free', None, c_void_p)
-vec_set = libfunc(libgsl, 'gsl_vector_set', None, c_void_p, c_size_t, c_double)
-vec_set_all = libfunc(libgsl, 'gsl_vector_set_all', None, c_void_p, c_double)
-vec_get = libfunc(libgsl, 'gsl_vector_get', c_double, c_void_p, c_size_t)
-vec_ptr = libfunc(libgsl, 'gsl_vector_ptr', POINTER(c_double), c_void_p, c_size_t)
-alloc_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_alloc', c_void_p, c_void_p, c_size_t)
-set_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_set', c_int, c_void_p, c_void_p, c_void_p, c_void_p)
-iter_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_iterate', c_int, c_void_p)
-free_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_free', None, c_void_p)
-getx_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_x', c_void_p, c_void_p)
-getmin_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_minimum', c_double, c_void_p)
-getsize_fmin = libfunc(libgsl, 'gsl_multimin_fminimizer_size', c_double, c_void_p)
-
-nsimplex = c_void_p.in_dll(libgsl, 'gsl_multimin_fminimizer_nmsimplex2').value
-
-
-class gsl_multimin_function(ctypes.Structure):
-    _fields_ = [("f", c_void_p), ("n", c_size_t), ("params", c_void_p)]
-fsize = ctypes.sizeof(gsl_multimin_function)
-
-
-@jit
-def minimizer(func, x0, modelPtr):
-    size = x0.size
-    fn = malloc(fsize)
-    buffer = nb.carray(fn, (3,), np.uintp)
-    buffer[0] = func
-    buffer[1] = size
-    buffer[2] = modelPtr
-    x_vec, step_vec = vec_alloc(size), vec_alloc(size)
-    for i in range(size):
-        vec_set(x_vec, i, x0[i])
-    vec_set_all(step_vec, 0.00025)
-    mini = alloc_fmin(nsimplex, size)
-    set_fmin(mini, fn, x_vec, step_vec)
-    for it in range(200):
-        if iter_fmin(mini):
-            print("Failure to iterate")
-            break
-        elif getsize_fmin(mini) < 1e-4:
-            break
-    x = getx_fmin(mini)
-    x_out = np.empty(size, dtype=np.float64)
-    for i in range(size):
-        x_out[i] = vec_get(x, i)
-    merr = getmin_fmin(mini)
-    free_fmin(mini)
-    vec_free(x_vec)
-    vec_free(step_vec)
-    free(fn)
-    return x_out, merr
