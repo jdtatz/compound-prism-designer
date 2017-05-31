@@ -7,9 +7,8 @@ __all__ = ["jit", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam
 
 jit = partial(nb.jit, nopython=True, nogil=True, cache=False)
 
-
 """
-Utility Functions
+Temporary Numpy overloads for Numba
 """
 
 
@@ -23,6 +22,21 @@ def np_gradient(arr):
             out[-1] = (f[-1] - f[-2])
             return out
         return gradient
+
+
+@nb.extending.overload(np.tile)
+def np_tile(arr, reps):
+    if isinstance(arr, nb.types.Array) and arr.ndim == 1 and isinstance(reps, nb.types.Integer):
+        def tile(a, r):
+            out = np.empty(a.size * r, a.dtype)
+            for i in range(0, out.size, a.size):
+                out[i:i+a.size] = a
+            return out
+        return tile
+
+"""
+Utility Functions
+"""
 
 
 @jit
