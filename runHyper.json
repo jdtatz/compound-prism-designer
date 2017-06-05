@@ -1,0 +1,22 @@
+{
+  "prism name": "amici",
+  "glass indices": [0, 1, 0],
+  "merit function": "linearity",
+  "weights": {
+    "tir": 0.3,
+    "valid": 0.1,
+    "deviation": 15,
+    "dispersion": 50,
+    "NL": 25
+  },
+  "sampling domain": "wavelength",
+  "catalog": "Glasscat/schott_positive_glass_trimmed_oct2015.agf",
+  "wave minimum": 500.0,
+  "wave maximum": 820.0,
+  "number of waves": 100,
+  "deviation target": 0.0,
+  "dispersion target": 4.0,
+  "incident angle limit": 65.0,
+  "database file": "prism.db",
+  "input table name": "hyper"
+}
