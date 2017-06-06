@@ -196,7 +196,7 @@ class CompoundPrism:
         self.default_weights = {**base_weights, **default_weights} if default_weights else base_weights
         self.MeritWeights = namedtuple('MeritWeights', self.default_weights.keys())
         MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(self.default_weights), self.MeritWeights)
-        spec = OrderedDict(
+        self.spec = OrderedDict(
             prism_count=nb.int64,
             glass_count=nb.int64,
             glass_indices=nb.types.Array(nb.int64, 1, 'C'),
@@ -213,11 +213,12 @@ class CompoundPrism:
             w=nb.types.Array(nb.float64, 1, 'C'),
             n=nb.types.Array(nb.float64, 2, 'C')
         )
-        self.Config = namedtuple('Config', spec.keys())
-        ConfigType = nb.types.NamedTuple(spec.values(), self.Config)
+        self.Config = namedtuple('Config', self.spec.keys())
+        ConfigType = nb.types.NamedTuple(self.spec.values(), self.Config)
         self.prism = jit((ConfigType,))(prism)
 
-    def configure(self, glass_indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, initial_angles, angle_limit, w, n=None):
+    def configure(self, glass_indices, deltaC_target, deltaT_target, weights,
+                  sampling_domain, theta0, initial_angles, angle_limit, w):
         nwaves = w.size
         sampling_domain_is_wavenumber = sampling_domain == 'wavenumber'
         glass_indices = np.asarray(glass_indices, np.int64)
@@ -231,7 +232,8 @@ class CompoundPrism:
         else:
             initial_angles = np.asarray(initial_angles, np.float64) * np.pi / 180
         weights = self.MeritWeights(**{k: float(v) for k, v in {**self.default_weights, **weights}.items()})
-        return self.Config(prism_count, glass_count, glass_indices, incident_indices, refracted_indices, deltaC_target, deltaT_target, weights, nwaves, sampling_domain_is_wavenumber, theta0, initial_angles, angle_limit, w, n)
+        local = locals()
+        return self.Config(**{k: local.get(k, None) for k in self.spec.keys()})
 
-    def __call__(self, model):
-        return self.prism(model)
+    def __call__(self, model, n, g):
+        return self.prism(model._replace(n=np.asarray(n, np.float64, 'C')))
