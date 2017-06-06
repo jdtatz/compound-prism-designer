@@ -17,6 +17,5 @@
   "dispersion target": 4.0,
   "incident angle limit": 65.0,
   "database file": "prism.db",
-  "input table name": "test1",
-  "output table name": "testpost"
+  "input table name": "test1"
 }
