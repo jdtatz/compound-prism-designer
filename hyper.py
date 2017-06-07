@@ -57,7 +57,7 @@ def hyper(**settings):
     print('# glasses in catalog =', nglass)
     print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
     print('thread count:', thread_count, '\n')
-    cmpnd = CompoundPrism(merit)
+    cmpnd = CompoundPrism(merit, settings)
     model = cmpnd.configure(indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_lim, w)
 
     conn = sqlite3.connect(database_file, check_same_thread=False)
@@ -96,16 +96,16 @@ def hyper(**settings):
     insert_stmt = f"INSERT INTO {output_table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
     amounts = []
 
-
     def process(tid):
         count = 0
+        thread_model = cmpnd.configure_thread(model, tid)
         while True:
             try:
                 with itemLock:
                     glass, n = next(items)
             except StopIteration:
                 break
-            data = cmpnd(model._replace(n=np.stack(n)))
+            data = cmpnd(thread_model._replace(n=np.stack(n)))
             if data is not None:
                 count += 1
                 with outputLock:

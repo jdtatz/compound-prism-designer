@@ -187,12 +187,12 @@ def prism(model):
 
 class CompoundPrism:
     """ Class to contain Compound Prism functionality """
-    def __init__(self, merit_name):
+    def __init__(self, merit_name, settings):
         global merit
         Merit = MeritFunctionRegistry.get(merit_name)
-        self.meritcls = Merit()
+        self.meritcls = Merit(settings)
         merit = jit()(self.meritcls.merit)
-        self.default_weights = {**base_weights, **self.meritcls.default_weights}
+        self.default_weights = {**base_weights, **self.meritcls.weights}
         self.MeritWeights = namedtuple('MeritWeights', self.default_weights.keys())
         MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(self.default_weights), self.MeritWeights)
         self.spec = OrderedDict(
@@ -212,6 +212,7 @@ class CompoundPrism:
             w=nb.types.Array(nb.float64, 1, 'C'),
             n=nb.types.Array(nb.float64, 2, 'C')
         )
+        self.spec.update(self.meritcls.model_params)
         self.Config = namedtuple('Config', self.spec.keys())
         ConfigType = nb.types.NamedTuple(self.spec.values(), self.Config)
         self.prism = jit((ConfigType,))(prism)
@@ -232,7 +233,11 @@ class CompoundPrism:
             initial_angles = np.asarray(initial_angles, np.float64) * np.pi / 180
         weights = self.MeritWeights(**{k: float(v) for k, v in {**self.default_weights, **weights}.items()})
         local = locals()
-        return self.Config(**{k: local.get(k, None) for k in self.spec.keys()})
+        configuration = {k: local.get(k) for k in self.spec.keys()}
+        return self.Config(**self.meritcls.configure(configuration))
+
+    def configure_thread(self, model, tid):
+        return self.meritcls.configure_thread_model(model, tid)
 
     def __call__(self, model, n, g):
         return self.prism(model._replace(n=np.asarray(n, np.float64, 'C')))

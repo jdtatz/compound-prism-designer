@@ -58,7 +58,7 @@ def post_process(**settings):
     print('# glasses =', nglass)
     print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
     print('thread count:', thread_count, '\n')
-    cmpnd = CompoundPrism(merit)
+    cmpnd = CompoundPrism(merit, settings)
     model = cmpnd.configure(indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_lim, w)
 
     conn = sqlite3.connect(database_file, check_same_thread=False)
@@ -101,13 +101,14 @@ def post_process(**settings):
 
     def process(tid):
         count = 0
+        thread_model = cmpnd.configure_thread(model, tid)
         while True:
             try:
                 with itemLock:
                     glass, n = next(items)
             except StopIteration:
                 break
-            data = cmpnd(model, n, glass)
+            data = cmpnd(thread_model, n, glass)
             if data is not None:
                 count += 1
                 with outputLock:
