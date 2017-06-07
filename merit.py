@@ -1,58 +1,85 @@
 import numpy as np
 from utils import *
+from collections import OrderedDict
 
-__all__ = ["get_merit_function", "register_merit_function"]
-
-merit_functions = {}
-
-
-def get_merit_function(merit_name):
-    if not isinstance(merit_name, str):
-        raise TypeError(f"Given merit name is not a string, is {type(merit_name)}")
-    if merit_name not in merit_functions:
-        raise Exception(f"Unregistered merit function called: {merit_name}")
-    return merit_functions[merit_name]
+__all__ = ["MeritFunctionRegistry", "InvalidMeritFunction"]
 
 
-def register_merit_function(name, func, init_func=None, **weights):
-    if not isinstance(name, str):
-        raise TypeError(f"Merit name is not a string, is {type(name)}")
-    merit_functions[name] = (func, weights, init_func)
+class InvalidMeritFunction(Exception):
+    pass
 
 
-def linearity(model, angles, delta_spectrum, thetas):
-    """Linearity merit function"""
-    NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
-    return NL_err
-register_merit_function('linearity', linearity, NL=25)
+class MeritFunctionRegistry(type):
+    registry = {}
+
+    def __new__(cls, name, bases, namespace):
+        if 'name' not in namespace:
+            raise InvalidMeritFunction("No name given")
+        reg_name = namespace["name"]
+        if reg_name in cls.registry:
+            raise InvalidMeritFunction(f"Name {reg_name} is already registered to {cls.registry[reg_name]}")
+        if 'merit' not in namespace:
+            raise InvalidMeritFunction("No merit function specfied")
+        if not isinstance(namespace['merit'], staticmethod):
+            raise InvalidMeritFunction("The merit function must be a static method")
+        namespace['default_weights'] = OrderedDict(namespace.get('default_weights', {}))
+        new_cls = super().__new__(cls, name, bases, namespace)
+        cls.registry[reg_name] = new_cls
+        return new_cls
+
+    @classmethod
+    def get(mcs, item):
+        return mcs.registry[item]
 
 
-def beam_comp(model, angles, delta_spectrum, thetas):
-    """Beam Compression and Linearity merit function"""
-    NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
-    K = beam_compression(thetas, model.nwaves)
-    K_err = model.weights.K * (K - 1.0) ** 2
-    return NL_err + K_err
-register_merit_function('beam compression', beam_comp, NL=25, K=0.0025)
+class LinearityMerit(metaclass=MeritFunctionRegistry):
+    name = 'linearity'
+    default_weights = OrderedDict(NL=25)
+
+    @staticmethod
+    def merit(model, angles, delta_spectrum, thetas):
+        NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
+        return NL_err
 
 
-def chromaticity(model, angles, delta_spectrum, thetas):
-    """Chromaticity merit function"""
-    chromat = model.weights.chromat * np.abs(delta_spectrum.max() - delta_spectrum.min())
-    return chromat
-register_merit_function('chromaticity', chromaticity, chromat=1, dispersion=0)
+class BeamCompressionMerit(metaclass=MeritFunctionRegistry):
+    name = 'beam compression'
+    default_weights = OrderedDict(NL=25, K=0.0025)
+
+    @staticmethod
+    def merit(model, angles, delta_spectrum, thetas):
+        NL_err = model.weights.NL * nonlinearity_error(delta_spectrum)
+        K = beam_compression(thetas, model.nwaves)
+        K_err = model.weights.K * (K - 1.0) ** 2
+        return NL_err + K_err
 
 
-def thinness(model, angles, delta_spectrum, thetas):
-    """Thinness merit function"""
-    anglesum = model.weights.anglesum * model.deltaT_target * np.sum(angles ** 2)
-    return anglesum
-register_merit_function('thinness', thinness, anglesum=0.001)
+class ChromaticityMerit(metaclass=MeritFunctionRegistry):
+    name = 'chromaticity'
+    default_weights = OrderedDict(chromat=1, dispersion=0)
+
+    @staticmethod
+    def merit(model, angles, delta_spectrum, thetas):
+        chromat = model.weights.chromat * np.abs(delta_spectrum.max() - delta_spectrum.min())
+        return chromat
 
 
-def second_order(model, angles, delta_spectrum, thetas):
-    """Second Order Error merit function"""
-    coeffs, remainder = get_poly_coeffs(delta_spectrum, 2)
-    secondorder = model.weights.secondorder / coeffs[2] ** 2
-    return secondorder
-register_merit_function('second-order', second_order, secondorder=0.001)
+class ThinnessMerit(metaclass=MeritFunctionRegistry):
+    name = 'thinness'
+    default_weights = OrderedDict(anglesum=0.001)
+
+    @staticmethod
+    def merit(model, angles, delta_spectrum, thetas):
+        anglesum = model.weights.anglesum * model.deltaT_target * np.sum(angles ** 2)
+        return anglesum
+
+
+class SecondOrderMerit(metaclass=MeritFunctionRegistry):
+    name = 'second-order'
+    default_weights = OrderedDict(secondorder=0.001)
+
+    @staticmethod
+    def merit(model, angles, delta_spectrum, thetas):
+        coeffs, remainder = get_poly_coeffs(delta_spectrum, 2)
+        secondorder = model.weights.secondorder / coeffs[2] ** 2
+        return secondorder

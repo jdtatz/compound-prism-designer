@@ -1,7 +1,7 @@
 import numba as nb
 import numpy as np
 from utils import *
-from merit import get_merit_function
+from merit import MeritFunctionRegistry
 from collections import namedtuple, OrderedDict
 
 """
@@ -189,11 +189,10 @@ class CompoundPrism:
     """ Class to contain Compound Prism functionality """
     def __init__(self, merit_name):
         global merit
-        merit_func, default_weights, start = get_merit_function(merit_name)
-        if start is not None:
-            start()
-        merit = jit()(merit_func)
-        self.default_weights = {**base_weights, **default_weights} if default_weights else base_weights
+        Merit = MeritFunctionRegistry.get(merit_name)
+        self.meritcls = Merit()
+        merit = jit()(self.meritcls.merit)
+        self.default_weights = {**base_weights, **self.meritcls.default_weights}
         self.MeritWeights = namedtuple('MeritWeights', self.default_weights.keys())
         MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(self.default_weights), self.MeritWeights)
         self.spec = OrderedDict(
