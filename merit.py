@@ -2,7 +2,7 @@ import numpy as np
 from utils import *
 from collections import OrderedDict
 
-__all__ = ["MeritFunctionRegistry", "InvalidMeritFunction"]
+__all__ = ["MeritFunctionRegistry", "BaseMeritFunction", "InvalidMeritFunction"]
 
 
 class InvalidMeritFunction(Exception):
@@ -13,6 +13,8 @@ class MeritFunctionRegistry(type):
     registry = {}
 
     def __new__(cls, name, bases, namespace):
+        if not len(bases):
+            return super().__new__(cls, name, bases, namespace)
         if 'name' not in namespace:
             raise InvalidMeritFunction("No name given")
         reg_name = namespace["name"]
@@ -22,7 +24,6 @@ class MeritFunctionRegistry(type):
             raise InvalidMeritFunction("No merit function specfied")
         if not isinstance(namespace['merit'], staticmethod):
             raise InvalidMeritFunction("The merit function must be a static method")
-        namespace['default_weights'] = OrderedDict(namespace.get('default_weights', {}))
         new_cls = super().__new__(cls, name, bases, namespace)
         cls.registry[reg_name] = new_cls
         return new_cls
@@ -32,9 +33,23 @@ class MeritFunctionRegistry(type):
         return mcs.registry[item]
 
 
-class LinearityMerit(metaclass=MeritFunctionRegistry):
+class BaseMeritFunction(metaclass=MeritFunctionRegistry):
+    weights = OrderedDict()
+    model_params = OrderedDict()
+
+    def __init__(self, settings):
+        pass
+
+    def configure(self, configuration):
+        return configuration
+
+    def configure_thread_model(self, model, tid):
+        return model
+
+
+class LinearityMerit(BaseMeritFunction):
     name = 'linearity'
-    default_weights = OrderedDict(NL=25)
+    weights = OrderedDict(NL=25)
 
     @staticmethod
     def merit(model, angles, delta_spectrum, thetas):
@@ -42,9 +57,9 @@ class LinearityMerit(metaclass=MeritFunctionRegistry):
         return NL_err
 
 
-class BeamCompressionMerit(metaclass=MeritFunctionRegistry):
+class BeamCompressionMerit(BaseMeritFunction):
     name = 'beam compression'
-    default_weights = OrderedDict(NL=25, K=0.0025)
+    weights = OrderedDict(NL=25, K=0.0025)
 
     @staticmethod
     def merit(model, angles, delta_spectrum, thetas):
@@ -54,9 +69,9 @@ class BeamCompressionMerit(metaclass=MeritFunctionRegistry):
         return NL_err + K_err
 
 
-class ChromaticityMerit(metaclass=MeritFunctionRegistry):
+class ChromaticityMerit(BaseMeritFunction):
     name = 'chromaticity'
-    default_weights = OrderedDict(chromat=1, dispersion=0)
+    weights = OrderedDict(chromat=1, dispersion=0)
 
     @staticmethod
     def merit(model, angles, delta_spectrum, thetas):
@@ -64,9 +79,9 @@ class ChromaticityMerit(metaclass=MeritFunctionRegistry):
         return chromat
 
 
-class ThinnessMerit(metaclass=MeritFunctionRegistry):
+class ThinnessMerit(BaseMeritFunction):
     name = 'thinness'
-    default_weights = OrderedDict(anglesum=0.001)
+    weights = OrderedDict(anglesum=0.001)
 
     @staticmethod
     def merit(model, angles, delta_spectrum, thetas):
@@ -74,9 +89,9 @@ class ThinnessMerit(metaclass=MeritFunctionRegistry):
         return anglesum
 
 
-class SecondOrderMerit(metaclass=MeritFunctionRegistry):
+class SecondOrderMerit(BaseMeritFunction):
     name = 'second-order'
-    default_weights = OrderedDict(secondorder=0.001)
+    weights = OrderedDict(secondorder=0.001)
 
     @staticmethod
     def merit(model, angles, delta_spectrum, thetas):
