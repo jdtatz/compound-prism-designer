@@ -1,3 +1,4 @@
+from utils.numba_ctypes_support import register_ctypes_type, ctypes_typed_cache
 import utils.numba_fallbacks
 from utils.ctypes_utils import loadlibfunc
 from utils.base import *
