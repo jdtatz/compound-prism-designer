@@ -1,9 +1,11 @@
-import numpy as np
+import platform
 from ctypes import CDLL, POINTER, c_void_p, c_int, c_double
 from ctypes.util import find_library
-from utils import loadlibfunc, jit
 from itertools import repeat
-import platform
+
+import numpy as np
+
+from ..utils import loadlibfunc, jit
 
 # jit = lambda x: x
 

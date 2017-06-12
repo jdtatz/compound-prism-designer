@@ -1,12 +1,13 @@
-from ctypes import *
 import ctypes.util
+from collections import OrderedDict
+from ctypes import *
+from itertools import repeat
+
 import numba as nb
+import numba.cgutils
 import numba.extending
 import numba.typing
-import numba.cgutils
 from llvmlite import ir
-from itertools import repeat
-from collections import OrderedDict
 
 
 def cast_llvm(val, numba_type, llvm_type, builder):

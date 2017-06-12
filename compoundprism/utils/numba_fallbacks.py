@@ -1,6 +1,6 @@
-import numpy as np
 import numba as nb
 import numba.extending
+import numpy as np
 
 """
 Temporary Numpy overloads for Numba

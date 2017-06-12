@@ -1,15 +1,20 @@
-from glasscat import read_glasscat, glass_combos
+import json
+import sqlite3
+import sys
+import time
+from itertools import repeat
+from math import pi
 from multiprocessing import cpu_count
 from threading import Thread, Lock
-from prisms import CompoundPrism
-import time, sys, json, sqlite3
-from itertools import repeat
 from uuid import uuid4
-from math import pi
+
 import numpy as np
 
+from compoundprism.glasscat import read_glasscat, glass_paired
+from compoundprism.prisms import CompoundPrism
 
-def design(**settings):
+
+def post_process(**settings):
     prism_name = settings.get('prism name', 'prism')
     count = settings.get('glass count', 0)
     indices = settings.get('glass indices', None)
@@ -27,7 +32,9 @@ def design(**settings):
     theta0 = settings.get("theta0", 0.0)
     iangles = settings.get("initial angles", None)
     database_file = settings.get("database file", "prism.db")
-    table_name = settings.get("table name", "t" + uuid4().hex)
+    input_table_name = settings["input table name"]
+    output_table_name = settings.get("output table name", "t" + uuid4().hex)
+    process_count = settings.get("post process count", 100)
     thread_count = settings.get("thread count", cpu_count())
 
     if indices is not None:
@@ -38,7 +45,7 @@ def design(**settings):
         raise Exception("Invalid prism parametrization")
 
     if w is not None:
-        w = np.asarray(w, np.float64, 'C')
+        w = np.asarray(w, np.float64)
     elif sampling_domain == "wavenumber":
         w = 1.0 / np.linspace(1.0 / wavemax, 1.0 / wavemin, nwaves, dtype=np.float64)
     else:
@@ -51,7 +58,8 @@ def design(**settings):
     deltaT_target = dispersion_target * pi / 180.0
     angle_lim *= pi / 180.0
 
-    print('table:', table_name)
+    print('input table:', input_table_name)
+    print('output table:', output_table_name)
     print('# glasses =', nglass)
     print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
     print('thread count:', thread_count, '\n')
@@ -61,8 +69,9 @@ def design(**settings):
     conn = sqlite3.connect(database_file, check_same_thread=False)
     c = conn.cursor()
 
-    c.execute("""CREATE TABLE IF NOT EXISTS runs (
+    c.execute("""CREATE TABLE IF NOT EXISTS post_processing (
         "table id" TEXT PRIMARY KEY,
+        "input table id" TEXT,
         "prism name" TEXT,
         "merit function" TEXT,
         "deviation target" REAL,
@@ -71,7 +80,7 @@ def design(**settings):
         json TEXT
         )""")
 
-    c.execute(f"""CREATE TABLE {table_name} (
+    c.execute(f"""CREATE TABLE {output_table_name} (
         {", ".join(f"glass{i} TEXT" for i in range(1, count+1))},
         {", ".join(f"alpha{i} REAL" for i in range(1, count+1))},
         meritError REAL,
@@ -87,10 +96,12 @@ def design(**settings):
         chromat REAL
         )""")
 
+    c.execute(f"SELECT {','.join(f'glass{i}' for i in range(1, count+1))} FROM {input_table_name} ORDER BY meritError ASC LIMIT {process_count}")
+    pairs = c.fetchall()
     t1 = time.time()
-    items = glass_combos(gcat, count, w)
+    items = glass_paired(gcat, pairs, w)
     itemLock, outputLock = Lock(), Lock()
-    insert_stmt = f"INSERT INTO {table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
+    insert_stmt = f"INSERT INTO {output_table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
     amounts = []
 
     def process(tid):
@@ -127,13 +138,13 @@ def design(**settings):
     else:
         print('Failed to complete')
         print('Elapsed time =', dt)
-    c.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
-              (table_name, prism_name, merit, deviation_target, dispersion_target, amount > 0, str(settings)))
+    c.execute("INSERT INTO post_processing VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              (output_table_name, input_table_name, prism_name, merit, deviation_target, dispersion_target, amount > 0, str(settings)))
     conn.commit()
     conn.close()
 
 if __name__ == "__main__":
-    print('Starting Compound Prism Designer')
+    print('Starting Compound Prism Post Processorr')
     with open(sys.argv[1], 'r') as f:
         settings = json.load(f)
-    design(**settings)
+    post_process(**settings)
