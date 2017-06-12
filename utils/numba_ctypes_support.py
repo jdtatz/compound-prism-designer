@@ -5,6 +5,7 @@ import numba.extending
 import numba.typing
 import numba.cgutils
 from llvmlite import ir
+from itertools import repeat
 from collections import OrderedDict
 
 
@@ -43,6 +44,8 @@ def register_ctypes_type(ctypes_type, numba_type=None, llvm_type=None):
         return register_pointer_type(ctypes_type)
     elif issubclass(ctypes_type, Structure):
         return register_struct(ctypes_type)
+    elif issubclass(ctypes_type, Array):
+        return register_array(ctypes_type)
     else:
         raise NotImplementedError
 
@@ -124,7 +127,7 @@ def unbox_csimple(typ, obj, c):
     """
     Convert object to a native structure.
     """
-    print('unbox', typ, obj, c.context.get_argument_type(typ))
+    # print('unbox', typ, obj, c.context.get_argument_type(typ))
     value_obj = c.pyapi.object_getattr_string(obj, "value")
     native_val = c.pyapi.to_native_value(typ.numba_type, value_obj)
     c.pyapi.decref(value_obj)
@@ -136,7 +139,7 @@ def box_csimple(typ, val, c):
     """
     Convert a native structure to an object.
     """
-    print('box', typ, val, typ.name)
+    # print('box', typ, val, typ.name)
     c_simple = c.pyapi.from_native_value(typ.numba_type, val)
     class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.ctypes_type))
     obj = c.pyapi.call_function_objargs(class_obj, (c_simple, ))
@@ -312,7 +315,7 @@ class CStructAttributeTemplate(nb.typing.templates.AttributeTemplate):
     key = CStructType
 
     def generic_resolve(self, typ, attr):
-        print('resolve', typ, attr, typ.spec)
+        # print('resolve', typ, attr, typ.spec)
         if attr in typ.spec:
             attrtyp = typ.spec[attr]
             if isinstance(attrtyp, CSimpleType):
@@ -333,7 +336,7 @@ def struct_getattr_impl(context, builder, typ, val, name):
 @nb.extending.typeof_impl.register(Structure)
 def typeof_struct(val, c):
     """ Find registered type of ctypes Structure, create one if not found """
-    print("RegStruct", val, type(val), c)
+    # print("RegStruct", val, type(val), c)
     typ = type(val)
     if typ not in ctypes_typed_cache:
         register_struct(typ)
@@ -345,7 +348,7 @@ def unbox_struct(typ, obj, c):
     """
     Convert object to a native structure.
     """
-    print("unbox", typ, obj)
+    # print("unbox", typ, obj)
     struct = nb.cgutils.create_struct_proxy(typ)(c.context, c.builder)
     for field, ftyp in typ.spec.items():
         field_obj = c.pyapi.object_getattr_string(obj, field)
@@ -361,10 +364,10 @@ def unbox_struct(typ, obj, c):
 
 @nb.extending.box(CStructType)
 def box_struct(typ, val, c):
-    """prism.db
+    """
     Convert a native structure to an object.
     """
-    print('box', typ, val)
+    # print('box', typ, val)
     struct = nb.cgutils.create_struct_proxy(typ)(c.context, c.builder, value=val)
     class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.ctypes_type))
     field_objs = [c.pyapi.from_native_value(ftyp, getattr(struct, field)) for field, ftyp in typ.spec.items()]
@@ -404,11 +407,143 @@ def register_struct(ctypes_struct):
         struct = nb.cgutils.create_struct_proxy(typ)(context, builder)
         for arg, field in zip(args, typ.spec):
             setattr(struct, field, arg)
-        print('impl', typ, sig)
+        # print('impl', typ, sig)
         return struct._getvalue()
 
     return CStructType
 
+"""
+Ctypes Array
+"""
+
+
+class CArrayType(nb.types.Type):
+    def __init__(self, base, count):
+        self.base = base
+        self.ctypes_type = base.ctypes_type * count
+        self.length = count
+        self.primative = ir.ArrayType(base.primative, count)
+        super().__init__(name="CtypesArray({}x{})".format(base.ctypes_type.__name__, count))
+
+
+@nb.extending.register_model(CArrayType)
+class CArrayModel(nb.extending.models.PrimitiveModel):
+    def __init__(self, dmm, fe_type):
+        super().__init__(dmm, fe_type, fe_type.primative)
+
+
+@nb.extending.infer
+class CArrayGetItemTemplate(nb.typing.templates.FunctionTemplate):
+    key = 'getitem'
+
+    def apply(self, args, kwds):
+        print('resolve Array', args, kwds)
+        base = args[0].base
+        if isinstance(base, CSimpleType):
+            base = base.numba_type
+        if isinstance(args[1], nb.types.Integer):
+            return nb.typing.signature(base, CArrayType, args[1])
+        elif isinstance(args[1], nb.types.SliceType):
+            return nb.typing.signature(nb.types.List(base), CArrayType, args[1])
+
+
+@nb.extending.lower_builtin('static_getitem', CArrayType, nb.types.Const)
+def array_getitem(context, builder, sig, args):
+    print('Static GET', sig, args)
+    arr, idx = args
+    typ = sig.args[0]
+    if isinstance(idx, int):
+        return builder.extract_value(arr, idx)
+    elif isinstance(idx, slice):
+        aryLen = len(range(*idx.indices(typ.length)))
+        ary = ir.ArrayType(typ.base.primative, aryLen)(ir.Undefined)
+        for i, j in enumerate(range(*idx.indices(typ.length))):
+            val = builder.extract_value(arr, i)
+            builder.insert_value(ary, val, j)
+        return ary
+    else:
+        raise NotImplementedError
+
+
+@nb.extending.typeof_impl.register(Array)
+def typeof_array(val, c):
+    """ Find registered type of ctypes Array, create one if not found """
+    print("RegArray", val, type(val), c)
+    typ = type(val)
+    if typ not in ctypes_typed_cache:
+        register_array(typ)
+    return ctypes_typed_cache[typ]
+
+
+@nb.extending.unbox(CArrayType)
+def unbox_array(typ, obj, c):
+    """
+    Convert object to a native array.
+    """
+    print("unbox", typ, obj)
+    arr = typ.primative(ir.Undefined)
+    iter_obj = c.pyapi.object_getiter(obj)
+    for i in range(typ.length):
+        idx_obj = c.pyapi.iter_next(iter_obj)
+        if isinstance(typ.base, CSimpleType):
+            idx_native = c.pyapi.to_native_value(typ.base.numba_type, idx_obj)
+        else:
+            idx_native = c.pyapi.to_native_value(typ.base, idx_obj)
+        arr = c.builder.insert_value(arr, idx_native.value, i)
+        c.pyapi.decref(idx_obj)
+    c.pyapi.decref(iter_obj)
+    is_error = nb.cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
+    return nb.extending.NativeValue(arr, is_error=is_error)
+
+
+@nb.extending.box(CArrayType)
+def box_array(typ, val, c):
+    """prism.db
+    Convert a native array to an object.
+    """
+    print('box', typ, val)
+    arr = nb.cgutils.unpack_tuple(c.builder, val, typ.length)
+    objs = [c.pyapi.from_native_value(typ.base, ind) for ind in arr]
+    class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.ctypes_type))
+    res = c.pyapi.call_function_objargs(class_obj, objs)
+    for obj in objs:
+        c.pyapi.decref(obj)
+    c.pyapi.decref(class_obj)
+    return res
+
+
+def register_array(ctypes_array):
+    """
+    Register a ctypes Array
+    """
+    baseCTyp = ctypes_array._type_
+    length = ctypes_array._length_
+    if baseCTyp not in ctypes_typed_cache:
+        register_ctypes_type(baseCTyp)
+    baseTyp = ctypes_typed_cache[baseCTyp]
+    typ = CArrayType(baseTyp, length)
+    globals()[ctypes_array.__name__] = ctypes_array
+    ctypes_typed_cache[ctypes_array] = typ
+
+    @nb.extending.type_callable(ctypes_array)
+    def call_typ_array(context):
+        """
+        create call type
+        """
+        func_source = f"lambda {','.join(f'x{i}' for i in range(length))}: typ"
+        print('Call', func_source)
+        return eval(func_source, {"typ": typ})
+
+    @nb.extending.lower_builtin(ctypes_array, *repeat(nb.types.Any, length))
+    def impl_array(context, builder, sig, args):
+        """
+        make ctypes struct type declaration callable
+        """
+        typ = sig.return_type
+        print('Impl', typ, sig, args)
+        return nb.cgutils.pack_array(builder, args)
+
+    return typ
 
 """
 Ctypes Util pointer
@@ -442,23 +577,14 @@ class PointerCreateTemplate(nb.typing.templates.FunctionTemplate):
     key = POINTER
 
     def apply(self, args, kws):
-        print('APPLY', args, kws)
         typ = args[0]
-        print('tYP', typ, typ.typing_key)
-        pteCTyp = typ.typing_key
-        ptrCTyp = POINTER(pteCTyp)
+        ptrCTyp = POINTER(typ.typing_key)
         register_pointer_type(ptrCTyp)
-        pteTyp = ctypes_typed_cache[pteCTyp]
-        ptrTyp = ctypes_typed_cache[ptrCTyp]
-        print(pteCTyp, ptrCTyp, pteTyp, ptrTyp)
-
         for tmpl in nb.typing.templates.builtin_registry.functions:
             if tmpl.key == ptrCTyp:
                 break
         else:
             raise Exception("Pointer Type Mis/Not Registered")
-        print(tmpl)
-
         sig = nb.typing.signature(nb.types.Function(tmpl), typ)
         return sig
 
@@ -526,9 +652,12 @@ if __name__ == "__main__":
     free.argtypes = [c_void_p]
     free.restype = None
 
+    c4 = c_int64 * 4
 
     @nb.jit(nopython=True)
     def test(x2):
+        arr = c4(4, 3, 2, 1)
+        print(arr[0], arr[3])
         p = c_int64(16)
         t = POINTER(c_int64)(p)
         print(t, t[0])
@@ -550,5 +679,6 @@ if __name__ == "__main__":
     vp = cast(l, c_void_p)
     lt = pointer(l)
     z = myStruct2(5, 6.9)
-    ret = test(z)
+    q = c4(5, 7, 3, 10)
+    ret = test(q)
     print("mini", ret)
