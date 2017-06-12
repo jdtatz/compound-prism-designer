@@ -437,14 +437,15 @@ class CArrayGetItemTemplate(nb.typing.templates.FunctionTemplate):
     key = 'getitem'
 
     def apply(self, args, kwds):
-        print('resolve Array', args, kwds)
-        base = args[0].base
-        if isinstance(base, CSimpleType):
-            base = base.numba_type
-        if isinstance(args[1], nb.types.Integer):
-            return nb.typing.signature(base, CArrayType, args[1])
-        elif isinstance(args[1], nb.types.SliceType):
-            return nb.typing.signature(nb.types.List(base), CArrayType, args[1])
+        if isinstance(args[0], CArrayType):
+            print('resolve Array', args, kwds)
+            base = args[0].base
+            if isinstance(base, CSimpleType):
+                base = base.numba_type
+            if isinstance(args[1], nb.types.Integer):
+                return nb.typing.signature(base, CArrayType, args[1])
+            elif isinstance(args[1], nb.types.SliceType):
+                return nb.typing.signature(nb.types.List(base), CArrayType, args[1])
 
 
 @nb.extending.lower_builtin('static_getitem', CArrayType, nb.types.Const)
