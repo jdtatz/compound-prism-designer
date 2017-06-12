@@ -1,4 +1,5 @@
 from collections import namedtuple, OrderedDict
+from ctypes import c_char_p, c_void_p, cast
 import numba as nb
 import numpy as np
 from .merit import MeritFunctionRegistry
@@ -210,7 +211,8 @@ class CompoundPrism:
             initial_angles=nb.types.Array(nb.float64, 1, 'C'),
             angle_limit=nb.float64,
             w=nb.types.Array(nb.float64, 1, 'C'),
-            n=nb.types.Array(nb.float64, 2, 'C')
+            n=nb.types.Array(nb.float64, 2, 'C'),
+            glass=nb.int64
         )
         self.spec.update(self.meritcls.model_params)
         self.Config = namedtuple('Config', self.spec.keys())
@@ -223,8 +225,8 @@ class CompoundPrism:
         sampling_domain_is_wavenumber = sampling_domain == 'wavenumber'
         glass_indices = np.asarray(glass_indices, np.int64)
         prism_count, glass_count = len(glass_indices), glass_indices.max() + 1
-        incident_indices = np.arange(0, glass_count * 2 + 1, 2)
-        refracted_indices = np.arange(1, prism_count * 2 + 1, 2)
+        incident_indices = np.arange(0, glass_count * 2 + 1, 2, dtype=np.int64)
+        refracted_indices = np.arange(1, prism_count * 2 + 1, 2, dtype=np.int64)
         if initial_angles is None:
             initial_angles = np.ones((glass_count,)) * deltaT_target
             initial_angles[1::2] *= -1
@@ -239,5 +241,8 @@ class CompoundPrism:
     def configure_thread(self, model, tid):
         return self.meritcls.configure_thread_model(model, tid)
 
-    def __call__(self, model, n, g):
-        return self.prism(model._replace(n=np.asarray(n, np.float64, 'C')))
+    def __call__(self, model, n, glass):
+        arr = c_char_p*len(model.glass_indices)
+        ptrs = arr(*(c_char_p(glass[i].encode('ASCII')) for i in model.glass_indices))
+        g = cast(ptrs, c_void_p)
+        return self.prism(model._replace(n=np.asarray(n, np.float64, 'C'), glass=g.value))

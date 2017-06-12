@@ -1,23 +1,15 @@
-import platform
-from ctypes import CDLL, POINTER, c_void_p, c_int, c_double
-from ctypes.util import find_library
-from itertools import repeat
-
 import numpy as np
+from ctypes import CDLL, POINTER, c_void_p, c_int, c_double
+from compoundprism.utils import loadlibfunc, jit
+from itertools import repeat
+import platform
 
-from ..utils import loadlibfunc, jit
+__all__ = ["create1d", "create2d", "eval1d", "eval2d_grid", "eval2d_pts"]
 
-# jit = lambda x: x
-
-"""
-Load FitPack
-"""
-
-libc = CDLL(find_library("c"))
-if platform.system() == 'Windows':
-    libfit = CDLL("./fitpack/fitpack.dll")
+if platform == "Windows":
+    libfit = CDLL("fitpack.dll")
 else:
-    libfit = CDLL("./fitpack/fitpack.so")
+    libfit = CDLL("./compoundprism/fitpack/fitpack.so")
 
 freal = c_double
 fint = c_int
@@ -179,7 +171,7 @@ def eval2d_grid(x_, y_, tx_, ty_, c_, kx_, ky_):
     ier = np.empty(1, npint)  # errors
     bispev(tx.ctypes.data, nx.ctypes.data, ty.ctypes.data, ny.ctypes.data, c.ctypes.data, kx.ctypes.data, ky.ctypes.data, x.ctypes.data, mx.ctypes.data, y.ctypes.data, my.ctypes.data, z.ctypes.data, wrk.ctypes.data, lwrk.ctypes.data, iwrk.ctypes.data, kwrk.ctypes.data, ier.ctypes.data)
     if ier[0] == 0:
-        return z
+        return z.T
     raise Exception("invalid input data")
 
 
@@ -205,7 +197,6 @@ def eval2d_pts(x_, y_, tx_, ty_, c_, kx_, ky_):
     raise Exception("invalid input data")
 
 
-"""
 if __name__ == "__main__":
     print('verifying fitpack ctypes layer')
     try:
@@ -217,7 +208,7 @@ if __name__ == "__main__":
         xi = np.array([4, 4.5, 4.7])
         yo = eval1d(xi, t, c, 3)
         ys = spline(xi)
-        assert np.allclose(yo, ys)
+        assert np.allclose(yo, ys), "1-D cubic spline"
         count = 20
         x2 = np.random.rand(count)
         y2 = np.random.rand(count)
@@ -230,147 +221,10 @@ if __name__ == "__main__":
         xo.sort(), yo.sort()
         d = eval2d_grid(xo, yo, tx, ty, c, 3, 3)
         d2 = bs(xo, yo)
-        assert np.allclose(d, d2)
-        d = eval2d_pts(xo, yo, tx, ty, c, 3, 3)
-        d2 = bs(xo, yo, grid=False)
-        assert np.allclose(d, d2)
+        assert np.allclose(d, d2), "2-D cubic spline grid eval"
+        dp = eval2d_pts(xo, yo, tx, ty, c, 3, 3)
+        d2p = bs(xo, yo, grid=False)
+        assert np.allclose(dp, d2p), "2-D cubic spline points eval"
         print('verified')
     except ImportError:
         print("scipy not installed")
-"""
-
-"""
-PMT Code
-"""
-
-
-@jit
-def power(waves, values, bounds, bins, tx, ty, c):
-    powered = np.zeros((len(bounds), len(waves)), np.float64)
-    for i in range(bounds.shape[0]):
-        spots = np.digitize(waves, bounds[i])
-        sl = np.where(spots == 1)[0]
-        sr = np.where(spots == 3)[0]
-        sin = np.where(spots == 2)[0]
-        powered[i][sin] = values[sin]
-        if sl.size:
-            l = np.array(bins[i, 1])
-            powered[i][sl] = values[sl] * np.abs(-1 - eval2d_grid(l, waves[sl], tx, ty, c, 3, 3)) / 2.0
-        if sr.size:
-            r = np.array(bins[i, 0])
-            powered[i][sr] = values[sr] * np.abs(1 - eval2d_grid(r, waves[sr], tx, ty, c, 3, 3)) / 2.0
-    return powered
-
-
-@jit
-def get_bounds(bins, fields, waves, positions):
-    fbins = bins.flatten()
-    bounds = np.empty((len(bins), 4), np.float64)
-    ptw = np.empty((len(bins), 2, fields.size), np.float64)
-    for i in range(fields.size):
-        p2w = positions[i * waves.size:(i + 1) * waves.size]
-        order = np.argsort(p2w)
-        x, y = p2w[order], waves[order]
-        t, c, res = create1d(0, x, y, 3, 0)
-        wbins = eval1d(fbins, t, c, 3)
-        ptw[:, :, i] = wbins.reshape((-1, 2))
-    for i in range(bounds.shape[0]):
-        ls = np.min(ptw[i])
-        lt = np.max(np.minimum(ptw[i, 0], ptw[i, 1]))
-        rt = np.min(np.maximum(ptw[i, 0], ptw[i, 1]))
-        rs = np.max(ptw[i])
-        bounds[i] = (ls, lt, rt, rs)
-    """
-    bounds1 = np.transpose((
-        np.minimum.reduce(np.minimum.reduce(ptw, 1), 1),
-        np.maximum.reduce(np.minimum.reduce(ptw, 1), 1),
-        np.minimum.reduce(np.maximum.reduce(ptw, 1), 1),
-        np.maximum.reduce(np.maximum.reduce(ptw, 1), 1)
-    ))
-    assert np.all(bounds == bounds1)
-    """
-    return bounds
-
-
-@jit
-def pmt_coverage(bins, rays):
-    """
-    How much of the light is captured
-    """
-    fields = np.linspace(-1.0, 1.0, 101)
-    # waves = np.empty(21, np.float64)
-    waves = np.arange(500, 821, 16).astype(np.float64)
-    # rays = np.empty(len(fields) * len(waves), np.float64)
-    bounds = get_bounds(bins, fields, waves, rays)
-    ls, lt, rt, rs = bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
-    som_in = np.abs(rs - ls)
-    tot_in = np.abs(rt - lt)
-    ideal = waves.max() - waves.min()
-    print(np.sum(tot_in), np.sum(som_in), ideal)
-    return np.sum(som_in) / ideal, np.sum(tot_in) / ideal, np.sum(tot_in) / np.sum(som_in)
-
-
-@jit
-def pmt_spread(bins, rays, dyes):
-    """
-    How spread out are the dyes along the pmt
-    """
-    fields = np.linspace(-1.0, 1.0, 101)
-    # waves = np.empty(21, np.float64)
-    waves = np.arange(500, 821, 16).astype(np.float64)
-    # rays = np.empty(len(fields) * len(waves), np.float64)
-    bounds = get_bounds(bins, fields, waves, rays)
-    twaves = np.tile(waves, fields.size)
-    tfields = np.tile(fields, waves.size)
-    tx, ty, c, res = create2d(0, rays, twaves, tfields, 3, 3, rays.size)
-    spread = np.zeros(dyes.shape[0])
-    for i in range(dyes.shape[0]):
-        waves, emission = dyes[i, 0], dyes[i, 1]
-        p = power(waves, emission, bounds, bins, tx, ty, c)
-        for j in range(bins.shape[0]):
-            if p[j].nonzero()[0].size:
-                spread[i] += 1
-    return spread
-
-
-@jit
-def pmt_cross_talk(bins, rays, dyes):
-    """
-    How much the dyes intersect
-    """
-    fields = np.linspace(-1.0, 1.0, 101)
-    # waves = np.empty(21, np.float64)
-    waves = np.arange(500, 821, 16).astype(np.float64)
-    # rays = np.empty(len(fields) * len(waves), np.float64)
-    bounds = get_bounds(bins, fields, waves, rays)
-    twaves = np.tile(waves, fields.size)
-    tfields = np.tile(fields, waves.size)
-    tx, ty, c, res = create2d(0, rays, twaves, tfields, 3, 3, rays.size)
-    binned = np.empty((dyes.shape[0], bins.shape[0]), np.float64)
-    for i in range(dyes.shape[0]):
-        waves, emission = dyes[i, 0], dyes[i, 1]
-        p = power(waves, emission, bounds, bins, tx, ty, c)
-        for j in range(bins.shape[0]):
-            binned[i, j] = p[j].sum() / max(p[j].nonzero()[0].size, 1)
-    cross = np.empty((dyes.shape[0], dyes.shape[0]), np.float64)
-    for i in range(dyes.shape[0]):
-        for j in range(dyes.shape[0]):
-            cross[i, j] = cross[j, i] = binned[i] @ binned[j]
-    return cross
-
-
-data = np.load("data.npy")
-rays = data[:, 2] + 16
-binLabels = list(range(32, 0, -1))
-bbins = np.array([(b + 0.1, b + 0.9) for b in range(0, 32)], np.float64)
-merit = pmt_coverage(bbins, data[:, 2])
-print(merit)
-dyes = np.zeros((4, 2, 100), np.float64)
-dyes[:, 0] = np.linspace(500, 820, dyes.shape[2])
-dyes[:, 1, 20:80] = 100*np.random.rand(dyes.shape[0], 60)
-dyes[3, 1] = 0
-dyes[3, 1, 81:] = 100
-pspread = pmt_spread(bbins, rays, dyes)
-print(pspread)
-cross = pmt_cross_talk(bbins, rays, dyes)
-print(cross)
