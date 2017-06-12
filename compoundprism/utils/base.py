@@ -1,6 +1,7 @@
+from functools import partial
+
 import numba as nb
 import numpy as np
-from functools import partial
 
 __all__ = ["jit", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio"]
 

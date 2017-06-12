@@ -1,8 +1,8 @@
+from collections import namedtuple, OrderedDict
 import numba as nb
 import numpy as np
-from utils import *
-from merit import MeritFunctionRegistry
-from collections import namedtuple, OrderedDict
+from .merit import MeritFunctionRegistry
+from .utils import *
 
 """
 Prism Code

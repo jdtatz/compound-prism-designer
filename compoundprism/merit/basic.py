@@ -1,7 +1,9 @@
-from .registry import *
-from utils import *
-import numpy as np
 from collections import OrderedDict
+
+import numpy as np
+
+from .registry import *
+from ..utils import *
 
 
 class LinearityMerit(BaseMeritFunction):

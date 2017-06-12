@@ -1,6 +1,7 @@
 from itertools import permutations, starmap
 import numpy as np
 
+__all__ = ["calc_n", "read_glasscat", "glass_combos", "glass_paired"]
 
 def calc_n(glass_dict, wm):
     dispform = glass_dict['dispform']

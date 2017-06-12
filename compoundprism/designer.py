@@ -1,15 +1,20 @@
-from glasscat import read_glasscat, glass_paired
+import json
+import sqlite3
+import sys
+import time
+from itertools import repeat
+from math import pi
 from multiprocessing import cpu_count
 from threading import Thread, Lock
-import time, sys, json, sqlite3
-from prisms import CompoundPrism
-from itertools import repeat
 from uuid import uuid4
-from math import pi
+
 import numpy as np
 
+from compoundprism.glasscat import read_glasscat, glass_combos
+from compoundprism.prisms import CompoundPrism
 
-def hyper(**settings):
+
+def design(**settings):
     prism_name = settings.get('prism name', 'prism')
     count = settings.get('glass count', 0)
     indices = settings.get('glass indices', None)
@@ -26,9 +31,8 @@ def hyper(**settings):
     angle_lim = settings.get("incident angle limit", 65.0)
     theta0 = settings.get("theta0", 0.0)
     iangles = settings.get("initial angles", None)
-    database_file = settings["database file"]
-    input_table_name = settings["input table name"]
-    output_table_name = settings.get("output table name", "t" + uuid4().hex)
+    database_file = settings.get("database file", "prism.db")
+    table_name = settings.get("table name", "t" + uuid4().hex)
     thread_count = settings.get("thread count", cpu_count())
 
     if indices is not None:
@@ -39,7 +43,7 @@ def hyper(**settings):
         raise Exception("Invalid prism parametrization")
 
     if w is not None:
-        w = np.asarray(w, np.float64)
+        w = np.asarray(w, np.float64, 'C')
     elif sampling_domain == "wavenumber":
         w = 1.0 / np.linspace(1.0 / wavemax, 1.0 / wavemin, nwaves, dtype=np.float64)
     else:
@@ -52,9 +56,8 @@ def hyper(**settings):
     deltaT_target = dispersion_target * pi / 180.0
     angle_lim *= pi / 180.0
 
-    print('input table:', input_table_name)
-    print('output table:', output_table_name)
-    print('# glasses in catalog =', nglass)
+    print('table:', table_name)
+    print('# glasses =', nglass)
     print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
     print('thread count:', thread_count, '\n')
     cmpnd = CompoundPrism(merit, settings)
@@ -69,10 +72,11 @@ def hyper(**settings):
         "merit function" TEXT,
         "deviation target" REAL,
         "dispersion target" REAL,
+        completed BOOLEAN,
         json TEXT
         )""")
 
-    c.execute(f"""CREATE TABLE {output_table_name} (
+    c.execute(f"""CREATE TABLE {table_name} (
         {", ".join(f"glass{i} TEXT" for i in range(1, count+1))},
         {", ".join(f"alpha{i} REAL" for i in range(1, count+1))},
         meritError REAL,
@@ -88,12 +92,10 @@ def hyper(**settings):
         chromat REAL
         )""")
 
-    c.execute(f"""SELECT {", ".join(f"glass{i} TEXT" for i in range(1, count+1))} FROM {input_table_name}""")
-
     t1 = time.time()
-    items = glass_paired(gcat, c.fetchall(), w)
+    items = glass_combos(gcat, count, w)
     itemLock, outputLock = Lock(), Lock()
-    insert_stmt = f"INSERT INTO {output_table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
+    insert_stmt = f"INSERT INTO {table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
     amounts = []
 
     def process(tid):
@@ -105,7 +107,7 @@ def hyper(**settings):
                     glass, n = next(items)
             except StopIteration:
                 break
-            data = cmpnd(thread_model._replace(n=np.stack(n)))
+            data = cmpnd(thread_model, n, glass)
             if data is not None:
                 count += 1
                 with outputLock:
@@ -123,17 +125,20 @@ def hyper(**settings):
     amount = sum(amounts)
 
     dt = time.time() - t1
-    print('Total glass combinations considered =', amount)
-    print('Elapsed time for solution search in the full catalog =', dt, 'sec')
-    print('Elapsed time per glass combination =', 1000 * dt / amount, 'ms')
-
-    c.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
-              (output_table_name, prism_name, merit, deviation_target, dispersion_target, str(settings)))
+    if amount > 0:
+        print('Total glass combinations considered =', amount)
+        print('Elapsed time for solution search in the full catalog =', dt, 'sec')
+        print('Elapsed time per glass combination =', 1000 * dt / amount, 'ms')
+    else:
+        print('Failed to complete')
+        print('Elapsed time =', dt)
+    c.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (table_name, prism_name, merit, deviation_target, dispersion_target, amount > 0, str(settings)))
     conn.commit()
     conn.close()
 
 if __name__ == "__main__":
-    print('Starting Compound Prism Hyper Parameter Designer')
+    print('Starting Compound Prism Designer')
     with open(sys.argv[1], 'r') as f:
         settings = json.load(f)
-    hyper(**settings)
+    design(**settings)
