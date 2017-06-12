@@ -292,10 +292,12 @@ def get_item_cpointer(context, builder, sig, args):
 Ctypes Structure
 """
 
+
 class CStructType(nb.types.Type):
     def __init__(self, struct):
-        self.struct = struct
+        self.ctypes_type = struct
         self.spec = OrderedDict([(field, ctypes_typed_cache[ctyp]) for field, ctyp in struct._fields_])
+        self.primative = ir.LiteralStructType([self.spec[k].primative for k in self.spec.keys()])
         super().__init__(name="CtypesStruct({})".format(struct.__name__))
 
 
@@ -306,7 +308,7 @@ class CStructModel(nb.extending.models.StructModel):
 
 
 @nb.extending.infer_getattr
-class CPointerAttributeTemplate(nb.typing.templates.AttributeTemplate):
+class CStructAttributeTemplate(nb.typing.templates.AttributeTemplate):
     key = CStructType
 
     def generic_resolve(self, typ, attr):
@@ -323,9 +325,9 @@ def struct_getattr_impl(context, builder, typ, val, name):
     """ getattr for struct """
     struct = nb.cgutils.create_struct_proxy(typ)(context, builder, value=val)
     attrval = getattr(struct, name)
-    # attrty = typ.spec[name]
-    # return nb.targets.imputils.impl_ret_borrowed(context, builder, attrty, attrval)
-    return attrval
+    attrty = typ.spec[name]
+    return nb.targets.imputils.impl_ret_borrowed(context, builder, attrty, attrval)
+    #return attrval
 
 
 @nb.extending.typeof_impl.register(Structure)
@@ -364,7 +366,7 @@ def box_struct(typ, val, c):
     """
     print('box', typ, val)
     struct = nb.cgutils.create_struct_proxy(typ)(c.context, c.builder, value=val)
-    class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.struct))
+    class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.ctypes_type))
     field_objs = [c.pyapi.from_native_value(ftyp, getattr(struct, field)) for field, ftyp in typ.spec.items()]
     res = c.pyapi.call_function_objargs(class_obj, field_objs)
     for field_obj in field_objs:
@@ -434,6 +436,39 @@ def nb_pointer(context, builder, sig, args):
     # print('ptr', sig, args)
     return nb.cgutils.alloca_once_value(builder, args[0])
 
+
+@nb.extending.infer
+class PointerCreateTemplate(nb.typing.templates.FunctionTemplate):
+    key = POINTER
+
+    def apply(self, args, kws):
+        print('APPLY', args, kws)
+        typ = args[0]
+        print('tYP', typ, typ.typing_key)
+        pteCTyp = typ.typing_key
+        ptrCTyp = POINTER(pteCTyp)
+        register_pointer_type(ptrCTyp)
+        pteTyp = ctypes_typed_cache[pteCTyp]
+        ptrTyp = ctypes_typed_cache[ptrCTyp]
+        print(pteCTyp, ptrCTyp, pteTyp, ptrTyp)
+
+        for tmpl in nb.typing.templates.builtin_registry.functions:
+            if tmpl.key == ptrCTyp:
+                break
+        else:
+            raise Exception("Pointer Type Mis/Not Registered")
+        print(tmpl)
+
+        sig = nb.typing.signature(nb.types.Function(tmpl), typ)
+        return sig
+
+nb.typing.templates.infer_global(POINTER, nb.types.Function(PointerCreateTemplate))
+
+
+@nb.extending.lower_builtin(POINTER, nb.types.Any)
+def nb_pointer(context, builder, sig, args):
+    return args[0]
+
 """
 Function Ptr Code
 """
@@ -495,6 +530,8 @@ if __name__ == "__main__":
     @nb.jit(nopython=True)
     def test(x2):
         p = c_int64(16)
+        t = POINTER(c_int64)(p)
+        print(t, t[0])
         t = malloc(p)
         print(t)
         #a = (c_int*5)(1, 2, 3, 4, 5)
@@ -502,7 +539,8 @@ if __name__ == "__main__":
         d = pointer(x)
         d2 = pointer(d)
         z = myStruct(10, 7.2, d)
-        print("mix", t, x.value, d.contents, d2.contents.contents, x2, z, z.x, z.y)
+        zp = pointer(z)
+        print("mix", t, x.value, d.contents, d2.contents.contents, x2, z, z.x, z.y, zp[0].y)
         free(c_void_p(t))
         return t
 
