@@ -95,22 +95,18 @@ def register_simple_type(ctyp, typ):
 
     @nb.extending.type_callable(ctyp)
     def call_typ_ctyp(context):
-        def typer(val):
-            # print("typer", val)
-            return ctypes_typed_cache[ctyp]
-        # print('get_typer', ctyp, context)
+        def typer(val=None):
+            return typ
         return typer
+
+    @nb.extending.lower_builtin(typ.ctypes_type)
+    def impl_csimple(context, builder, sig, args):
+        return ir.Constant(typ.primative, ir.Undefined)
 
     @nb.extending.lower_builtin(typ.ctypes_type, nb.types.Number)
     def impl_csimple(context, builder, sig, args):
         value = args[0]
-        # print("impl", sig.return_type, value, value.type)
         return cast_llvm(value, typ.numba_type, typ.primative, builder)
-
-    @nb.extending.lower_cast(typ, typ.numba_type)
-    def cast_csimple(context, builder, fromty, toty, val):
-        print('CAST')
-        return val
 
 
 for simple_ctyp, simple_typ in ctypes_typed_cache.items():
@@ -119,7 +115,6 @@ for simple_ctyp, simple_typ in ctypes_typed_cache.items():
 
 @nb.extending.typeof_impl.register(ctypes._SimpleCData)
 def typeof_csimple(val, c):
-    # print("reg", val, type(val), c)
     return ctypes_typed_cache[type(val)]
 
 
@@ -128,7 +123,6 @@ def unbox_csimple(typ, obj, c):
     """
     Convert object to a native structure.
     """
-    # print('unbox', typ, obj, c.context.get_argument_type(typ))
     value_obj = c.pyapi.object_getattr_string(obj, "value")
     native_val = c.pyapi.to_native_value(typ.numba_type, value_obj)
     c.pyapi.decref(value_obj)
@@ -140,7 +134,6 @@ def box_csimple(typ, val, c):
     """
     Convert a native structure to an object.
     """
-    # print('box', typ, val, typ.name)
     c_simple = c.pyapi.from_native_value(typ.numba_type, val)
     class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.ctypes_type))
     obj = c.pyapi.call_function_objargs(class_obj, (c_simple, ))
@@ -153,14 +146,12 @@ class CSimpleAttributeTemplate(nb.typing.templates.AttributeTemplate):
     key = CSimpleType
 
     def generic_resolve(self, typ, attr):
-        # print('resolve', typ, attr, self.key)
         if attr == 'value':
             return typ.numba_type
 
 
 @nb.extending.lower_getattr(CSimpleType, 'value')
 def get_value_csimple(context, builder, typ, val):
-    # print('getValue', typ, val)
     return val
 
 """
@@ -199,19 +190,21 @@ def register_pointer_type(ptrTyp):
 
     @nb.extending.type_callable(ptrTyp)
     def call_typ_cpointer(context):
-        def typer(val):
-            # print("typer", val)
+        def typer(val=None):
             return typ
-        # print('get_typer', typ.ctypes_type, context)
         return typer
 
     @nb.extending.lower_builtin(ptrTyp, typ.numba_type.key)
     def impl_cpointer(context, builder, sig, args):
         typ = sig.return_type
         value = args[0]
-        # print("impl", typ, value.type, value)
         val = nb.cgutils.alloca_once_value(builder, value)
         return val
+
+    @nb.extending.lower_builtin(ptrTyp)
+    def impl_cpointer(context, builder, sig, args):
+        nullptr = typ.primative(None)
+        return nullptr
 
     return ptrTyp
 
@@ -230,12 +223,27 @@ def unbox_cpointer(typ, obj, c):
     """
     Convert object to a native structure.
     """
-    # print('unbox', typ, obj, c.context.get_argument_type(typ))
-    contents_obj = c.pyapi.object_getattr_string(obj, "contents")
-    contents = c.pyapi.to_native_value(typ.numba_type.key, contents_obj)
-    c.pyapi.decref(contents_obj)
-    val = nb.cgutils.alloca_once_value(c.builder, contents.value)
-    is_error = nb.cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
+    retptr = nb.cgutils.alloca_once(c.builder, typ.primative)
+    errptr = nb.cgutils.alloca_once_value(c.builder, nb.cgutils.false_bit)
+    truth_obj = c.pyapi.object_istrue(obj)
+    zero = ir.Constant(truth_obj.type, 0)
+    truth_val = c.builder.icmp_unsigned('!=', truth_obj, zero)
+    with c.builder.if_else(truth_val, True) as (then, otherwise):
+        with then:
+            contents_obj = c.pyapi.object_getattr_string(obj, "contents")
+            contents = c.pyapi.to_native_value(typ.numba_type.key, contents_obj).value
+            val = nb.cgutils.alloca_once_value(c.builder, contents)
+            is_error = nb.cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
+            c.pyapi.decref(contents_obj)
+            c.builder.store(val, retptr)
+            c.builder.store(is_error, errptr)
+        with otherwise:
+            val = typ.primative(None)
+            c.builder.store(val, retptr)
+            is_error = nb.cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
+            c.builder.store(is_error, errptr)
+    val = c.builder.load(retptr)
+    is_error = c.builder.load(errptr)
     return nb.extending.NativeValue(val, is_error=is_error)
 
 
@@ -244,14 +252,21 @@ def box_cpointer(typ, val, c):
     """
     Convert a native structure to an object.
     """
-    # print('box', typ, val, typ.name, typ.numba_type.key)
-    ptr = c.builder.load(val)
-    inner = c.pyapi.from_native_value(typ.numba_type.key, ptr)
+    retptr = nb.cgutils.alloca_once(c.builder, ir.PointerType(ir.IntType(8)))
     class_obj = c.pyapi.unserialize(c.pyapi.serialize_object(typ.ctypes_type))
-    res = c.pyapi.call_function_objargs(class_obj, (inner, ))
+    is_not_null = nb.cgutils.is_not_null(c.builder, val)
+    with c.builder.if_else(is_not_null, True) as (then, otherwise):
+        with then:
+            ptr = c.builder.load(val)
+            inner = c.pyapi.from_native_value(typ.numba_type.key, ptr)
+            res = c.pyapi.call_function_objargs(class_obj, (inner,))
+            c.builder.store(res, retptr)
+            c.pyapi.decref(inner)
+        with otherwise:
+            res = c.pyapi.call_function_objargs(class_obj, ())
+            c.builder.store(res, retptr)
     c.pyapi.decref(class_obj)
-    c.pyapi.decref(inner)
-    return res
+    return c.builder.load(retptr)
 
 
 @nb.extending.infer_getattr
@@ -270,25 +285,21 @@ class CPointerMethodTemplate(nb.typing.templates.FunctionTemplate):
 
     def apply(self, args, kws):
         typ, index = args
-        if isinstance(typ, CPointerType):
+        if isinstance(typ, CPointerType) and isinstance(index, nb.types.Integer):
             retype = typ.numba_type.key
             if isinstance(retype, CSimpleType):
                 retype = retype.numba_type
-            sig = retype(*args)
-            # print('genericIn', sig, self, args, kws)
-            return sig
+            return nb.typing.signature(retype, typ, index)
 
 
 @nb.extending.lower_getattr(CPointerType, 'contents')
 def get_contents_cpointer(context, builder, typ, val):
-    # print('getContents', typ, val)
     return builder.load(val)
 
 
 @nb.extending.lower_builtin('getitem', CPointerType, nb.types.Integer)
 def get_item_cpointer(context, builder, sig, args):
     val, index = args
-    # print('getItem', sig, val, index)
     ptr = nb.cgutils.pointer_add(builder, val, index)
     return builder.load(ptr)
 
@@ -658,14 +669,13 @@ if __name__ == "__main__":
 
     @nb.jit(nopython=True)
     def test(x2):
-        arr = c4(4, 3, 2, 1)
-        print(arr[0], arr[3])
         p = c_int64(16)
-        t = POINTER(c_int64)(p)
-        print(t, t[0])
+        t = POINTER(c_int64)()
+        print(t, t[0], x2)
+        return t
+        """
         t = malloc(p)
         print(t)
-        #a = (c_int*5)(1, 2, 3, 4, 5)
         x = c_int(13)
         d = pointer(x)
         d2 = pointer(d)
@@ -674,6 +684,7 @@ if __name__ == "__main__":
         print("mix", t, x.value, d.contents, d2.contents.contents, x2, z, z.x, z.y, zp[0].y)
         free(c_void_p(t))
         return t
+        """
 
 
     t = c_int(255)
@@ -681,6 +692,6 @@ if __name__ == "__main__":
     vp = cast(l, c_void_p)
     lt = pointer(l)
     z = myStruct2(5, 6.9)
-    q = c4(5, 7, 3, 10)
+    q = POINTER(c_int)()
     ret = test(q)
     print("mini", ret)
