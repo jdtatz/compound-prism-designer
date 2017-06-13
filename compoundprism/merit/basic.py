@@ -2,11 +2,12 @@ from collections import OrderedDict
 
 import numpy as np
 
-from .registry import *
+from .registry import MeritFunctionRegistry
 from ..utils import *
 
 
-class LinearityMerit(BaseMeritFunction):
+@MeritFunctionRegistry.register
+class LinearityMerit:
     name = 'linearity'
     weights = OrderedDict(NL=25)
 
@@ -16,7 +17,8 @@ class LinearityMerit(BaseMeritFunction):
         return NL_err
 
 
-class BeamCompressionMerit(BaseMeritFunction):
+@MeritFunctionRegistry.register
+class BeamCompressionMerit:
     name = 'beam compression'
     weights = OrderedDict(NL=25, K=0.0025)
 
@@ -28,7 +30,8 @@ class BeamCompressionMerit(BaseMeritFunction):
         return NL_err + K_err
 
 
-class ChromaticityMerit(BaseMeritFunction):
+@MeritFunctionRegistry.register
+class ChromaticityMerit:
     name = 'chromaticity'
     weights = OrderedDict(chromat=1, dispersion=0)
 
@@ -38,7 +41,8 @@ class ChromaticityMerit(BaseMeritFunction):
         return chromat
 
 
-class ThinnessMerit(BaseMeritFunction):
+@MeritFunctionRegistry.register
+class ThinnessMerit:
     name = 'thinness'
     weights = OrderedDict(anglesum=0.001)
 
@@ -48,7 +52,8 @@ class ThinnessMerit(BaseMeritFunction):
         return anglesum
 
 
-class SecondOrderMerit(BaseMeritFunction):
+@MeritFunctionRegistry.register
+class SecondOrderMerit:
     name = 'second-order'
     weights = OrderedDict(secondorder=0.001)
 

@@ -1,33 +1,43 @@
 import math
 import numpy as np
 import ctypes
-from ctypes import cast, c_void_p, c_uint64, c_char_p
+import os
+from ctypes import c_void_p, c_uint64
 from compoundprism.utils import loadlibfunc, jit
-from collections import namedtuple, OrderedDict
+from collections import OrderedDict
 from compoundprism.fitpack import *
-from compoundprism.merit.registry import BaseMeritFunction
+from compoundprism.merit.registry import MeritFunctionRegistry
 import numba as nb
 
 
-def start_zemax(count, zemax_file):
-    if 'zos' not in globals():
-        global zos, wavesInSystem, pooledRayTraceSystem, optimzeSystem, changeSystem
-        zos = ctypes.WinDLL("ZosLibrary.dll")
-        wavesInSystem = loadlibfunc(zos, 'wavesInSystem', c_uint64, c_void_p, c_void_p)
-        pooledRayTraceSystem = loadlibfunc(zos, 'pooledRayTraceSystem', None, c_void_p, c_void_p, c_void_p, c_uint64)
-        optimzeSystem = loadlibfunc(zos, 'optimzeSystem', None, c_void_p)
-        changeSystem = loadlibfunc(zos, 'changeSystem', None, c_void_p, c_void_p, c_void_p, c_void_p)
-    print('connecting')
-    conn = zos.connectZOS()
-    if conn == 0:
-        raise Exception("Failed to connect")
-    print('connected')
-    sys = zos.getPrimarySystem(conn)
-    zos.loadFile(sys, zemax_file)
-    print("Files Loaded")
-    zos.setupSystem(sys, count)
-    print('system setup')
-    return sys
+class ZemaxPMTBase:
+    def __init__(self, settings):
+        base = os.path.join(os.path.dirname(__file__), 'prism_compat_0p4_NA_125um.ZMX')
+        zemax_file = settings.get("zemax file", base).encode("UTF-8")
+        self.fields = settings.get("zemax fields", np.linspace(-1.0, 1.0, 101))
+        self.bins = settings.get("zemax bins",  np.array([(b + 0.1, b + 0.9) for b in range(0, 32)], np.float64))
+        self.height = settings.get("zemax height", 50)
+        if 'zos' not in globals():
+            global zos, wavesInSystem, pooledRayTraceSystem, optimzeSystem, changeSystem
+            zos = ctypes.WinDLL(os.path.join(os.path.dirname(__file__), 'ZosLibrary.dll'))
+            wavesInSystem = loadlibfunc(zos, 'wavesInSystem', c_uint64, c_void_p, c_void_p)
+            pooledRayTraceSystem = loadlibfunc(zos, 'pooledRayTraceSystem', None, c_void_p, c_void_p, c_void_p, c_uint64)
+            optimzeSystem = loadlibfunc(zos, 'optimzeSystem', None, c_void_p)
+            changeSystem = loadlibfunc(zos, 'changeSystem', None, c_void_p, c_void_p, c_void_p, c_void_p)
+        print('connecting to Zemax OpticStudio')
+        self.conn = zos.connectZOS()
+        if self.conn == 0:
+            raise ConnectionError("Failed to connect")
+        print('connected')
+        self.sys = zos.getPrimarySystem(self.conn)
+        zos.loadFile(self.sys, zemax_file)
+
+    def configure(self, configuration):
+        zos.setupSystem(self.sys, configuration["prism_count"])
+        return {**configuration, 'bins': self.bins, 'fields': self.fields, 'height': self.height}
+
+    def configure_thread_model(self, model, tid):
+        return model._replace(sys=zos.copySystem(self.sys))
 
 
 @jit
@@ -114,99 +124,106 @@ def get_bounds(bins, fields, waves, positions):
     return bounds
 
 
-class PMTMerit(BaseMeritFunction):
-    name = 'pmt'
-    weights = OrderedDict(tot_per=1.0, som_per=1.0, tot_som=0.5)
-    model_params = OrderedDict(sys=nb.int64, bins=nb.types.Array(nb.float64, 2, 'C'), fields=nb.types.Array(nb.float64, 1, 'C'))
-
-    def __init__(self, settings):
-        self.sys = start_zemax(3, b"prism_compat_0p4_NA_125um.ZMX")
-
-    def configure(self, configuration):
-        new = {'bins': np.array([(b + 0.1, b + 0.9) for b in range(0, 32)], np.float64), 'fields': np.linspace(-1.0, 1.0, 101)}
-        return {**configuration, **new}
-
-    def configure_thread_model(self, model, tid):
-        return model._replace(sys=zos.copySystem(self.sys))
-
-    @staticmethod
-    def merit(model, angles, delta, thetas):
-            waves, rays = rayTrace(model.sys, model.glass, angles, 50, model.fields)
-            bounds = get_bounds(model.bins, model.fields, waves, rays)
-            ls, lt, rt, rs = bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
-            som_in = np.abs(rs - ls)
-            tot_in = np.abs(rt - lt)
-            ideal = waves.max() - waves.min()
-            merr = model.weights.tot_per * np.sum(tot_in) / ideal
-            merr += model.weights.som_per * np.sum(som_in) / ideal
-            merr += model.weights.tot_som * np.sum(tot_in) / np.sum(som_in)
-            return merr
-    
-
-@jit
-def pmt_coverage(model, angles):
+@MeritFunctionRegistry.register
+class PMTCoverageMerit(ZemaxPMTBase):
     """
     How much of the light is captured
     """
-    fields = np.linspace(-1.0, 1.0, 101)
-    waves, rays = rayTrace(model.sys, model.materials, angles, model.height, fields)
-    bounds = get_bounds(model.bins, fields, waves, rays)
-    ls, lt, rt, rs = bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
-    som_in = np.abs(rs - ls)
-    tot_in = np.abs(rt - lt)
-    ideal = waves.max() - waves.min()
-    print(np.sum(tot_in), np.sum(som_in), ideal)
-    return np.sum(som_in) / ideal, np.sum(tot_in) / ideal, np.sum(tot_in) / np.sum(som_in)
+    name = 'pmt coverage'
+    weights = OrderedDict(tot_per=1.0, som_per=1.0, tot_som=0.5)
+    model_params = OrderedDict(sys=nb.int64, bins=nb.types.Array(nb.float64, 2, 'C'), fields=nb.types.Array(nb.float64, 1, 'C'), height=np.float64)
+
+    @staticmethod
+    def merit(model, angles, delta, thetas):
+        waves, rays = rayTrace(model.sys, model.glass, angles, model.height, model.fields)
+        bounds = get_bounds(model.bins, model.fields, waves, rays)
+        ls, lt, rt, rs = bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
+        som_in = np.abs(rs - ls)
+        tot_in = np.abs(rt - lt)
+        ideal = waves.max() - waves.min()
+        merr = model.weights.tot_per * np.sum(tot_in) / ideal
+        merr += model.weights.som_per * np.sum(som_in) / ideal
+        merr += model.weights.tot_som * np.sum(tot_in) / np.sum(som_in)
+        return merr
 
 
-@jit
-def pmt_spread(model, angles):
+@MeritFunctionRegistry.register
+class PMTSpreadMerit(ZemaxPMTBase):
     """
     How spread out are the dyes along the pmt
     """
-    bins, dyes = model.bins, model.dyes
-    fields = np.linspace(-1.0, 1.0, 101)
-    waves, rays = rayTrace(model.sys, model.materials, angles, model.height, fields)
-    bounds = get_bounds(bins, fields, waves, rays)
-    twaves = np.tile(waves, fields.size)
-    tfields = np.tile(fields, waves.size)
-    tx, ty, c, res = create2d(0, rays, twaves, tfields, 3, 3, rays.size)
-    spread = np.zeros(dyes.shape[0])
-    for i in range(dyes.shape[0]):
-        waves, emission = dyes[i, 0], dyes[i, 1]
-        p = power(waves, emission, bounds, bins, tx, ty, c)
-        for j in range(bins.shape[0]):
-            if p[j].nonzero()[0].size:
-                spread[i] += 1
-    return spread
+    name = 'pmt dye spread'
+    weights = OrderedDict(spread=1.0)
+    model_params = OrderedDict(sys=nb.int64, bins=nb.types.Array(nb.float64, 2, 'C'), fields=nb.types.Array(nb.float64, 1, 'C'), height=np.float64, dyes=nb.types.Array(nb.float64, 3, 'C'))
+
+    def __init__(self, settings):
+        super().__init__(settings)
+        dyeFile = settings.get('zemax dye file', os.path.join(os.path.dirname(__file__), 'test_dyes.npy'))
+        self.dyes = np.load(dyeFile)
+
+    def configure(self, configuration):
+        config = super().configure(configuration)
+        return {**config, 'dyes': self.dyes}
+
+    @staticmethod
+    def merit(model, angles, delta, thetas):
+        waves, rays = rayTrace(model.sys, model.materials, angles, model.height, model.fields)
+        bounds = get_bounds(model.bins, model.fields, waves, rays)
+        twaves = np.tile(waves, model.fields.size)
+        tfields = np.tile(model.fields, waves.size)
+        tx, ty, c, res = create2d(0, rays, twaves, tfields, 3, 3, rays.size)
+        spread = np.zeros(model.dyes.shape[0])
+        for i in range(model.dyes.shape[0]):
+            waves, emission = model.dyes[i, 0], model.dyes[i, 1]
+            p = power(waves, emission, bounds, model.bins, tx, ty, c)
+            for j in range(model.bins.shape[0]):
+                if p[j].nonzero()[0].size:
+                    spread[i] += 1
+        return model.weights.spread * spread
 
 
-@jit
-def pmt_cross_talk(model, angles):
+@MeritFunctionRegistry.register
+class PMTCrossTalkMerit(ZemaxPMTBase):
     """
-    How much the dyes intersect
+    How much the dyes intersect along the pmt
     """
-    bins, dyes = model.bins, model.dyes 
-    fields = np.linspace(-1.0, 1.0, 101)
-    waves, rays = rayTrace(model.sys, model.materials, angles, model.height, fields)
-    bounds = get_bounds(bins, fields, waves, rays)
-    twaves = np.tile(waves, fields.size)
-    tfields = np.tile(fields, waves.size)
-    tx, ty, c, res = create2d(0, rays, twaves, tfields, 3, 3, rays.size)
-    binned = np.empty((dyes.shape[0], bins.shape[0]), np.float64)
-    for i in range(dyes.shape[0]):
-        waves, emission = dyes[i, 0], dyes[i, 1]
-        p = power(waves, emission, bounds, bins, tx, ty, c)
-        for j in range(bins.shape[0]):
-            binned[i, j] = p[j].sum() / max(p[j].nonzero()[0].size, 1)
-    cross = np.empty((dyes.shape[0], dyes.shape[0]), np.float64)
-    for i in range(dyes.shape[0]):
-        for j in range(dyes.shape[0]):
-            cross[i, j] = cross[j, i] = binned[i] @ binned[j]
-    return cross
+    name = 'pmt dye cross talk'
+    weights = OrderedDict(cross=0.5)
+    model_params = OrderedDict(sys=nb.int64, bins=nb.types.Array(nb.float64, 2, 'C'), fields=nb.types.Array(nb.float64, 1, 'C'), height=np.float64, dyes=nb.types.Array(nb.float64, 3, 'C'))
+
+    def __init__(self, settings):
+        super().__init__(settings)
+        dyeFile = settings.get('zemax dye file', os.path.join(os.path.dirname(__file__), 'test_dyes.npy'))
+        self.dyes = np.load(dyeFile)
+
+    def configure(self, configuration):
+        config = super().configure(configuration)
+        return {**config, 'dyes': self.dyes}
+
+    @staticmethod
+    def merit(model, angles, delta, thetas):
+        waves, rays = rayTrace(model.sys, model.materials, angles, model.height, model.fields)
+        bounds = get_bounds(model.bins, model.fields, waves, rays)
+        twaves = np.tile(waves, model.fields.size)
+        tfields = np.tile(model.fields, waves.size)
+        tx, ty, c, res = create2d(0, rays, twaves, tfields, 3, 3, rays.size)
+        binned = np.empty((model.dyes.shape[0], model.bins.shape[0]), np.float64)
+        for i in range(model.dyes.shape[0]):
+            waves, emission = model.dyes[i, 0], model.dyes[i, 1]
+            p = power(waves, emission, bounds, model.bins, tx, ty, c)
+            for j in range(model.bins.shape[0]):
+                binned[i, j] = p[j].sum() / max(p[j].nonzero()[0].size, 1)
+        cross = np.zeros((model.dyes.shape[0], model.dyes.shape[0]), np.float64)
+        for i in range(model.dyes.shape[0]):
+            for j in range(model.dyes.shape[0]):
+                if i != j:
+                    cross[i, j] = cross[j, i] = binned[i] @ binned[j]
+        return cross.sum() * model.weights.cross
 
 
 if __name__ == "__main__":
+    from ctypes import cast, c_char_p
+    from collections import namedtuple
     g1 = b'N-FK58'
     g2 = b'P-SF68'
     g3 = b'LF5'
@@ -215,33 +232,28 @@ if __name__ == "__main__":
     a2 = -48.2729540140781
     a3 = 17.502053458746
 
-    h = 50
     materials = (g1, g2, g3, g2, g1)
     alphas = np.array((a1, a2, a3, a2, a1)) * np.pi / 180
     count = len(materials)
 
-    zemaxFile = b"prism_compat_0p4_NA_125um.ZMX"
-
-    sys = start_zemax(count, zemaxFile)
-
     mats = (c_char_p*count)(*materials)
     materialsPtr = cast(mats, c_void_p).value
 
-    binLabels = list(range(32, 0, -1))
-    bbins = np.array([(b + 0.1, b + 0.9) for b in range(0, 32)], np.float64)
     dyes = np.zeros((4, 2, 100), np.float64)
     dyes[:, 0] = np.linspace(500, 820, dyes.shape[2])
     dyes[:, 1, 20:80] = 100*np.random.rand(dyes.shape[0], 60)
     dyes[3, 1] = 0
     dyes[3, 1, 81:] = 100
+    np.save("test_dyes", dyes)
 
-    Model = namedtuple("Model", "sys, materials, height, bins, dyes")
-    model = Model(sys, materialsPtr, h, bbins, dyes)
+    Model = namedtuple("Model", "sys, materials, height, bins, fields, dyes")
+    base_model = Model(None, materialsPtr, None, None, None, None)
+    settings = {}
 
-    cov = pmt_coverage(model, alphas)
-    print(cov)
-    pspread = pmt_spread(model, alphas)
-    print(pspread)
-    cross = pmt_cross_talk(model, alphas)
-    print(cross)
-
+    Merits = [PMTCoverageMerit, PMTSpreadMerit, PMTCrossTalkMerit]
+    for Merit in Merits:
+        m = Merit(settings)
+        m.configure({"prism_count": 3})
+        model = m.configure_thread_model(base_model, 0)
+        merit_error = m.merit(m, alphas, None, None)
+        print(Merit, merit_error)

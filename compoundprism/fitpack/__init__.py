@@ -3,13 +3,15 @@ from ctypes import CDLL, POINTER, c_void_p, c_int, c_double
 from compoundprism.utils import loadlibfunc, jit
 from itertools import repeat
 import platform
+import os
 
 __all__ = ["create1d", "create2d", "eval1d", "eval2d_grid", "eval2d_pts"]
 
+fdir = os.path.dirname(os.path.realpath(__file__))
 if platform == "Windows":
-    libfit = CDLL("fitpack.dll")
+    libfit = CDLL(os.path.join(fdir, "fitpack.dll"))
 else:
-    libfit = CDLL("./compoundprism/fitpack/fitpack.so")
+    libfit = CDLL(os.path.join(fdir, "fitpack.so"))
 
 freal = c_double
 fint = c_int
