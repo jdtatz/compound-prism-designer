@@ -7,6 +7,7 @@ import numba as nb
 import numba.cgutils
 import numba.extending
 import numba.typing
+import numba.typeconv
 from llvmlite import ir
 
 
@@ -65,11 +66,18 @@ class CSimpleType(nb.types.Type):
     def cast_python_value(self, value):
         return self.ctypes_type(value)
 
+    def can_convert_to(self, typingctx, other):
+        if other is self.numba_type:
+            return nb.typeconv.Conversion.exact
+
+    def can_convert_from(self, typingctx, other):
+        if other is self.numba_type:
+            return nb.typeconv.Conversion.exact
+
 
 @nb.extending.register_model(CSimpleType)
 class CSimpleModel(nb.extending.models.PrimitiveModel):
     def __init__(self, dmm, fe_type):
-        # print('model', fe_type, dmm)
         super().__init__(dmm, fe_type, fe_type.primative)
 
 
@@ -154,6 +162,17 @@ class CSimpleAttributeTemplate(nb.typing.templates.AttributeTemplate):
 def get_value_csimple(context, builder, typ, val):
     return val
 
+
+@nb.extending.lower_cast(CSimpleType, nb.types.Number)
+def cast_sim_to(context, builder, fromty, toty, val):
+    return val
+
+
+@nb.extending.lower_cast(nb.types.Number, CSimpleType)
+def cast_sim_from(context, builder, fromty, toty, val):
+    return val
+
+
 """
 CPointers
 """
@@ -164,11 +183,19 @@ class CPointerType(nb.types.Type):
         super().__init__(name="CtypesPtr({})".format(base.ctypes_type.__name__))
         self.base = base
         self.ctypes_type = POINTER(base.ctypes_type)
-        self.numba_type = nb.types.CPointer(base)
+        self.numba_type = nb.types.CPointer(base.numba_type)
         self.primative = ir.PointerType(base.primative)
 
     def cast_python_value(self, value):
         return self.ctypes_type(value)
+
+    def can_convert_to(self, typingctx, other):
+        if other is self.numba_type:
+            return nb.typeconv.Conversion.exact
+
+    def can_convert_from(self, typingctx, other):
+        if other is self.numba_type:
+            return nb.typeconv.Conversion.exact
 
 
 @nb.extending.register_model(CPointerType)
@@ -194,12 +221,13 @@ def register_pointer_type(ptrTyp):
             return typ
         return typer
 
-    @nb.extending.lower_builtin(ptrTyp, typ.numba_type.key)
+    @nb.extending.lower_builtin(ptrTyp, nb.types.Any)
     def impl_cpointer(context, builder, sig, args):
         typ = sig.return_type
         value = args[0]
-        val = nb.cgutils.alloca_once_value(builder, value)
-        return val
+        ptr = builder.alloca(typ.base.primative)
+        builder.store(value, ptr)
+        return ptr
 
     @nb.extending.lower_builtin(ptrTyp)
     def impl_cpointer(context, builder, sig, args):
@@ -231,7 +259,7 @@ def unbox_cpointer(typ, obj, c):
     with c.builder.if_else(truth_val, True) as (then, otherwise):
         with then:
             contents_obj = c.pyapi.object_getattr_string(obj, "contents")
-            contents = c.pyapi.to_native_value(typ.numba_type.key, contents_obj).value
+            contents = c.pyapi.to_native_value(typ.base, contents_obj).value
             val = nb.cgutils.alloca_once_value(c.builder, contents)
             is_error = nb.cgutils.is_not_null(c.builder, c.pyapi.err_occurred())
             c.pyapi.decref(contents_obj)
@@ -258,7 +286,7 @@ def box_cpointer(typ, val, c):
     with c.builder.if_else(is_not_null, True) as (then, otherwise):
         with then:
             ptr = c.builder.load(val)
-            inner = c.pyapi.from_native_value(typ.numba_type.key, ptr)
+            inner = c.pyapi.from_native_value(typ.base, ptr)
             res = c.pyapi.call_function_objargs(class_obj, (inner,))
             c.builder.store(res, retptr)
             c.pyapi.decref(inner)
@@ -279,8 +307,19 @@ class CPointerAttributeTemplate(nb.typing.templates.AttributeTemplate):
             return typ.numba_type.key
 
 
+@nb.extending.lower_getattr(CPointerType, 'contents')
+def get_contents_cpointer(context, builder, typ, val):
+    return builder.load(val)
+
+
+@nb.extending.lower_setattr(CPointerType, 'contents')
+def get_contents_cpointer(context, builder, sig, args):
+    ptr, val = args
+    return builder.store(val, ptr)
+
+
 @nb.extending.infer
-class CPointerMethodTemplate(nb.typing.templates.FunctionTemplate):
+class CPointerGetItemTemplate(nb.typing.templates.FunctionTemplate):
     key = "getitem"
 
     def apply(self, args, kws):
@@ -292,16 +331,39 @@ class CPointerMethodTemplate(nb.typing.templates.FunctionTemplate):
             return nb.typing.signature(retype, typ, index)
 
 
-@nb.extending.lower_getattr(CPointerType, 'contents')
-def get_contents_cpointer(context, builder, typ, val):
-    return builder.load(val)
-
-
 @nb.extending.lower_builtin('getitem', CPointerType, nb.types.Integer)
 def get_item_cpointer(context, builder, sig, args):
     val, index = args
     ptr = nb.cgutils.pointer_add(builder, val, index)
     return builder.load(ptr)
+
+
+@nb.extending.infer
+class CPointerSetItemTemplate(nb.typing.templates.FunctionTemplate):
+    key = "setitem"
+
+    def apply(self, args, kws):
+        typ, index, val = args
+        if isinstance(typ, CPointerType) and isinstance(index, nb.types.Integer):
+            return nb.typing.signature(nb.void, typ, index, val)
+
+
+@nb.extending.lower_builtin('setitem', CPointerType, nb.types.Integer, nb.types.Any)
+def set_item_cpointer(context, builder, sig, args):
+    ptr, index, val = args
+    item_ptr = nb.cgutils.pointer_add(builder, ptr, index)
+    return builder.store(val, item_ptr)
+
+
+@nb.extending.lower_cast(CPointerType, nb.types.CPointer)
+def cast_ptr_to(context, builder, fromty, toty, val):
+    return val
+
+
+@nb.extending.lower_cast(nb.types.CPointer, CPointerType)
+def cast_ptr_from(context, builder, fromty, toty, val):
+    return val
+
 
 """
 Ctypes Structure
@@ -310,6 +372,7 @@ Ctypes Structure
 
 class CStructType(nb.types.Type):
     def __init__(self, struct):
+        self.numba_type = self
         self.ctypes_type = struct
         self.spec = OrderedDict([(field, ctypes_typed_cache[ctyp]) for field, ctyp in struct._fields_])
         self.primative = ir.LiteralStructType([self.spec[k].primative for k in self.spec.keys()])
@@ -432,6 +495,7 @@ Ctypes Array
 class CArrayType(nb.types.Type):
     def __init__(self, base, count):
         self.base = base
+        self.numba_type = self
         self.ctypes_type = base.ctypes_type * count
         self.length = count
         self.primative = ir.ArrayType(base.primative, count)
@@ -612,7 +676,7 @@ def nb_pointer(context, builder, sig, args):
 Function Ptr Code
 """
 
-
+'''
 @nb.extending.typeof_impl.register(ctypes._CFuncPtr)
 def test(cfnptr, c):
     if cfnptr.argtypes is None:
@@ -632,16 +696,11 @@ def test(cfnptr, c):
         res = nb.types.void
     sig = nb.typing.signature(res, *args)
     return nb.types.ExternalFunctionPointer(sig, cconv=None, get_pointer=lambda f: cast(f, c_void_p).value)
+'''
 
 """
 Test Code
 """
-
-
-@nb.extending.lower_cast(nb.types.Any, nb.types.Any)
-def cast_sim(context, builder, fromty, toty, val):
-    print('CAST', fromty, toty, val)
-    return val
 
 
 if __name__ == "__main__":
@@ -659,10 +718,10 @@ if __name__ == "__main__":
 
     malloc = libc.malloc
     malloc.argtypes = [c_int64]
-    malloc.restype = c_void_p
+    malloc.restype = POINTER(c_int)
 
     free = libc.free
-    free.argtypes = [c_void_p]
+    free.argtypes = [POINTER(c_int)]
     free.restype = None
 
     c4 = c_int64 * 4
@@ -670,7 +729,12 @@ if __name__ == "__main__":
     @nb.jit(nopython=True)
     def test(x2):
         p = c_int64(16)
-        t = POINTER(c_int64)()
+        v = malloc(p)
+        v[0] = 6
+        print("ptrs", p, v[0])
+        free(v)
+        t = POINTER(c_int64)(p)
+        t.contents = p
         print(t, t[0], x2)
         return t
         """
