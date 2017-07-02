@@ -106,7 +106,8 @@ def hyper(**settings):
         delta1 REAL,
         delta2 REAL,
         nonlin REAL,
-        chromat REAL
+        chromat REAL,
+        weights TEXT
         )""")
 
     c.execute(f"""SELECT {", ".join(f"glass{i}" for i in range(1, count+1))} 
@@ -115,7 +116,7 @@ def hyper(**settings):
     t1 = time.time()
     items = glass_paired(gcat, c.fetchall(), w)
     itemLock, outputLock = Lock(), Lock()
-    insert_stmt = f"INSERT INTO {output_table_name} VALUES ({', '.join(repeat('?', 2 * count + 11))})"
+    insert_stmt = f"INSERT INTO {output_table_name} VALUES ({', '.join(repeat('?', 2 * count + 12))})"
     amounts = []
 
     def process(tid):
@@ -133,7 +134,7 @@ def hyper(**settings):
                 if data is not None:
                     count += 1
                     with outputLock:
-                        c.execute(insert_stmt, (*glass, *data[0], *data[1:]))
+                        c.execute(insert_stmt, (*glass, *data[0], *data[1:], str(new_weight)))
                         if tid == 0 and count % 10000 == 0:
                             conn.commit()
                             print("Saved")
