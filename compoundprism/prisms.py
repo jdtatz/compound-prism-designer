@@ -161,7 +161,7 @@ def minimizer(model):
     return sim[0], fsim[0]
 
 
-def prism(model):
+def optimize(model):
     angles, merr = minimizer(model)
     delta_spectrum, thetas = snells(model, angles)
     if np.any(np.isnan(thetas)):
@@ -193,7 +193,10 @@ class CompoundPrism:
         Merit = MeritFunctionRegistry.get(merit_name)
         self.meritcls = Merit(settings)
         merit = jit()(self.meritcls.merit)
-        self.default_weights = {**base_weights, **self.meritcls.weights}
+        if hasattr(self.meritcls, 'weights'):
+            self.default_weights = {**base_weights, **self.meritcls.weights}
+        else:
+            self.default_weights = base_weights
         self.MeritWeights = namedtuple('MeritWeights', self.default_weights.keys())
         MeritWeightType = nb.types.NamedUniTuple(nb.float64, len(self.default_weights), self.MeritWeights)
         self.spec = OrderedDict(
@@ -214,10 +217,11 @@ class CompoundPrism:
             n=nb.types.Array(nb.float64, 2, 'C'),
             glass=nb.int64
         )
-        self.spec.update(self.meritcls.model_params)
+        if hasattr(self.meritcls, 'model_params'):
+            self.spec.update(self.meritcls.model_params)
         self.Config = namedtuple('Config', self.spec.keys())
         ConfigType = nb.types.NamedTuple(self.spec.values(), self.Config)
-        self.prism = jit((ConfigType,))(prism)
+        self.optimize = jit((ConfigType,))(optimize)
 
     def configure(self, glass_indices, deltaC_target, deltaT_target, weights,
                   sampling_domain, theta0, initial_angles, angle_limit, w):
@@ -236,13 +240,19 @@ class CompoundPrism:
         weights = self.MeritWeights(**{k: float(v) for k, v in {**self.default_weights, **weights}.items()})
         local = locals()
         configuration = {k: local.get(k) for k in self.spec.keys()}
-        return self.Config(**self.meritcls.configure(configuration))
+        if hasattr(self.meritcls, 'configure'):
+            return self.Config(**self.meritcls.configure(configuration))
+        else:
+            return self.Config(**configuration)
 
     def configure_thread(self, model, tid):
-        return self.meritcls.configure_thread_model(model, tid)
+        if hasattr(self.meritcls, 'configure_thread_model'):
+            return self.meritcls.configure_thread_model(model, tid)
+        else:
+            return model
 
     def __call__(self, model, n, glass):
         arr = c_char_p*len(model.glass_indices)
         ptrs = arr(*(c_char_p(glass[i].encode('ASCII')) for i in model.glass_indices))
         g = cast(ptrs, c_void_p)
-        return self.prism(model._replace(n=np.asarray(n, np.float64, 'C'), glass=g.value))
+        return self.optimize(model._replace(n=np.asarray(n, np.float64, 'C'), glass=g.value))
