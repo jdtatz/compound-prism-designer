@@ -214,8 +214,7 @@ class CompoundPrism:
             initial_angles=nb.types.Array(nb.float64, 1, 'C'),
             angle_limit=nb.float64,
             w=nb.types.Array(nb.float64, 1, 'C'),
-            n=nb.types.Array(nb.float64, 2, 'C'),
-            glass=nb.int64
+            n=nb.types.Array(nb.float64, 2, 'C')
         )
         if hasattr(self.meritcls, 'model_params'):
             self.spec.update(self.meritcls.model_params)
@@ -251,8 +250,5 @@ class CompoundPrism:
         else:
             return model
 
-    def __call__(self, model, n, glass):
-        arr = c_char_p*len(model.glass_indices)
-        ptrs = arr(*(c_char_p(glass[i].encode('ASCII')) for i in model.glass_indices))
-        g = cast(ptrs, c_void_p)
-        return self.optimize(model._replace(n=np.asarray(n, np.float64, 'C'), glass=g.value))
+    def __call__(self, model, n):
+        return self.optimize(model._replace(n=np.ascontiguousarray(n, np.float64)))

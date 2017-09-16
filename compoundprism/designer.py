@@ -1,6 +1,4 @@
-import json
 import sqlite3
-import sys
 import time
 from itertools import repeat
 from math import pi
@@ -107,7 +105,7 @@ def design(**settings):
                     glass, n = next(items)
             except StopIteration:
                 break
-            data = cmpnd(thread_model, n, glass)
+            data = cmpnd(thread_model, n)
             if data is not None:
                 count += 1
                 with outputLock:
@@ -136,9 +134,3 @@ def design(**settings):
               (table_name, prism_name, merit, deviation_target, dispersion_target, amount > 0, str(settings)))
     conn.commit()
     conn.close()
-
-if __name__ == "__main__":
-    print('Starting Compound Prism Designer')
-    with open(sys.argv[1], 'r') as f:
-        settings = json.load(f)
-    design(**settings)
