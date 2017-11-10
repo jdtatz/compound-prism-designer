@@ -3,8 +3,10 @@
   "glass indices": [0, 1, 0],
   "merit function": "linearity",
   "weights": {
-    "tir": 0.3,
-    "valid": 0.1,
+    "tir": 50,
+    "valid": 5,
+    "crit_angle": 1,
+    "thin": 2.5,
     "deviation": 15,
     "dispersion": 50,
     "NL": 25

@@ -1,11 +1,28 @@
 from functools import partial
 
 import numba as nb
+import numba.extending
 import numpy as np
 
 __all__ = ["jit", "get_poly_coeffs", "nonlinearity", "nonlinearity_error", "beam_compression", "spectral_sampling_ratio"]
 
 jit = partial(nb.jit, nopython=True, nogil=True, cache=False)
+
+"""
+Temporary Numpy overloads for Numba
+"""
+
+
+@nb.extending.overload(np.gradient)
+def np_gradient(arr):
+    if isinstance(arr, nb.types.Array) and arr.ndim == 1:
+        def gradient(f):
+            out = np.empty_like(f)
+            out[1:-1] = (f[2:] - f[:-2])/2.0
+            out[0] = (f[1] - f[0])
+            out[-1] = (f[-1] - f[-2])
+            return out
+        return gradient
 
 
 """
