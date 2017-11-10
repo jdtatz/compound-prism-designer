@@ -1,4 +1,4 @@
-from itertools import permutations, starmap
+from itertools import product, starmap
 import numpy as np
 
 __all__ = ["calc_n", "read_glasscat", "glass_combos", "glass_paired"]
@@ -60,7 +60,7 @@ def read_glasscat(catalog_filename):
 def glass_combos(gcat, count, w):
     transmission = lambda g: (gcat[g]['ld'][0] < w.min() / 1000.0) and (gcat[g]['ld'][1] > w.max() / 1000.0)
     glasses = list(map(lambda g: (g, calc_n(gcat[g], w)), filter(transmission, gcat)))
-    return starmap(zip, permutations(glasses, count))
+    return starmap(zip, product(glasses, repeat=count))
 
 
 def glass_paired(gcat, combos, w):

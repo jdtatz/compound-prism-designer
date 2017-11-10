@@ -9,7 +9,8 @@ from uuid import uuid4
 import numpy as np
 
 from compoundprism.glasscat import read_glasscat, glass_combos
-from compoundprism.prisms import CompoundPrism
+from compoundprism.merit import registry
+from compoundprism.prisms import create
 
 
 def design(**settings):
@@ -58,8 +59,8 @@ def design(**settings):
     print('# glasses =', nglass)
     print(f'targets: deltaC = {deviation_target} deg, deltaT = {dispersion_target} deg')
     print('thread count:', thread_count, '\n')
-    cmpnd = CompoundPrism(merit, settings)
-    model = cmpnd.configure(indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_lim, w)
+    meritFunc = registry[merit](settings)
+    cmpnd = create(meritFunc, indices, deltaC_target, deltaT_target, weights, sampling_domain, theta0, iangles, angle_lim, w)
 
     conn = sqlite3.connect(database_file, check_same_thread=False)
     c = conn.cursor()
@@ -98,14 +99,13 @@ def design(**settings):
 
     def process(tid):
         count = 0
-        thread_model = cmpnd.configure_thread(model, tid)
         while True:
             try:
                 with itemLock:
                     glass, n = next(items)
             except StopIteration:
                 break
-            data = cmpnd(thread_model, n)
+            data = cmpnd(np.ascontiguousarray(n, np.float64))
             if data is not None:
                 count += 1
                 with outputLock:
