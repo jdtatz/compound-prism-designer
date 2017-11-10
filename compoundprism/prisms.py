@@ -30,28 +30,42 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
     @jit((nb.f8[:, :], nb.f8[:]))
     def snells(n, angles):
         thetas = np.empty((2 * prism_count + 3, nwaves))
-        alphas = angles[glass_indices]
-        beta = np.sum(alphas[:prism_count // 2]) + alphas[prism_count // 2] / 2
-        gamma = np.sum(alphas[prism_count // 2 + 1:]) + alphas[prism_count // 2] / 2
-        ns = n[glass_indices]
-
+        path = np.empty((prism_count + 1, nwaves))
+        beta = np.sum(angles[glass_indices[:prism_count // 2]]) + angles[glass_indices[prism_count // 2]] / 2
+        gamma = np.sum(angles[glass_indices[prism_count // 2 + 1:]]) + angles[glass_indices[prism_count // 2]] / 2
+        
+        path[0] = 1
         thetas[0] = theta0 + beta  # theta 1
-        np.arcsin((1.0 / ns[0]) * np.sin(theta0 + beta), thetas[1])  # theta 1 prime
+        np.arcsin((1.0 / n[glass_indices[0]]) * np.sin(theta0 + beta), thetas[1])  # theta 1 prime
         for i in range(1, prism_count + 1):
-            thetas[2 * i] = thetas[2 * i - 1] - alphas[i - 1]  # theta i
-            if i < prism_count:
-                np.arcsin(ns[i - 1] / ns[i] * np.sin(thetas[2 * i]), thetas[2 * i + 1])  # theta i prime
-            else:
-                np.arcsin(ns[i - 1] * np.sin(thetas[2 * i]), thetas[2 * i + 1])  # theta (n-1) prime
+            path[i] = path[i-1] * np.sin(np.abs(thetas[2 * i - 1])) / np.sin(np.pi/2 - np.abs(angles[glass_indices[i-1]] + thetas[2 * i - 1]))
+            thetas[2 * i] = thetas[2 * i - 1] - angles[glass_indices[i - 1]]  # theta i
+            ndiv = (n[glass_indices[i - 1]] / n[glass_indices[i]]) if i < prism_count else n[glass_indices[i - 1]]
+            np.arcsin(ndiv * np.sin(thetas[2 * i]), thetas[2 * i + 1])  # theta i prime
         thetas[-1] = thetas[-2] + gamma  # theta n
 
         delta_spectrum = theta0 - thetas[-1]
 
-        return delta_spectrum, thetas
+        return delta_spectrum, thetas, path
+        
+    @jit((nb.f8[:, :], nb.f8[:]))
+    def snells2(n, angles):
+        path = np.empty((prism_count + 1, nwaves))
+        beta = np.sum(angles[glass_indices[:prism_count // 2]]) + angles[glass_indices[prism_count // 2]] / 2
+        gamma = np.sum(angles[glass_indices[prism_count // 2 + 1:]]) + angles[glass_indices[prism_count // 2]] / 2
+        
+        path[0] = 1
+        last = np.arcsin((1.0 / n[glass_indices[0]]) * np.sin(theta0 + beta))  # theta 1 prime
+        for i in range(1, prism_count + 1):
+            path[i] = path[i-1] * np.sin(np.abs(last)) / np.sin(np.pi/2 - np.abs(angles[glass_indices[i-1]] + last))
+            ndiv = (n[glass_indices[i - 1]] / n[glass_indices[i]]) if i < prism_count else n[glass_indices[i - 1]]
+            last = np.arcsin(ndiv * np.sin(last - angles[glass_indices[i - 1]]))  # theta i prime
+        delta_spectrum = theta0 - (last + gamma)
+        return delta_spectrum, path
 
     @jit(nb.f8(nb.f8[:, :], nb.f8[:]))
     def merit_error(n, angles):
-        delta_spectrum, thetas = snells(n, angles)
+        delta_spectrum, thetas, path = snells(n, angles)
         # If TIR occurs in the design (producing NaNs in the spectrum), then give a
         # hard error: return a large error which has nothing to do with the (invalid)
         # performance data.
@@ -59,20 +73,22 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
             return weights.tir * np.sum(np.isnan(delta_spectrum))
         # enforces valid solution
         alphas = angles[glass_indices]
-        refracted = thetas[refracted_indices]
+        refracted = thetas[1:prism_count * 2 + 1:2]
         refs = np.abs(alphas) + refracted.T * np.sign(alphas)
         merit_err = weights.valid * np.sum(np.greater(refs, np.pi / 2)) / (prism_count * nwaves)
+        
+        merit_err = weights.valid * np.sum(np.logical_or(path < 0, path > 20))
         # critical angle prevention
-        incident = thetas[incident_indices]
-        merit_err += weights.crit_angle * np.sum(np.greater(np.abs(incident), angle_limit)) / (glass_count * nwaves)
+        incident = thetas[:prism_count * 2 + 1:2]
+        merit_err += weights.crit_angle * np.sum(np.greater(np.abs(incident), angle_limit)) / (prism_count * nwaves)
         # Punish if the prism gets too small to be usable
         too_thin = np.abs(angles) - 1.0
         too_thin[np.where(np.abs(angles) > np.pi / 180.0)[0]] = 0.0
         merit_err += weights.thin * np.sum(too_thin ** 2) / glass_count
         # deltaC and deltaT errors
         merit_err += weights.deviation * (delta_spectrum[nwaves // 2] - deltaC_target) ** 2
-        # merit_err += weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
-        merit_err += weights.dispersion * (1 + np.tanh(-0.5*((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target)))
+        merit_err += weights.dispersion * ((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target) ** 2
+        # merit_err += weights.dispersion * (1 + np.tanh(-0.5*((delta_spectrum.max() - delta_spectrum.min()) - deltaT_target)))
 
         return merit_err + merit(n, angles, delta_spectrum, thetas)
 
@@ -178,7 +194,7 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
     @jit((nb.f8[:, :],))
     def optimize(n):
         angles, merr = minimizer(n)
-        delta_spectrum, thetas = snells(n, angles)
+        delta_spectrum, thetas, p = snells(n, angles)
         if np.any(np.isnan(thetas)):
             return
 
@@ -188,8 +204,8 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
         deltaT = (delta_spectrum.max() - delta_spectrum.min()) * 180.0 / np.pi
         alphas = angles * 180.0 / np.pi
         NL = 10000.0 * nonlinearity(delta_spectrum)
-        SSR = 0 # spectral_sampling_ratio(w, delta_spectrum, sampling_domain_is_wavenumber)
-        K = beam_compression(thetas, nwaves)
+        SSR = np.min(p) # spectral_sampling_ratio(w, delta_spectrum, sampling_domain_is_wavenumber)
+        K = np.max(p) # beam_compression(thetas, nwaves)
         _, remainder = get_poly_coeffs(delta_spectrum, 1)
         nonlin = np.sqrt(remainder) * dw * 180.0 / np.pi
         chromat = 100.0 * abs(delta_spectrum.max() - delta_spectrum.min()) * 180.0 / np.pi

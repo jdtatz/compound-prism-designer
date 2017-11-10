@@ -44,7 +44,17 @@ def get_poly_coeffs(g, n):
 
 
 @jit
-def nonlinearity(x):
+def nonlinearity(delta):
+    g0 = (((delta[2] - delta[0])/2) - ((delta[1] - delta[0]))) ** 2
+    gn1 = (((delta[-1] - delta[-2])) - ((delta[-1] - delta[-3])/2)) ** 2
+    g1 = (((delta[3] - delta[1]) / 2) - ((delta[1] - delta[0]))) ** 2 / 4
+    gn2 = (((delta[-1] - delta[-2])) - ((delta[-2] - delta[-4]) / 2)) ** 2 / 4
+    err = g0 + g1 + gn2 + gn1 + np.sum(np.square((delta[4:] - delta[2:-2]) - (delta[2:-2] - delta[:-4]))) / 16
+    return np.sqrt(err)
+
+
+@jit
+def nonlin(x):
     """Calculate the nonlinearity of the given delta spectrum"""
     g = np.gradient(np.gradient(x))
     return np.sqrt(np.sum(g ** 2))
