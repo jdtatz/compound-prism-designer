@@ -12,8 +12,9 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
            sampling_domain, theta0, initial_angles, angle_limit, w):
     nwaves = w.size
     dw = np.abs(np.mean(np.gradient(w)))
-    start = 1
-    size = 10
+    aperture = 4.8
+    start = 5
+    height = 25
     sampling_domain_is_wavenumber = sampling_domain == 'wavenumber'
     glass_indices = np.asarray(glass_indices, np.int64)
     prism_count, glass_count = len(glass_indices), glass_indices.max() + 1
@@ -55,9 +56,11 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
         midV2 = angles[glass_indices[mid]] / 2
         beta = np.sum(angles[glass_indices[:mid]]) + midV2
         gamma = np.sum(angles[glass_indices[mid + 1:]]) + midV2
-        sides = size / np.cos(midV2 + np.array([np.sum(angles[glass_indices[i:mid]]) for i in range(mid+1)] + [np.sum(angles[glass_indices[mid+1:i+1]]) for i in range(mid, prism_count)]))
+        sides = height / np.cos(midV2 + np.array([np.sum(angles[glass_indices[i:mid]]) for i in range(mid+1)] + [np.sum(angles[glass_indices[mid+1:i+1]]) for i in range(mid, prism_count)]))
 
-        path = np.full((nwaves,), start / np.cos(beta), np.float64)
+        path = np.empty((2, nwaves), np.float64)
+        path[0, :] = (start - aperture) / np.cos(beta)
+        path[1, :] = (start + aperture) / np.cos(beta)
         refracted = np.arcsin((1.0 / n[glass_indices[0]]) * np.sin(theta0 + beta))
         for i in range(1, prism_count + 1):
             alpha = angles[glass_indices[i - 1]]
@@ -83,7 +86,7 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
         too_thin = np.abs(angles) - 1.0
         too_thin_err = np.sum(np.array([t**2 for t in too_thin if t+1.0 <= np.pi / 180]))
         merit_err = weights.crit_angle * crit_count / (prism_count * nwaves) \
-                    + weights.valid * invalid_count / (prism_count * nwaves) \
+                    + weights.valid * invalid_count / prism_count \
                     + weights.thin * too_thin_err / glass_count \
                     + weights.deviation * (delta[nwaves // 2] - deltaC_target) ** 2 \
                     + weights.dispersion * ((delta.max() - delta.min()) - deltaT_target) ** 2 \
