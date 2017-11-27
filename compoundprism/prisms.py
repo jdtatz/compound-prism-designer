@@ -12,15 +12,14 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
            sampling_domain, theta0, initial_angles, angle_limit, w):
     nwaves = w.size
     dw = np.abs(np.mean(np.gradient(w)))
+    start = 1
+    size = 10
     sampling_domain_is_wavenumber = sampling_domain == 'wavenumber'
     glass_indices = np.asarray(glass_indices, np.int64)
     prism_count, glass_count = len(glass_indices), glass_indices.max() + 1
-    incident_indices = np.arange(0, glass_count * 2 + 1, 2, dtype=np.int64)
-    refracted_indices = np.arange(1, prism_count * 2 + 1, 2, dtype=np.int64)
     if initial_angles is None:
-        initial_angles = np.ones((glass_count,)) * deltaT_target
+        initial_angles = np.full((glass_count,), np.pi / 2)
         initial_angles[1::2] *= -1
-        initial_angles += np.ones((glass_count,)) * deltaC_target / (2 ** glass_count)
     else:
         initial_angles = np.asarray(initial_angles, np.float64) * np.pi / 180
     base_weights = OrderedDict(tir=0.1, valid=1.0, crit_angle=1.0, thin=0.25, deviation=1.0, dispersion=1.0)
@@ -49,22 +48,48 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
         return delta_spectrum, thetas, path
         
     @jit((nb.f8[:, :], nb.f8[:]))
-    def snells2(n, angles):
-        path = np.empty((prism_count + 1, nwaves))
-        beta = np.sum(angles[glass_indices[:prism_count // 2]]) + angles[glass_indices[prism_count // 2]] / 2
-        gamma = np.sum(angles[glass_indices[prism_count // 2 + 1:]]) + angles[glass_indices[prism_count // 2]] / 2
-        
-        path[0] = 1
-        last = np.arcsin((1.0 / n[glass_indices[0]]) * np.sin(theta0 + beta))  # theta 1 prime
+    def merit_error(n, angles):
+        crit_count = 0
+        invalid_count = 0
+        mid = prism_count // 2
+        midV2 = angles[glass_indices[mid]] / 2
+        beta = np.sum(angles[glass_indices[:mid]]) + midV2
+        gamma = np.sum(angles[glass_indices[mid + 1:]]) + midV2
+        sides = size / np.cos(midV2 + np.array([np.sum(angles[glass_indices[i:mid]]) for i in range(mid+1)] + [np.sum(angles[glass_indices[mid+1:i+1]]) for i in range(mid, prism_count)]))
+
+        path = np.full((nwaves,), start / np.cos(beta), np.float64)
+        refracted = np.arcsin((1.0 / n[glass_indices[0]]) * np.sin(theta0 + beta))
         for i in range(1, prism_count + 1):
-            path[i] = path[i-1] * np.sin(np.abs(last)) / np.sin(np.pi/2 - np.abs(angles[glass_indices[i-1]] + last))
-            ndiv = (n[glass_indices[i - 1]] / n[glass_indices[i]]) if i < prism_count else n[glass_indices[i - 1]]
-            last = np.arcsin(ndiv * np.sin(last - angles[glass_indices[i - 1]]))  # theta i prime
-        delta_spectrum = theta0 - (last + gamma)
-        return delta_spectrum, path
+            alpha = angles[glass_indices[i - 1]]
+            incident = refracted - alpha
+            crit_count += np.sum(np.abs(incident) > angle_limit)
+            # TODO: Triple-Check this
+            los = np.sin(np.pi/2 - refracted*np.sign(alpha))/np.sin(np.pi/2 - incident*np.sign(alpha)) - 1
+            if alpha > 0:
+                path = path*los
+            else:
+                path = sides[i] - (sides[i-1] - path)*los
+            invalid_count += np.sum(np.logical_or(path < 0, path > sides[i]))
+            if i < prism_count:
+                refracted = np.arcsin((n[glass_indices[i - 1]] / n[glass_indices[i]]) * np.sin(incident))
+            else:
+                refracted = np.arcsin(n[glass_indices[i - 1]] * np.sin(incident))
+        delta = theta0 - (refracted + gamma)
+
+        if np.any(np.isnan(delta)):
+            return weights.tir * np.sum(np.isnan(delta))
+        too_thin = np.abs(angles) - 1.0
+        too_thin_err = np.sum(np.array([t**2 for t in too_thin if t+1.0 <= np.pi / 180]))
+        merit_err = weights.crit_angle * crit_count / (prism_count * nwaves) \
+                    + weights.valid * invalid_count / (prism_count * nwaves) \
+                    + weights.thin * too_thin_err / glass_count \
+                    + weights.deviation * (delta[nwaves // 2] - deltaC_target) ** 2 \
+                    + weights.dispersion * ((delta.max() - delta.min()) - deltaT_target) ** 2 \
+                    + 25 * nonlinearity(delta)
+        return merit_err
 
     @jit(nb.f8(nb.f8[:, :], nb.f8[:]))
-    def merit_error(n, angles):
+    def merit_error2(n, angles):
         delta_spectrum, thetas, path = snells(n, angles)
         # If TIR occurs in the design (producing NaNs in the spectrum), then give a
         # hard error: return a large error which has nothing to do with the (invalid)
