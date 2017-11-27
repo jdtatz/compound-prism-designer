@@ -64,11 +64,13 @@ def create(merit, glass_indices, deltaC_target, deltaT_target, weights,
             incident = refracted - alpha
             crit_count += np.sum(np.abs(incident) > angle_limit)
             # TODO: Triple-Check this
-            los = np.sin(np.pi/2 - refracted*np.sign(alpha))/np.sin(np.pi/2 - incident*np.sign(alpha)) - 1
+            t1 = np.pi/2 - refracted*np.sign(alpha)
+            t2 = np.pi - np.abs(alpha) - t1
+            # los = np.sin(np.pi/2 - refracted*np.sign(alpha))/np.sin(np.pi/2 - incident*np.sign(alpha))
             if alpha > 0:
-                path = path*los
+                path = path*np.sin(t1)/np.sin(t2)
             else:
-                path = sides[i] - (sides[i-1] - path)*los
+                path = sides[i] - (sides[i-1] - path)*np.sin(t1)/np.sin(t2)
             invalid_count += np.sum(np.logical_or(path < 0, path > sides[i]))
             if i < prism_count:
                 refracted = np.arcsin((n[glass_indices[i - 1]] / n[glass_indices[i]]) * np.sin(incident))
