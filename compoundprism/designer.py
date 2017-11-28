@@ -127,6 +127,15 @@ def design(**settings):
         print('Total glass combinations considered =', amount)
         print('Elapsed time for solution search in the full catalog =', dt, 'sec')
         print('Elapsed time per glass combination =', 1000 * dt / amount, 'ms')
+        c.execute(f"""SELECT
+                          {", ".join(f"glass{i} TEXT" for i in range(1, count+1))}, 
+                          {", ".join(f"alpha{i} REAL" for i in range(1, count+1))},
+                          min(meritError),
+                          deviation,
+                          dispersion,
+                          NL
+                      from {table_name}""")
+        print("Best:", c.fetchone())
     else:
         print('Failed to complete')
         print('Elapsed time =', dt)
