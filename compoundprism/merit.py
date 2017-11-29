@@ -15,7 +15,7 @@ def register(name):
 
 @register('linearity')
 def linearity(settings):
-    NL = settings['weights']['NL']
+    NL = settings['weights']['linearity']
     @jit
     def merit(n, angles, delta_spectrum, thetas):
         NL_err = NL * nonlinearity(delta_spectrum)
@@ -25,7 +25,7 @@ def linearity(settings):
 
 @register('beam compression')
 def beam_compression(settings):
-    NL = settings['weights']['NL']
+    NL = settings['weights']['linearity']
     weight_K = settings['weights']['K']
     nwaves = settings['nwaves']
     @jit

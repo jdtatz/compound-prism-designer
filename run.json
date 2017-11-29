@@ -9,7 +9,7 @@
     "thin": 2.5,
     "deviation": 15,
     "dispersion": 50,
-    "NL": 25
+    "linearity": 100
   },
   "sampling domain": "wavelength",
   "catalog": "Glasscat/schott_positive_glass_trimmed_oct2015.agf",
