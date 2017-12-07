@@ -4,17 +4,22 @@ os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 import numpy as np
 import numba as nb
+import numba.typing
+import numba.typing.templates
 import numba.cuda
 import numba.cuda.cudaimpl
+import numba.cuda.cudadecl
 import numba.cuda.stubs
+from llvmlite.llvmpy.core import Type
 import math
+import operator
 from collections import namedtuple, OrderedDict
 
-count = 2
+count = 4
 count_p1 = count+1
-start = 5
-radius = 4.8
-height = 25
+start = 6
+radius = 5
+height = 20
 theta0 = 0
 angle_limit = 65.0 * math.pi / 180.0
 nwaves = 100
@@ -22,11 +27,123 @@ deltaC_target = 0
 deltaT_target = 45 * math.pi / 180
 inital_angles = np.full((count,), math.pi/2, np.float32)
 inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50.0, valid=5.0, crit_angle=1.0, thin=2.5, deviation=5.0, dispersion=20.0,
-                           linearity=100.0)
+base_weights = OrderedDict(tir=50.0, valid=5.0, crit_angle=1.0, thin=2.5, deviation=5.0, dispersion=30.0,
+                           linearity=1000.0)
 MeritWeights = namedtuple('MeritWeights', base_weights.keys())
 weights = MeritWeights(**base_weights)
 
+
+class shfl(nb.cuda.stubs.Stub):
+    _description_ = '<shfl>'
+    
+    class idx(nb.cuda.stubs.Stub):
+        """
+        shfl from tid
+        """
+    
+    class up(nb.cuda.stubs.Stub):
+        """
+        shfl from above
+        """
+        
+    class down(nb.cuda.stubs.Stub):
+        """
+        shfl from below
+        """
+        
+    class xor(nb.cuda.stubs.Stub):
+        """
+        shfl from xor
+        """
+
+class shfl_idx(nb.cuda.stubs.Stub):
+    """
+    shfl from tid
+    """
+    _description_ = '<shfl>'
+
+@numba.cuda.cudaimpl.lower(shfl_idx, nb.i4, nb.i4, nb.i4)
+def lower_shfl_idx(context, builder, sig, args):
+    print('lower', sig, args)
+    fname = 'llvm.nvvm.shfl.sync.idx.i32'
+    lmod = builder.module
+    fnty = Type.function(Type.int(32), (Type.int(32), Type.int(32), Type.int(32)))
+    func = lmod.get_or_insert_function(fnty, name=fname)
+    ret =  builder.call(func, args)
+    print(lmod)
+    return ret
+
+
+@nb.cuda.cudadecl.intrinsic
+class Cuda_shfl_idx(nb.typing.templates.AbstractTemplate):
+    key = shfl_idx
+    
+    def generic(self, args, kws):
+        print('resolve generic', args, kws)
+        return nb.i4(nb.i4, nb.i4, nb.i4)
+
+nb.cuda.cudadecl.intrinsic_global(shfl_idx, nb.types.Function(Cuda_shfl_idx))
+
+
+class syncthreads_or(nb.cuda.stubs.Stub):
+    _description_ = '<syncthreads_or()>'
+@numba.cuda.cudaimpl.lower(syncthreads_or, nb.i4)
+def lower_syncthreads_or(context, builder, sig, args):
+    fname = 'llvm.nvvm.barrier0.or'
+    lmod = builder.module
+    fnty = Type.function(Type.int(32), (Type.int(32),))
+    func = lmod.get_or_insert_function(fnty, name=fname)
+    return builder.call(func, args)
+@nb.cuda.cudadecl.intrinsic
+class Cuda_syncthreads_or(nb.typing.templates.AbstractTemplate):
+    key = syncthreads_or
+    def generic(self, args, kws):
+        return nb.i4(nb.i4,)
+nb.cuda.cudadecl.intrinsic_global(syncthreads_or, nb.types.Function(Cuda_syncthreads_or))
+
+
+class syncthreads_and(nb.cuda.stubs.Stub):
+    _description_ = '<syncthreads_and()>'
+@numba.cuda.cudaimpl.lower(syncthreads_and, nb.i4)
+def lower_syncthreads_and(context, builder, sig, args):
+    fname = 'llvm.nvvm.barrier0.and'
+    lmod = builder.module
+    fnty = Type.function(Type.int(32), (Type.int(32),))
+    func = lmod.get_or_insert_function(fnty, name=fname)
+    return builder.call(func, args)
+@nb.cuda.cudadecl.intrinsic
+class Cuda_syncthreads_and(nb.typing.templates.AbstractTemplate):
+    key = syncthreads_and
+    def generic(self, args, kws):
+        return nb.i4(nb.i4,)
+nb.cuda.cudadecl.intrinsic_global(syncthreads_and, nb.types.Function(Cuda_syncthreads_and))
+
+
+class syncthreads_popc(nb.cuda.stubs.Stub):
+    _description_ = '<syncthreads_popc()>'
+@numba.cuda.cudaimpl.lower(syncthreads_popc, nb.i4)
+def lower_syncthreads_popc(context, builder, sig, args):
+    fname = 'llvm.nvvm.barrier0.popc'
+    lmod = builder.module
+    fnty = Type.function(Type.int(32), (Type.int(32),))
+    func = lmod.get_or_insert_function(fnty, name=fname)
+    return builder.call(func, args)
+@nb.cuda.cudadecl.intrinsic
+class Cuda_syncthreads_popc(nb.typing.templates.AbstractTemplate):
+    key = syncthreads_popc
+    def generic(self, args, kws):
+        return nb.i4(nb.i4,)
+nb.cuda.cudadecl.intrinsic_global(syncthreads_popc, nb.types.Function(Cuda_syncthreads_popc))
+
+"""
+@nb.cuda.jit((nb.i4[:], ))
+def test(arr):
+    i = nb.cuda.threadIdx.x
+    arr[i] = shfl_idx(syncthreads_popc(1), 0, 32)
+
+testA = np.empty(64, np.int32)
+test[2, 32](testA)
+"""
 
 
 @nb.cuda.jit(device=True)
@@ -63,7 +180,7 @@ def create_fold_func(func):
         return nb.cuda.shfl.idx(value, 0)
 
     @nb.cuda.jit(device=True)
-    def fold(value, sahredArr, foldLen):
+    def fold(value, sharedArr, foldLen):
         tID = nb.cuda.threadIdx.x
         if foldLen <= warpSize and isPow2(foldLen):
             return warpFold(value, foldLen)
@@ -99,6 +216,12 @@ def create_fold_func(func):
               for i in range(1, warpCount):
                 value = func(value, sharedArr[i])
             return value
+    return fold
+
+
+foldSum = create_fold_func(operator.add)
+foldMax = create_fold_func(max)
+foldMin = create_fold_func(min)
 
 
 @nb.cuda.jit(device=True)
@@ -119,10 +242,8 @@ def merit_error(n, angles):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
     sharedBlock = nb.cuda.shared.array(nwaves, nb.f4)
-    cCount = nb.cuda.shared.array(nwaves, nb.i4)
-    vCount = nb.cuda.shared.array(nwaves, nb.i4)
-    crit_count = 0
-    invalid_count = 0
+    crit_violation = False
+    invalidity = False
     mid = count // 2
     beta = angles[mid] / 2
     for i in range(count):
@@ -137,8 +258,7 @@ def merit_error(n, angles):
     for i in range(1, count + 1):
         alpha = angles[i - 1]
         incident = refracted - alpha
-        if abs(incident) > angle_limit:
-            crit_count += 1
+        crit_violation |= abs(incident) > angle_limit
 
         if i <= mid:
             offAngle -= angles[i - 1]
@@ -154,10 +274,7 @@ def merit_error(n, angles):
         else:
             path0 = sideR - (sideL - path0) * los
             path1 = sideR - (sideL - path1) * los
-        if 0 > path0 or path0 > sideR:
-            invalid_count += 1
-        if 0 > path1 or path1 > sideR:
-            invalid_count += 1
+        invalidity |= 0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR
         sideL = sideR
             
         if i < count:
@@ -166,24 +283,16 @@ def merit_error(n, angles):
             refracted = math.asin(n[i - 1, tid] * math.sin(incident))
     delta = theta0 - (refracted + offAngle)
     sharedBlock[tid] = delta
-    cCount[tid] = crit_count
-    vCount[tid] = invalid_count
-    nb.cuda.syncthreads()
-    
-    nan_count = 0
-    crit_count = 0
-    invalid_count = 0
-    minVal, maxVal = sharedBlock[0], sharedBlock[0]
-    for i in range(nwaves):
-        if math.isnan(sharedBlock[i]):
-            nan_count += 1
-        else:
-            minVal = min(minVal, sharedBlock[i])
-            maxVal = max(maxVal, sharedBlock[i])
-        crit_count += cCount[i]
-        invalid_count += vCount[i]
+    nan_count = syncthreads_popc(math.isnan(delta))
     if nan_count > 0:
         return weights.tir * nan_count
+    crit_count = syncthreads_popc(crit_violation)
+    invalid_count = syncthreads_popc(invalidity)
+    
+    minVal, maxVal = sharedBlock[0], sharedBlock[0]
+    for i in range(nwaves):
+        minVal = min(minVal, sharedBlock[i])
+        maxVal = max(maxVal, sharedBlock[i])
 
     too_thin_err = 0
     for a in angles:
@@ -196,7 +305,6 @@ def merit_error(n, angles):
                 + weights.deviation * (sharedBlock[nwaves // 2] - deltaC_target) ** 2 \
                 + weights.dispersion * ((maxVal - minVal) - deltaT_target) ** 2 \
                 + weights.linearity * nonlinearity(sharedBlock)
-    nb.cuda.syncthreads()
     return merit_err
 
 
