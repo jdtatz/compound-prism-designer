@@ -17,18 +17,16 @@ from collections import namedtuple, OrderedDict
 
 count = 4
 count_p1 = count+1
-start = 6
-radius = 5
-height = 20
+start = 3.01
+radius = 3
+height = 25
 theta0 = 0
-angle_limit = 65.0 * math.pi / 180.0
 nwaves = 100
-deltaC_target = 0
+deltaC_target = 0 * math.pi / 180
 deltaT_target = 45 * math.pi / 180
 inital_angles = np.full((count,), math.pi/2, np.float32)
 inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50.0, valid=5.0, crit_angle=1.0, thin=2.5, deviation=5.0, dispersion=30.0,
-                           linearity=1000.0)
+base_weights = OrderedDict(tir=50.0, valid=5.0, thin=2.5, deviation=5.0, dispersion=30.0, linearity=10000.0)
 MeritWeights = namedtuple('MeritWeights', base_weights.keys())
 weights = MeritWeights(**base_weights)
 
@@ -56,34 +54,24 @@ class shfl(nb.cuda.stubs.Stub):
         shfl from xor
         """
 
-class shfl_idx(nb.cuda.stubs.Stub):
-    """
-    shfl from tid
-    """
-    _description_ = '<shfl>'
-
-@numba.cuda.cudaimpl.lower(shfl_idx, nb.i4, nb.i4, nb.i4)
+@numba.cuda.cudaimpl.lower(shfl.idx, nb.i4, nb.i4, nb.i4)
 def lower_shfl_idx(context, builder, sig, args):
-    print('lower', sig, args)
-    fname = 'llvm.nvvm.shfl.sync.idx.i32'
+    fname = 'llvm.nvvm.shfl.idx.i32'
     lmod = builder.module
     fnty = Type.function(Type.int(32), (Type.int(32), Type.int(32), Type.int(32)))
     func = lmod.get_or_insert_function(fnty, name=fname)
-    ret =  builder.call(func, args)
-    print(lmod)
-    return ret
-
-
+    return builder.call(func, args)
 @nb.cuda.cudadecl.intrinsic
 class Cuda_shfl_idx(nb.typing.templates.AbstractTemplate):
-    key = shfl_idx
-    
+    key = shfl.idx
     def generic(self, args, kws):
-        print('resolve generic', args, kws)
         return nb.i4(nb.i4, nb.i4, nb.i4)
-
-nb.cuda.cudadecl.intrinsic_global(shfl_idx, nb.types.Function(Cuda_shfl_idx))
-
+@nb.cuda.cudadecl.intrinsic_attr
+class Cuda_shfls(nb.typing.templates.AttributeTemplate):
+    key = nb.types.Module(shfl)
+    def resolve_idx(self, mod):
+        return nb.types.Function(Cuda_shfl_idx)
+nb.cuda.cudadecl.intrinsic_global(shfl, nb.types.Module(shfl))
 
 class syncthreads_or(nb.cuda.stubs.Stub):
     _description_ = '<syncthreads_or()>'
@@ -135,15 +123,16 @@ class Cuda_syncthreads_popc(nb.typing.templates.AbstractTemplate):
         return nb.i4(nb.i4,)
 nb.cuda.cudadecl.intrinsic_global(syncthreads_popc, nb.types.Function(Cuda_syncthreads_popc))
 
-"""
+
 @nb.cuda.jit((nb.i4[:], ))
 def test(arr):
     i = nb.cuda.threadIdx.x
-    arr[i] = shfl_idx(syncthreads_popc(1), 0, 32)
+    # arr[i] = shfl.idx(syncthreads_popc(1), 0, 32)
+    arr[i] = syncthreads_popc(1)
 
 testA = np.empty(64, np.int32)
 test[2, 32](testA)
-"""
+
 
 
 @nb.cuda.jit(device=True)
@@ -237,28 +226,62 @@ def nonlinearity(delta):
     return math.sqrt(err)
 
 
+'''
+@nb.cuda.jit(device=True)
+def nonlinearity(delta):
+    """Calculate the nonlinearity of the given delta spectrum"""
+    if tid == 0:
+        err = (((delta[2] - delta[0]) / 2) - (delta[1] - delta[0])) ** 2
+    elif tid == 1:
+        err = (((delta[3] - delta[1]) / 2) - (delta[1] - delta[0])) ** 2 / 4
+    elif tid == nwaves - 1:
+        err = ((delta[-1] - delta[-2]) - ((delta[-1] - delta[-3]) / 2)) ** 2
+    elif tid == nwaves - 2:
+        err = ((delta[-1] - delta[-2]) - ((delta[-2] - delta[-4]) / 2)) ** 2 / 4
+    else:
+        err = ((delta[tid + 2] - delta[tid]) - (delta[tid] - delta[tid - 2])) ** 2 / 16
+    return math.sqrt(foldSum(err))
+'''
+
+
 @nb.cuda.jit(device=True)
 def merit_error(n, angles):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
     sharedBlock = nb.cuda.shared.array(nwaves, nb.f4)
-    crit_violation = False
-    invalidity = False
     mid = count // 2
     beta = angles[mid] / 2
     for i in range(count):
         if i < mid:
             beta += angles[i]
+    n1 = 1.0
+    n2 = n[0, tid]
     path0 = (start - radius) / math.cos(beta)
     path1 = (start + radius) / math.cos(beta)
     offAngle = beta
-    sideL = height / math.cos(offAngle)
+    sideR = sideL = height / math.cos(offAngle)
+    invalidity = 0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR
     incident = theta0 + beta
+    crit_angle =  math.asin(n2)
+    crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle)
+    if crit_violation_count > 0:
+        return weights.tir * crit_violation_count
     refracted = math.asin((1.0 / n[0, tid]) * math.sin(incident))
+    ci, cr = math.cos(incident), math.cos(refracted)
+    t_s = 1 - ((n1*ci-n2*cr)/(n1*ci+n2*cr))**2
+    t_p = 1 - ((n1*cr-n2*ci)/(n1*cr+n2*ci))**2
+    T = 1 - 0.5*(((n1*ci-n2*cr)/(n1*ci+n2*cr))**2 + ((n1*cr-n2*ci)/(n1*cr+n2*ci))**2)
     for i in range(1, count + 1):
+        n1 = n2
+        n2 = n[i, tid] if i < count else 1.0
         alpha = angles[i - 1]
         incident = refracted - alpha
-        crit_violation |= abs(incident) > angle_limit
+        
+        crit_angle = math.asin(n2 / n1) if n2 < n1 else (math.pi / 2)
+        crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle*0.999)
+        if crit_violation_count > 0:
+            return weights.tir * crit_violation_count
+
 
         if i <= mid:
             offAngle -= angles[i - 1]
@@ -277,34 +300,34 @@ def merit_error(n, angles):
         invalidity |= 0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR
         sideL = sideR
             
-        if i < count:
-            refracted = math.asin((n[i - 1, tid] / n[i, tid]) * math.sin(incident))
-        else:
-            refracted = math.asin(n[i - 1, tid] * math.sin(incident))
+        refracted = math.asin((n1 / n2) * math.sin(incident))
+        ci, cr = math.cos(incident), math.cos(refracted)
+        t_s *= 1 - ((n1*ci-n2*cr)/(n1*ci+n2*cr))**2
+        t_p *= 1 - ((n1*cr-n2*ci)/(n1*cr+n2*ci))**2
+        T *= 1 - 0.5*(((n1*ci-n2*cr)/(n1*ci+n2*cr))**2 + ((n1*cr-n2*ci)/(n1*cr+n2*ci))**2)
     delta = theta0 - (refracted + offAngle)
     sharedBlock[tid] = delta
-    nan_count = syncthreads_popc(math.isnan(delta))
-    if nan_count > 0:
-        return weights.tir * nan_count
-    crit_count = syncthreads_popc(crit_violation)
     invalid_count = syncthreads_popc(invalidity)
-    
-    minVal, maxVal = sharedBlock[0], sharedBlock[0]
+    T_too_low = syncthreads_popc(T < 0.70)
+
+    minVal, maxVal, deltaC = sharedBlock[0], sharedBlock[0], sharedBlock[nwaves // 2]
     for i in range(nwaves):
         minVal = min(minVal, sharedBlock[i])
         maxVal = max(maxVal, sharedBlock[i])
+    deltaT = (maxVal - minVal)
 
     too_thin_err = 0
     for a in angles:
         t = abs(a)
         if t <= math.pi / 180.0:
             too_thin_err += (t - 1.0) ** 2
-    merit_err = weights.crit_angle * crit_count / (count * nwaves) \
-                + weights.valid * invalid_count / count \
+    NL = nonlinearity(sharedBlock)
+    merit_err = weights.valid * invalid_count / count \
                 + weights.thin * too_thin_err / count \
-                + weights.deviation * (sharedBlock[nwaves // 2] - deltaC_target) ** 2 \
-                + weights.dispersion * ((maxVal - minVal) - deltaT_target) ** 2 \
-                + weights.linearity * nonlinearity(sharedBlock)
+                + weights.deviation * (deltaC - deltaC_target) ** 2 \
+                + weights.dispersion * (deltaT - deltaT_target) ** 2 \
+                + weights.linearity * NL \
+                + 5*T_too_low / nwaves
     return merit_err
 
 
@@ -470,7 +493,44 @@ def optimize(ns, out):
         for i in range(count):
             out[ind * (1 + count) + i + 1] = xmin[i]
 
-
+@nb.cuda.jit((nb.i4[:], nb.f4[:, :], nb.f4[:]), fastmath=False)
+def findder(counter, ns, out):
+    tid = nb.cuda.threadIdx.x
+    bid = nb.cuda.blockIdx.x
+    cinital_angles = nb.cuda.const.array_like(inital_angles)
+    xmin = nb.cuda.local.array(count, nb.f4)
+    ind = nb.cuda.shared.array(1, nb.i4)
+    best = nb.cuda.shared.array(count, nb.f4)
+    bestVal, bestInd = np.inf, 0
+    n = nb.cuda.shared.array((count, nwaves), nb.f4)
+    nglass = ns.shape[0]
+    top = nglass ** count
+    while True:
+        nb.cuda.syncthreads()
+        if tid == 0:
+            ind[0] = nb.cuda.atomic.add(counter, 0, 1)
+        nb.cuda.syncthreads()
+        if ind[0] >= top:
+            break
+        for i in range(count):
+            n[i, tid] = ns[(ind[0] // (nglass ** i)) % nglass, tid]
+        for i in range(count): 
+            xmin[i] = cinital_angles[i]
+        nb.cuda.syncthreads()
+        fx = minimizer(n, xmin)
+        if tid == 0 and fx < bestVal:
+            bestVal = fx
+            bestInd = ind[0]
+            for i in range(count):
+                best[i] = xmin[i]
+    if tid == 0:
+        outi = bid*(count+2)
+        out[outi] = bestVal
+        out[outi+1] = bestInd
+        for i in range(count):
+            out[outi+i+2] = best[i]
+        
+nb.cuda.select_device(1)
 import time
 from compoundprism.glasscat import read_glasscat, calc_n
 
@@ -480,18 +540,27 @@ nglass = len(gcat)
 names = list(gcat.keys())
 glasses = np.array([calc_n(gcat[name], w) for name in names], np.float32)
 nb.cuda.profile_start()
-d_out = nb.cuda.device_array(((1 + count) * nglass ** count), np.float32)
+# d_out = nb.cuda.device_array(((1 + count) * nglass ** count), np.float32)
+blockCount = 128
+d_out = nb.cuda.device_array(blockCount*(count+2), np.float32)
 print('Starting')
+counter = np.zeros((10,), np.int32)
 t1 = time.time()
-optimize[nglass ** count, nwaves](glasses, d_out)
+findder[blockCount, nwaves](counter, glasses, d_out)
+# optimize[nglass ** count, nwaves](glasses, d_out)
 output = d_out.copy_to_host()
 dt = time.time() - t1
+"""
 mi, = np.where(output[::(count+1)] == np.min(output[::(count+1)]))
 gs = [names[((mi[0]) // (nglass ** i)) % nglass] for i in range(count)]
 mi = (count+1) * mi[0]
 print(output[mi], *gs, *(output[mi+1:mi+(count+1)] * 180 / np.pi))
+"""
+mi, = np.where(output[::(count+2)] == np.min(output[::(count+2)]))
+mi = (count+2) * mi[0]
+gs = [names[(int(output[mi+1]) // (nglass ** i)) % nglass] for i in range(count)]
+print(output[mi], *gs, *(output[mi+2:mi+(count+2)] * 180 / np.pi))
+
 print(dt, 's')
 nb.cuda.profile_stop()
-"""
-Best: ('N-SF66', 'N-LAF34', 75.6237857668015, -112.94657682536811, 1.8423067282937657, -17.32103143116662, 37.09139264883297, 50.430053463384056)
-"""
+
