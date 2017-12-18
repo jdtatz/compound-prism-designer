@@ -1,19 +1,16 @@
 #!/usr/bin/env python3.6
 import os
-os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
-os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 import numpy as np
 import numba as nb
-import numba.typing
-import numba.typing.templates
 import numba.cuda
-import numba.cuda.cudaimpl
-import numba.cuda.cudadecl
-import numba.cuda.stubs
-from llvmlite.llvmpy.core import Type
+from numbaCudaFallbacks import syncthreads_and, syncthreads_or, syncthreads_popc
 import math
 import operator
 from collections import namedtuple, OrderedDict
+import time
+from compoundprism.glasscat import read_glasscat, calc_n
+os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
+os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
 count = 4
 count_p1 = count+1
@@ -31,110 +28,6 @@ MeritWeights = namedtuple('MeritWeights', base_weights.keys())
 weights = MeritWeights(**base_weights)
 
 
-class shfl(nb.cuda.stubs.Stub):
-    _description_ = '<shfl>'
-    
-    class idx(nb.cuda.stubs.Stub):
-        """
-        shfl from tid
-        """
-    
-    class up(nb.cuda.stubs.Stub):
-        """
-        shfl from above
-        """
-        
-    class down(nb.cuda.stubs.Stub):
-        """
-        shfl from below
-        """
-        
-    class xor(nb.cuda.stubs.Stub):
-        """
-        shfl from xor
-        """
-
-@numba.cuda.cudaimpl.lower(shfl.idx, nb.i4, nb.i4, nb.i4)
-def lower_shfl_idx(context, builder, sig, args):
-    fname = 'llvm.nvvm.shfl.idx.i32'
-    lmod = builder.module
-    fnty = Type.function(Type.int(32), (Type.int(32), Type.int(32), Type.int(32)))
-    func = lmod.get_or_insert_function(fnty, name=fname)
-    return builder.call(func, args)
-@nb.cuda.cudadecl.intrinsic
-class Cuda_shfl_idx(nb.typing.templates.AbstractTemplate):
-    key = shfl.idx
-    def generic(self, args, kws):
-        return nb.i4(nb.i4, nb.i4, nb.i4)
-@nb.cuda.cudadecl.intrinsic_attr
-class Cuda_shfls(nb.typing.templates.AttributeTemplate):
-    key = nb.types.Module(shfl)
-    def resolve_idx(self, mod):
-        return nb.types.Function(Cuda_shfl_idx)
-nb.cuda.cudadecl.intrinsic_global(shfl, nb.types.Module(shfl))
-
-class syncthreads_or(nb.cuda.stubs.Stub):
-    _description_ = '<syncthreads_or()>'
-@numba.cuda.cudaimpl.lower(syncthreads_or, nb.i4)
-def lower_syncthreads_or(context, builder, sig, args):
-    fname = 'llvm.nvvm.barrier0.or'
-    lmod = builder.module
-    fnty = Type.function(Type.int(32), (Type.int(32),))
-    func = lmod.get_or_insert_function(fnty, name=fname)
-    return builder.call(func, args)
-@nb.cuda.cudadecl.intrinsic
-class Cuda_syncthreads_or(nb.typing.templates.AbstractTemplate):
-    key = syncthreads_or
-    def generic(self, args, kws):
-        return nb.i4(nb.i4,)
-nb.cuda.cudadecl.intrinsic_global(syncthreads_or, nb.types.Function(Cuda_syncthreads_or))
-
-
-class syncthreads_and(nb.cuda.stubs.Stub):
-    _description_ = '<syncthreads_and()>'
-@numba.cuda.cudaimpl.lower(syncthreads_and, nb.i4)
-def lower_syncthreads_and(context, builder, sig, args):
-    fname = 'llvm.nvvm.barrier0.and'
-    lmod = builder.module
-    fnty = Type.function(Type.int(32), (Type.int(32),))
-    func = lmod.get_or_insert_function(fnty, name=fname)
-    return builder.call(func, args)
-@nb.cuda.cudadecl.intrinsic
-class Cuda_syncthreads_and(nb.typing.templates.AbstractTemplate):
-    key = syncthreads_and
-    def generic(self, args, kws):
-        return nb.i4(nb.i4,)
-nb.cuda.cudadecl.intrinsic_global(syncthreads_and, nb.types.Function(Cuda_syncthreads_and))
-
-
-class syncthreads_popc(nb.cuda.stubs.Stub):
-    _description_ = '<syncthreads_popc()>'
-@numba.cuda.cudaimpl.lower(syncthreads_popc, nb.i4)
-def lower_syncthreads_popc(context, builder, sig, args):
-    fname = 'llvm.nvvm.barrier0.popc'
-    lmod = builder.module
-    fnty = Type.function(Type.int(32), (Type.int(32),))
-    func = lmod.get_or_insert_function(fnty, name=fname)
-    return builder.call(func, args)
-@nb.cuda.cudadecl.intrinsic
-class Cuda_syncthreads_popc(nb.typing.templates.AbstractTemplate):
-    key = syncthreads_popc
-    def generic(self, args, kws):
-        return nb.i4(nb.i4,)
-nb.cuda.cudadecl.intrinsic_global(syncthreads_popc, nb.types.Function(Cuda_syncthreads_popc))
-
-
-@nb.cuda.jit((nb.i4[:], ))
-def test(arr):
-    i = nb.cuda.threadIdx.x
-    # arr[i] = shfl.idx(syncthreads_popc(1), 0, 32)
-    arr[i] = syncthreads_popc(1)
-
-testA = np.empty(64, np.int32)
-test[2, 32](testA)
-
-
-
 @nb.cuda.jit(device=True)
 def ilog2(n):
     return 0 if n < 2 else 1 + ilog2(n >> 1)
@@ -150,12 +43,12 @@ def roundToPow2(num):
     return 1 << ilog2(num)
 
 
-def create_fold_func(func):
+def create_fold_func(func, warpSize=32):
     @nb.cuda.jit(device=True)
     def warpFold(value, foldLen):
         i = foldLen / 2
         while i > 0:
-            value = func(val, nb.cuda.shfl.xor(value, i, foldLen))
+            value = func(value, nb.cuda.shfl.xor(value, i, foldLen))
             i >>= 2
         return value
 
@@ -186,22 +79,22 @@ def create_fold_func(func):
             elif isPow2(foldLen % warpSize):
                 value = warpFold(value, foldLen % warpSize)
             else:
-                value = partialWarpFold(value, warpID, foldLen % warpSize);
+                value = partialWarpFold(value, warpID, foldLen % warpSize)
             if warpID == 0:
                 sharedArr[tID // warpSize] = value
             nb.cuda.syncthreads()
-            faster = (warpCount - 1) > (1 + log2(warpCountPow2) + (0 if isPow2(warpCount) else 1))
+            faster = (warpCount - 1) > (1 + ilog2(warpCountPow2) + (0 if isPow2(warpCount) else 1))
             allWarpsFull = foldLen % warpSize == 0
             partialBigEnough = foldLen % warpSize >= warpCountPow2
             
             if faster and (allWarpsFull or partialBigEnough or withinFullWarp):
-              value = sharedArr[warpID % warpCount];
+              value = sharedArr[warpID % warpCount]
               if not isPow2(warpCount) and warpID < warpCount - warpCountPow2:
                 value = func(value, sharedArr[warpID + warpCountPow2])
-              value = warpFold(value, warpCountPow2);
-              value = nb.cuda.shfl.idx(value, 0);
+              value = warpFold(value, warpCountPow2)
+              value = nb.cuda.shfl.idx(value, 0)
             else:
-              value = sharedArr[0];
+              value = sharedArr[0]
               for i in range(1, warpCount):
                 value = func(value, sharedArr[i])
             return value
@@ -364,16 +257,16 @@ def minimizer(n, xmin):
     ncalls = count
 
     for i in range(count+1):
-        x = fsim[i]
+        fx = fsim[i]
         for k in range(count):
             xmin[k] = sim[i, k]
         j = i - 1
-        while j >= 0 and fsim[j] > x:
+        while j >= 0 and fsim[j] > fx:
             fsim[j + 1] = fsim[j]
             for k in range(count):
                 sim[j + 1, k] = sim[j, k]
             j -= 1
-        fsim[j + 1] = x
+        fsim[j + 1] = fx
         for k in range(count):
             sim[j + 1, k] = xmin[k]
 
@@ -529,10 +422,9 @@ def findder(counter, ns, out):
         out[outi+1] = bestInd
         for i in range(count):
             out[outi+i+2] = best[i]
-        
+
+
 nb.cuda.select_device(1)
-import time
-from compoundprism.glasscat import read_glasscat, calc_n
 
 w = np.linspace(500, 820, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
