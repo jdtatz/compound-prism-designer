@@ -13,19 +13,19 @@ from compoundprism.glasscat import read_glasscat, calc_n
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
-count = 3
+count = 4
 count_p1 = count + 1
-start = 3.5
+start = 2
 radius = 1.5
 height = 25
 theta0 = 0
 nwaves = 100
 deltaC_target = 0 * math.pi / 180
-deltaT_target = 45 * math.pi / 180
-transmission_minimum = 0.7
+deltaT_target = 32 * math.pi / 180
+transmission_minimum = 0.85
 inital_angles = np.full((count,), math.pi / 2, np.float32)
 inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50.0, valid=5.0, thin=2.5, deviation=5.0, dispersion=30.0, linearity=10000.0, transm=5)
+base_weights = OrderedDict(tir=50.0, valid=5.0, thin=2.5, deviation=5.0, dispersion=30.0, linearity=1000.0, transm=6)
 MeritWeights = namedtuple('MeritWeights', base_weights.keys())
 weights = MeritWeights(**base_weights)
 
@@ -139,7 +139,7 @@ def nonlinearity(delta):
 
 
 @nb.cuda.jit(device=True)
-def merit_error(n, angles):
+def merit_error(n, angles, ind, nglass):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
     sharedBlock = nb.cuda.shared.array(nwaves, nb.f4)
@@ -149,7 +149,7 @@ def merit_error(n, angles):
         if i < mid:
             beta += angles[i]
     n1 = 1.0
-    n2 = n[0, tid]
+    n2 = n[ind[0] % nglass, tid]
     path0 = (start - radius) / math.cos(beta)
     path1 = (start + radius) / math.cos(beta)
     offAngle = beta
@@ -160,12 +160,12 @@ def merit_error(n, angles):
     crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle)
     if crit_violation_count > 0:
         return weights.tir * crit_violation_count, False
-    refracted = math.asin((1.0 / n[0, tid]) * math.sin(incident))
+    refracted = math.asin((n1 / n2) * math.sin(incident))
     ci, cr = math.cos(incident), math.cos(refracted)
     T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
     for i in range(1, count + 1):
         n1 = n2
-        n2 = n[i, tid] if i < count else 1.0
+        n2 = n[(ind[0] // (nglass ** i)) % nglass, tid] if i < count else 1.0
         alpha = angles[i - 1]
         incident = refracted - alpha
 
@@ -224,7 +224,7 @@ def merit_error(n, angles):
 
 
 @nb.cuda.jit(device=True)
-def minimizer(n, xmin):
+def minimizer(n, xmin, ind, nglass):
     sim = nb.cuda.local.array((count_p1, count), nb.f4)
     fsim = nb.cuda.local.array(count_p1, nb.f4)
     xr = nb.cuda.local.array(count, nb.f4)
@@ -242,7 +242,7 @@ def minimizer(n, xmin):
     xatol = 1e-4
     fatol = 1e-4
     
-    _, test = merit_error(n, cinital_angles)
+    _, test = merit_error(n, cinital_angles, ind, nglass)
     if not test:
         return np.inf
 
@@ -257,7 +257,7 @@ def minimizer(n, xmin):
     maxfun = count * 200
 
     for k in range(count + 1):
-        fsim[k], _ = merit_error(n, sim[k])
+        fsim[k], _ = merit_error(n, sim[k], ind, nglass)
     ncalls = count
 
     # sort
@@ -291,7 +291,7 @@ def minimizer(n, xmin):
             for s in range(count):
                 xbar += sim[s, i]
             xr[i] = (1 + rho) * xbar / count - rho * sim[-1, i]
-        fxr, _ = merit_error(n, xr)
+        fxr, _ = merit_error(n, xr, ind, nglass)
         ncalls += 1
         doshrink = False
 
@@ -301,7 +301,7 @@ def minimizer(n, xmin):
                 for s in range(count):
                     xbar += sim[s, i]
                 xe[i] = (1 + rho * chi) * xbar / count - rho * chi * sim[-1, i]
-            fxe, _ = merit_error(n, xe)
+            fxe, _ = merit_error(n, xe, ind, nglass)
             ncalls += 1
             if fxe < fxr:
                 for i in range(count):
@@ -322,7 +322,7 @@ def minimizer(n, xmin):
                 for s in range(count):
                     xbar += sim[s, i]
                 xc[i] = (1 + psi * rho) * xbar / count - psi * rho * sim[-1, i]
-            fxc, _ = merit_error(n, xc)
+            fxc, _ = merit_error(n, xc, ind, nglass)
             ncalls += 1
             if fxc <= fxr:
                 for i in range(count):
@@ -337,7 +337,7 @@ def minimizer(n, xmin):
                 for s in range(count):
                     xbar += sim[s, i]
                 xcc[i] = (1 - psi) * xbar / count + psi * sim[-1, i]
-            fxcc, _ = merit_error(n, xcc)
+            fxcc, _ = merit_error(n, xcc, ind, nglass)
             ncalls += 1
             if fxcc < fsim[-1]:
                 for i in range(count):
@@ -349,7 +349,7 @@ def minimizer(n, xmin):
             for j in range(1, count + 1):
                 for i in range(count):
                     sim[j, i] = sim[0, i] + sigma * (sim[j, i] - sim[0, i])
-                fsim[j], _ = merit_error(n, sim[j])
+                fsim[j], _ = merit_error(n, sim[j], ind, nglass)
             ncalls += count
         # sort
         for i in range(count + 1):
@@ -379,20 +379,19 @@ def optimize(counter, ns, out):
     ind = nb.cuda.shared.array(1, nb.i4)
     best = nb.cuda.shared.array(count, nb.f4)
     bestVal, bestInd = np.inf, 0
-    n = nb.cuda.shared.array((count, nwaves), nb.f4)
+    #n = nb.cuda.shared.array((count, nwaves), nb.f4)
     nglass = ns.shape[0]
     top = nglass ** count
     while True:
-        nb.cuda.syncthreads()
         if tid == 0:
             ind[0] = nb.cuda.atomic.add(counter, 0, 1)
         nb.cuda.syncthreads()
         if ind[0] >= top:
             break
-        for i in range(count):
-            n[i, tid] = ns[(ind[0] // (nglass ** i)) % nglass, tid]
-        nb.cuda.syncthreads()
-        fx = minimizer(n, xmin)
+        #for i in range(count):
+        #    n[i, tid] = ns[(ind[0] // (nglass ** i)) % nglass, tid]
+        #nb.cuda.syncthreads()
+        fx = minimizer(ns, xmin, ind, nglass)
         if tid == 0 and fx < bestVal:
             bestVal = fx
             bestInd = ind[0]
@@ -411,7 +410,7 @@ gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
-blockCount = 128
+blockCount = 512
 d_out = nb.cuda.device_array(blockCount * (count + 2), np.float32)
 counter = np.zeros((10,), np.int32)
 print('Starting')
