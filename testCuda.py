@@ -13,7 +13,7 @@ from compoundprism.glasscat import read_glasscat, calc_n
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
-count = 4
+count = 3
 count_p1 = count + 1
 start = 3.5
 radius = 1.5
@@ -159,7 +159,7 @@ def merit_error(n, angles):
     crit_angle = math.pi / 2
     crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle)
     if crit_violation_count > 0:
-        return weights.tir * crit_violation_count
+        return weights.tir * crit_violation_count, False
     refracted = math.asin((1.0 / n[0, tid]) * math.sin(incident))
     ci, cr = math.cos(incident), math.cos(refracted)
     T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
@@ -172,7 +172,7 @@ def merit_error(n, angles):
         crit_angle = math.asin(n2 / n1) if n2 < n1 else (math.pi / 2)
         crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * 0.999)
         if crit_violation_count > 0:
-            return weights.tir * crit_violation_count
+            return weights.tir * crit_violation_count, False
 
         if i <= mid:
             offAngle -= alpha
@@ -188,6 +188,9 @@ def merit_error(n, angles):
         else:
             path0 = sideR - (sideL - path0) * los
             path1 = sideR - (sideL - path1) * los
+        invalid_count = syncthreads_popc(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR)
+        if invalid_count > 0:
+            return weights.tir * invalid_count, False
         invalidity |= 0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR
         sideL = sideR
 
@@ -217,7 +220,7 @@ def merit_error(n, angles):
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * T_too_low / nwaves
-    return merit_err
+    return merit_err, True
 
 
 @nb.cuda.jit(device=True)
@@ -238,6 +241,10 @@ def minimizer(n, xmin):
     zdelt = 0.00025
     xatol = 1e-4
     fatol = 1e-4
+    
+    _, test = merit_error(n, cinital_angles)
+    if not test:
+        return np.inf
 
     for i in range(count):
         sim[0, i] = cinital_angles[i]
@@ -250,7 +257,7 @@ def minimizer(n, xmin):
     maxfun = count * 200
 
     for k in range(count + 1):
-        fsim[k] = merit_error(n, sim[k])
+        fsim[k], _ = merit_error(n, sim[k])
     ncalls = count
 
     # sort
@@ -284,7 +291,7 @@ def minimizer(n, xmin):
             for s in range(count):
                 xbar += sim[s, i]
             xr[i] = (1 + rho) * xbar / count - rho * sim[-1, i]
-        fxr = merit_error(n, xr)
+        fxr, _ = merit_error(n, xr)
         ncalls += 1
         doshrink = False
 
@@ -294,7 +301,7 @@ def minimizer(n, xmin):
                 for s in range(count):
                     xbar += sim[s, i]
                 xe[i] = (1 + rho * chi) * xbar / count - rho * chi * sim[-1, i]
-            fxe = merit_error(n, xe)
+            fxe, _ = merit_error(n, xe)
             ncalls += 1
             if fxe < fxr:
                 for i in range(count):
@@ -315,7 +322,7 @@ def minimizer(n, xmin):
                 for s in range(count):
                     xbar += sim[s, i]
                 xc[i] = (1 + psi * rho) * xbar / count - psi * rho * sim[-1, i]
-            fxc = merit_error(n, xc)
+            fxc, _ = merit_error(n, xc)
             ncalls += 1
             if fxc <= fxr:
                 for i in range(count):
@@ -330,7 +337,7 @@ def minimizer(n, xmin):
                 for s in range(count):
                     xbar += sim[s, i]
                 xcc[i] = (1 - psi) * xbar / count + psi * sim[-1, i]
-            fxcc = merit_error(n, xcc)
+            fxcc, _ = merit_error(n, xcc)
             ncalls += 1
             if fxcc < fsim[-1]:
                 for i in range(count):
@@ -342,7 +349,7 @@ def minimizer(n, xmin):
             for j in range(1, count + 1):
                 for i in range(count):
                     sim[j, i] = sim[0, i] + sigma * (sim[j, i] - sim[0, i])
-                fsim[j] = merit_error(n, sim[j])
+                fsim[j], _ = merit_error(n, sim[j])
             ncalls += count
         # sort
         for i in range(count + 1):
@@ -416,7 +423,7 @@ output = d_out.copy_to_host()
 dt = time.time() - t1
 nb.cuda.profile_stop()
 
-index = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0]
+index = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
 gs = [names[(int(output[index + 1]) // (nglass ** i)) % nglass] for i in range(count)]
 print(output[index], *gs, *(output[index + 2:index + (count + 2)] * 180 / np.pi))
 print(dt, 's')
