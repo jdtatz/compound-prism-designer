@@ -142,7 +142,8 @@ def nonlinearity(delta):
 def merit_error(n, angles, ind, nglass):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
-    sharedBlock = nb.cuda.shared.array(nwaves, nb.f4)
+    delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
+    transm_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
     mid = count // 2
     beta = angles[mid] / 2
     for i in range(count):
@@ -198,28 +199,32 @@ def merit_error(n, angles, ind, nglass):
         ci, cr = math.cos(incident), math.cos(refracted)
         T *= 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
     delta = theta0 - (refracted + offAngle)
-    sharedBlock[tid] = delta
+    delta_spectrum[tid] = delta
+    transm_spectrum[tid] = T
     invalid_count = syncthreads_popc(invalidity)
-    T_too_low = syncthreads_popc(T < transmission_minimum)
 
-    minVal, maxVal, deltaC = sharedBlock[0], sharedBlock[0], sharedBlock[nwaves // 2]
+    meanT = 0
+    minVal, maxVal, deltaC = delta_spectrum[0], delta_spectrum[0], delta_spectrum[nwaves // 2]
     for i in range(nwaves):
-        minVal = min(minVal, sharedBlock[i])
-        maxVal = max(maxVal, sharedBlock[i])
+        minVal = min(minVal, delta_spectrum[i])
+        maxVal = max(maxVal, delta_spectrum[i])
+        meanT += transm_spectrum[i]
     deltaT = (maxVal - minVal)
+    meanT /= nwaves
+    transm_err = min(transmission_minimum - meanT, 0)
 
     too_thin_err = 0
     for a in angles:
         t = abs(a)
         if t <= math.pi / 180.0:
             too_thin_err += (t - 1.0) ** 2
-    NL = nonlinearity(sharedBlock)
+    NL = nonlinearity(delta_spectrum)
     merit_err = weights.valid * invalid_count / count \
                 + weights.thin * too_thin_err / count \
                 + weights.deviation * (deltaC - deltaC_target) ** 2 \
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
                 + weights.linearity * NL \
-                + weights.transm * T_too_low / nwaves
+                + weights.transm * transm_err
     return merit_err, True
 
 
