@@ -25,7 +25,7 @@ deltaT_target = 32 * math.pi / 180
 transmission_minimum = 0.85
 inital_angles = np.full((count,), math.pi / 2, np.float32)
 inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50.0, valid=5.0, thin=2.5, deviation=5.0, dispersion=30.0, linearity=1000.0, transm=6)
+base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=30, linearity=1000, transm=6)
 MeritWeights = namedtuple('MeritWeights', base_weights.keys())
 weights = MeritWeights(**base_weights)
 
@@ -142,8 +142,8 @@ def nonlinearity(delta):
 def merit_error(n, angles, ind, nglass):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
-    delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
-    transm_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
+    delta_spectrum = nb.cuda.shared.array(nwaves, nb.f8)
+    transm_spectrum = nb.cuda.shared.array(nwaves, nb.f8)
     mid = count // 2
     beta = angles[mid] / 2
     for i in range(count):
@@ -154,11 +154,10 @@ def merit_error(n, angles, ind, nglass):
     path0 = (start - radius) / math.cos(beta)
     path1 = (start + radius) / math.cos(beta)
     offAngle = beta
-    sideR = sideL = height / math.cos(offAngle)
-    invalidity = 0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR
+    sideL = height / math.cos(offAngle)
     incident = theta0 + beta
     crit_angle = math.pi / 2
-    crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle)
+    crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * 0.999)
     if crit_violation_count > 0:
         return weights.tir * crit_violation_count, False
     refracted = math.asin((n1 / n2) * math.sin(incident))
@@ -191,8 +190,7 @@ def merit_error(n, angles, ind, nglass):
             path1 = sideR - (sideL - path1) * los
         invalid_count = syncthreads_popc(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR)
         if invalid_count > 0:
-            return weights.tir * invalid_count, False
-        invalidity |= 0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR
+            return weights.invalid * invalid_count, False
         sideL = sideR
 
         refracted = math.asin((n1 / n2) * math.sin(incident))
@@ -201,10 +199,10 @@ def merit_error(n, angles, ind, nglass):
     delta = theta0 - (refracted + offAngle)
     delta_spectrum[tid] = delta
     transm_spectrum[tid] = T
-    invalid_count = syncthreads_popc(invalidity)
-
+    nb.cuda.syncthreads()
     meanT = 0
-    minVal, maxVal, deltaC = delta_spectrum[0], delta_spectrum[0], delta_spectrum[nwaves // 2]
+    deltaC = delta_spectrum[nwaves // 2]
+    minVal, maxVal = delta_spectrum[0], delta_spectrum[0]
     for i in range(nwaves):
         minVal = min(minVal, delta_spectrum[i])
         maxVal = max(maxVal, delta_spectrum[i])
@@ -212,16 +210,8 @@ def merit_error(n, angles, ind, nglass):
     deltaT = (maxVal - minVal)
     meanT /= nwaves
     transm_err = min(transmission_minimum - meanT, 0)
-
-    too_thin_err = 0
-    for a in angles:
-        t = abs(a)
-        if t <= math.pi / 180.0:
-            too_thin_err += (t - 1.0) ** 2
     NL = nonlinearity(delta_spectrum)
-    merit_err = weights.valid * invalid_count / count \
-                + weights.thin * too_thin_err / count \
-                + weights.deviation * (deltaC - deltaC_target) ** 2 \
+    merit_err = weights.deviation * (deltaC - deltaC_target) ** 2 \
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
@@ -229,14 +219,13 @@ def merit_error(n, angles, ind, nglass):
 
 
 @nb.cuda.jit(device=True)
-def minimizer(n, xmin, ind, nglass):
-    sim = nb.cuda.local.array((count_p1, count), nb.f4)
-    fsim = nb.cuda.local.array(count_p1, nb.f4)
-    xr = nb.cuda.local.array(count, nb.f4)
-    xe = nb.cuda.local.array(count, nb.f4)
-    xc = nb.cuda.local.array(count, nb.f4)
-    xcc = nb.cuda.local.array(count, nb.f4)
-    cinital_angles = nb.cuda.const.array_like(inital_angles)
+def minimizer(n, index, nglass):
+    const_init_angles = nb.cuda.const.array_like(inital_angles)
+    points = nb.cuda.local.array((count_p1, count), nb.f8)
+    results = nb.cuda.local.array(count_p1, nb.f8)
+    # Share mutually exclusive used arrays to save space
+    xr = xc = sorter = nb.cuda.local.array(count, nb.f8)
+    xe = nb.cuda.local.array(count, nb.f8)
 
     rho = 1
     chi = 2
@@ -244,162 +233,157 @@ def minimizer(n, xmin, ind, nglass):
     sigma = 0.5
     nonzdelt = 0.05
     zdelt = 0.00025
-    xatol = 1e-4
-    fatol = 1e-4
+    x_tolerance = 1e-4
+    f_tolerance = 1e-4
     
-    _, test = merit_error(n, cinital_angles, ind, nglass)
+    _, test = merit_error(n, const_init_angles, index, nglass)
     if not test:
-        return np.inf
+        return points[0], np.inf
 
     for i in range(count):
-        sim[0, i] = cinital_angles[i]
+        points[0, i] = const_init_angles[i]
     for k in range(count):
         for i in range(count):
-            sim[k + 1, i] = cinital_angles[i]
-        sim[k + 1, k] *= (1 + nonzdelt)
+            points[k + 1, i] = const_init_angles[i]
+        points[k + 1, k] *= (1 + nonzdelt)
 
-    maxiter = count * 200
-    maxfun = count * 200
+    max_iter = count * 200
+    max_call = count * 200
 
     for k in range(count + 1):
-        fsim[k], _ = merit_error(n, sim[k], ind, nglass)
+        results[k], _ = merit_error(n, points[k], index, nglass)
     ncalls = count
 
     # sort
     for i in range(count + 1):
-        fx = fsim[i]
+        fx = results[i]
         for k in range(count):
-            xmin[k] = sim[i, k]
+            sorter[k] = points[i, k]
         j = i - 1
-        while j >= 0 and fsim[j] > fx:
-            fsim[j + 1] = fsim[j]
+        while j >= 0 and results[j] > fx:
+            results[j + 1] = results[j]
             for k in range(count):
-                sim[j + 1, k] = sim[j, k]
+                points[j + 1, k] = points[j, k]
             j -= 1
-        fsim[j + 1] = fx
+        results[j + 1] = fx
         for k in range(count):
-            sim[j + 1, k] = xmin[k]
+            points[j + 1, k] = sorter[k]
 
     iterations = 1
-    while ncalls < maxfun and iterations < maxiter:
+    while ncalls < max_call and iterations < max_iter:
         # Tolerence Check
         maxF, maxS = 0, 0
         for i in range(1, count + 1):
-            maxF = max(maxF, abs(fsim[0] - fsim[i]))
+            maxF = max(maxF, abs(results[0] - results[i]))
             for j in range(count):
-                maxS = max(maxS, abs(sim[0, j] - sim[i, j]))
-        if maxS <= xatol and maxF <= fatol:
+                maxS = max(maxS, abs(points[0, j] - points[i, j]))
+        if maxS <= x_tolerance and maxF <= f_tolerance:
             break
 
         for i in range(count):
-            xbar = 0
+            centroid = 0
             for s in range(count):
-                xbar += sim[s, i]
-            xr[i] = (1 + rho) * xbar / count - rho * sim[-1, i]
-        fxr, _ = merit_error(n, xr, ind, nglass)
+                centroid += points[s, i]
+            xr[i] = (1 + rho) * centroid / count - rho * points[-1, i]
+        fxr, _ = merit_error(n, xr, index, nglass)
         ncalls += 1
         doshrink = False
 
-        if fxr < fsim[0]:
+        if fxr < results[0]:  # Reflection or Expansion
             for i in range(count):
-                xbar = 0
+                centroid = 0
                 for s in range(count):
-                    xbar += sim[s, i]
-                xe[i] = (1 + rho * chi) * xbar / count - rho * chi * sim[-1, i]
-            fxe, _ = merit_error(n, xe, ind, nglass)
+                    centroid += points[s, i]
+                xe[i] = (1 + rho * chi) * centroid / count - rho * chi * points[-1, i]
+            fxe, _ = merit_error(n, xe, index, nglass)
             ncalls += 1
-            if fxe < fxr:
+            if fxe < fxr:  # Expansion
                 for i in range(count):
-                    sim[-1, i] = xe[i]
-                fsim[-1] = fxe
-            else:
+                    points[-1, i] = xe[i]
+                results[-1] = fxe
+            else:  # Reflection
                 for i in range(count):
-                    sim[-1, i] = xr[i]
-                fsim[-1] = fxr
-        elif fxr < fsim[-2]:
+                    points[-1, i] = xr[i]
+                results[-1] = fxr
+        elif fxr < results[-2]:  # Reflection
             for i in range(count):
-                sim[-1, i] = xr[i]
-            fsim[-1] = fxr
-        elif fxr < fsim[-1]:
-            # Perform contraction
+                points[-1, i] = xr[i]
+            results[-1] = fxr
+        elif fxr < results[-1]:  # Contraction
             for i in range(count):
-                xbar = 0
+                centroid = 0
                 for s in range(count):
-                    xbar += sim[s, i]
-                xc[i] = (1 + psi * rho) * xbar / count - psi * rho * sim[-1, i]
-            fxc, _ = merit_error(n, xc, ind, nglass)
+                    centroid += points[s, i]
+                xc[i] = (1 + psi * rho) * centroid / count - psi * rho * points[-1, i]
+            fxc, _ = merit_error(n, xc, index, nglass)
             ncalls += 1
             if fxc <= fxr:
                 for i in range(count):
-                    sim[-1, i] = xc[i]
-                fsim[-1] = fxc
+                    points[-1, i] = xc[i]
+                results[-1] = fxc
             else:
                 doshrink = True
-        else:
-            # Perform an inside contraction
+        else:  # Inside Contraction
             for i in range(count):
-                xbar = 0
+                centroid = 0
                 for s in range(count):
-                    xbar += sim[s, i]
-                xcc[i] = (1 - psi) * xbar / count + psi * sim[-1, i]
-            fxcc, _ = merit_error(n, xcc, ind, nglass)
+                    centroid += points[s, i]
+                xc[i] = (1 - psi) * centroid / count + psi * points[-1, i]
+            fxcc, _ = merit_error(n, xc, index, nglass)
             ncalls += 1
-            if fxcc < fsim[-1]:
+            if fxcc < results[-1]:
                 for i in range(count):
-                    sim[-1, i] = xcc[i]
-                fsim[-1] = fxcc
+                    points[-1, i] = xc[i]
+                results[-1] = fxcc
             else:
                 doshrink = True
         if doshrink:
             for j in range(1, count + 1):
                 for i in range(count):
-                    sim[j, i] = sim[0, i] + sigma * (sim[j, i] - sim[0, i])
-                fsim[j], _ = merit_error(n, sim[j], ind, nglass)
+                    points[j, i] = points[0, i] + sigma * (points[j, i] - points[0, i])
+                results[j], _ = merit_error(n, points[j], index, nglass)
             ncalls += count
         # sort
         for i in range(count + 1):
-            x = fsim[i]
+            x = results[i]
             for k in range(count):
-                xmin[k] = sim[i, k]
+                sorter[k] = points[i, k]
             j = i - 1
-            while j >= 0 and fsim[j] > x:
-                fsim[j + 1] = fsim[j]
+            while j >= 0 and results[j] > x:
+                results[j + 1] = results[j]
                 for k in range(count):
-                    sim[j + 1, k] = sim[j, k]
+                    points[j + 1, k] = points[j, k]
                 j -= 1
-            fsim[j + 1] = x
+            results[j + 1] = x
             for k in range(count):
-                sim[j + 1, k] = xmin[k]
+                points[j + 1, k] = sorter[k]
         iterations += 1
-    for i in range(count):
-        xmin[i] = sim[0, i]
-    return fsim[0]
+    return points[0], results[0]
 
 
-@nb.cuda.jit((nb.i4[:], nb.f4[:, :], nb.f4[:]), fastmath=False)
+@nb.cuda.jit((nb.i4[:], nb.f8[:, :], nb.f8[:]), fastmath=False)
 def optimize(counter, ns, out):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
-    xmin = nb.cuda.local.array(count, nb.f4)
-    ind = nb.cuda.shared.array(1, nb.i4)
-    best = nb.cuda.shared.array(count, nb.f4)
+    index = nb.cuda.shared.array(1, nb.i4)
+    best = nb.cuda.shared.array(count, nb.f8)
     bestVal, bestInd = np.inf, 0
-    #n = nb.cuda.shared.array((count, nwaves), nb.f4)
+    #n = nb.cuda.shared.array((count, nwaves), nb.f8)
     nglass = ns.shape[0]
     top = nglass ** count
     while True:
         if tid == 0:
-            ind[0] = nb.cuda.atomic.add(counter, 0, 1)
+            index[0] = nb.cuda.atomic.add(counter, 0, 1)
         nb.cuda.syncthreads()
-        if ind[0] >= top:
+        if index[0] >= top:
             break
         #for i in range(count):
-        #    n[i, tid] = ns[(ind[0] // (nglass ** i)) % nglass, tid]
+        #    n[i, tid] = ns[(index[0] // (nglass ** i)) % nglass, tid]
         #nb.cuda.syncthreads()
-        fx = minimizer(ns, xmin, ind, nglass)
+        xmin, fx = minimizer(ns, index, nglass)
         if tid == 0 and fx < bestVal:
             bestVal = fx
-            bestInd = ind[0]
+            bestInd = index[0]
             for i in range(count):
                 best[i] = xmin[i]
     if tid == 0:
@@ -413,21 +397,20 @@ def optimize(counter, ns, out):
 w = np.linspace(500, 820, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
-glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
+glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float64)
 
 blockCount = 512
-d_out = nb.cuda.device_array(blockCount * (count + 2), np.float32)
+output = np.empty(blockCount * (count + 2), np.float64)
 counter = np.zeros((10,), np.int32)
 print('Starting')
 
 nb.cuda.profile_start()
 t1 = time.time()
-optimize[blockCount, nwaves](counter, glasses, d_out)
-output = d_out.copy_to_host()
+optimize[blockCount, nwaves](counter, glasses, output)
 dt = time.time() - t1
 nb.cuda.profile_stop()
 
-index = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
-gs = [names[(int(output[index + 1]) // (nglass ** i)) % nglass] for i in range(count)]
-print(output[index], *gs, *(output[index + 2:index + (count + 2)] * 180 / np.pi))
+indices = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
+gs = [names[(int(output[indices + 1]) // (nglass ** i)) % nglass] for i in range(count)]
+print(output[indices], *gs, *(output[indices + 2:indices + (count + 2)] * 180 / np.pi))
 print(dt, 's')
