@@ -224,8 +224,7 @@ def minimizer(n, index, nglass):
     points = nb.cuda.local.array((count_p1, count), nb.f8)
     results = nb.cuda.local.array(count_p1, nb.f8)
     # Share mutually exclusive used arrays to save space
-    xr = xc = sorter = nb.cuda.local.array(count, nb.f8)
-    xe = nb.cuda.local.array(count, nb.f8)
+    xr = xe = xc = sorter = nb.cuda.local.array(count, nb.f8)
 
     rho = 1
     chi = 2
@@ -289,26 +288,22 @@ def minimizer(n, index, nglass):
         ncalls += 1
         doshrink = False
 
-        if fxr < results[0]:  # Reflection or Expansion
-            for i in range(count):
-                centroid = 0
-                for s in range(count):
-                    centroid += points[s, i]
-                xe[i] = (1 + rho * chi) * centroid / count - rho * chi * points[-1, i]
-            fxe, _ = merit_error(n, xe, index, nglass)
-            ncalls += 1
-            if fxe < fxr:  # Expansion
-                for i in range(count):
-                    points[-1, i] = xe[i]
-                results[-1] = fxe
-            else:  # Reflection
-                for i in range(count):
-                    points[-1, i] = xr[i]
-                results[-1] = fxr
-        elif fxr < results[-2]:  # Reflection
+        if fxr < results[-2]:  # Reflection or Expansion
             for i in range(count):
                 points[-1, i] = xr[i]
             results[-1] = fxr
+            if fxr < results[0]:  # Maybe Expansion?
+                for i in range(count):
+                    centroid = 0
+                    for s in range(count):
+                        centroid += points[s, i]
+                    xe[i] = (1 + rho * chi) * centroid / count - rho * chi * points[-1, i]
+                fxe, _ = merit_error(n, xe, index, nglass)
+                ncalls += 1
+                if fxe < fxr:  # Do Expansion
+                    for i in range(count):
+                        points[-1, i] = xe[i]
+                    results[-1] = fxe
         elif fxr < results[-1]:  # Contraction
             for i in range(count):
                 centroid = 0
