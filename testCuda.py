@@ -13,7 +13,7 @@ from compoundprism.glasscat import read_glasscat, calc_n
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
-count = 4
+count = 3
 count_p1 = count + 1
 start = 2
 radius = 1.5
@@ -25,7 +25,7 @@ deltaT_target = 32 * math.pi / 180
 transmission_minimum = 0.85
 inital_angles = np.full((count,), math.pi / 2, np.float32)
 inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=30, linearity=1000, transm=6)
+base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=30, linearity=1000, transm=20)
 MeritWeights = namedtuple('MeritWeights', base_weights.keys())
 weights = MeritWeights(**base_weights)
 
@@ -142,20 +142,16 @@ def nonlinearity(delta):
 def merit_error(n, angles, ind, nglass):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
-    delta_spectrum = nb.cuda.shared.array(nwaves, nb.f8)
-    transm_spectrum = nb.cuda.shared.array(nwaves, nb.f8)
+    delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
+    transm_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
     mid = count // 2
-    beta = angles[mid] / 2
-    for i in range(count):
-        if i < mid:
-            beta += angles[i]
+    offAngle = sum(angles[:mid]) + angles[mid] / 2
     n1 = 1.0
     n2 = n[ind[0] % nglass, tid]
-    path0 = (start - radius) / math.cos(beta)
-    path1 = (start + radius) / math.cos(beta)
-    offAngle = beta
+    path0 = (start - radius) / math.cos(offAngle)
+    path1 = (start + radius) / math.cos(offAngle)
     sideL = height / math.cos(offAngle)
-    incident = theta0 + beta
+    incident = theta0 + offAngle
     crit_angle = math.pi / 2
     crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * 0.999)
     if crit_violation_count > 0:
@@ -196,19 +192,12 @@ def merit_error(n, angles, ind, nglass):
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
         T *= 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
-    delta = theta0 - (refracted + offAngle)
-    delta_spectrum[tid] = delta
+    delta_spectrum[tid] = delta = theta0 - (refracted + offAngle)
     transm_spectrum[tid] = T
     nb.cuda.syncthreads()
-    meanT = 0
     deltaC = delta_spectrum[nwaves // 2]
-    minVal, maxVal = delta_spectrum[0], delta_spectrum[0]
-    for i in range(nwaves):
-        minVal = min(minVal, delta_spectrum[i])
-        maxVal = max(maxVal, delta_spectrum[i])
-        meanT += transm_spectrum[i]
-    deltaT = (maxVal - minVal)
-    meanT /= nwaves
+    deltaT = (delta_spectrum.max() - delta_spectrum.min())
+    meanT = sum(transm_spectrum) / nwaves
     transm_err = min(transmission_minimum - meanT, 0)
     NL = nonlinearity(delta_spectrum)
     merit_err = weights.deviation * (deltaC - deltaC_target) ** 2 \
@@ -221,10 +210,11 @@ def merit_error(n, angles, ind, nglass):
 @nb.cuda.jit(device=True)
 def minimizer(n, index, nglass):
     const_init_angles = nb.cuda.const.array_like(inital_angles)
-    points = nb.cuda.local.array((count_p1, count), nb.f8)
-    results = nb.cuda.local.array(count_p1, nb.f8)
+    points = nb.cuda.local.array((count_p1, count), nb.f4)
+    results = nb.cuda.local.array(count_p1, nb.f4)
     # Share mutually exclusive used arrays to save space
-    xr = xe = xc = sorter = nb.cuda.local.array(count, nb.f8)
+    xr = xc = sorter = nb.cuda.local.array(count, nb.f4)
+    centroid = xe = nb.cuda.local.array(count, nb.f4)
 
     rho = 1
     chi = 2
@@ -235,8 +225,8 @@ def minimizer(n, index, nglass):
     x_tolerance = 1e-4
     f_tolerance = 1e-4
     
-    _, test = merit_error(n, const_init_angles, index, nglass)
-    if not test:
+    _, break_early_test = merit_error(n, const_init_angles, index, nglass)
+    if not break_early_test:
         return points[0], np.inf
 
     for i in range(count):
@@ -280,36 +270,31 @@ def minimizer(n, index, nglass):
             break
 
         for i in range(count):
-            centroid = 0
-            for s in range(count):
-                centroid += points[s, i]
-            xr[i] = (1 + rho) * centroid / count - rho * points[-1, i]
+            centroid[i] = center = sum(points[:-1, i]) / count
+            xr[i] = (1 + rho) * center - rho * points[-1, i]
         fxr, _ = merit_error(n, xr, index, nglass)
         ncalls += 1
-        doshrink = False
 
-        if fxr < results[-2]:  # Reflection or Expansion
+        if fxr < results[0]:  # Maybe Expansion?
+            for i in range(count):
+                xe[i] = (1 + rho * chi) * centroid[i] - rho * chi * points[-1, i]
+            fxe, _ = merit_error(n, xe, index, nglass)
+            ncalls += 1
+            if fxe < fxr:  # Expansion
+                for i in range(count):
+                    points[-1, i] = xe[i]
+                results[-1] = fxe
+            else:  # Reflection
+                for i in range(count):
+                    points[-1, i] = xr[i]
+                results[-1] = fxr
+        elif fxr < results[-2]:  # Reflection
             for i in range(count):
                 points[-1, i] = xr[i]
             results[-1] = fxr
-            if fxr < results[0]:  # Maybe Expansion?
-                for i in range(count):
-                    centroid = 0
-                    for s in range(count):
-                        centroid += points[s, i]
-                    xe[i] = (1 + rho * chi) * centroid / count - rho * chi * points[-1, i]
-                fxe, _ = merit_error(n, xe, index, nglass)
-                ncalls += 1
-                if fxe < fxr:  # Do Expansion
-                    for i in range(count):
-                        points[-1, i] = xe[i]
-                    results[-1] = fxe
         elif fxr < results[-1]:  # Contraction
             for i in range(count):
-                centroid = 0
-                for s in range(count):
-                    centroid += points[s, i]
-                xc[i] = (1 + psi * rho) * centroid / count - psi * rho * points[-1, i]
+                xc[i] = (1 + psi * rho) * centroid[i] - psi * rho * points[-1, i]
             fxc, _ = merit_error(n, xc, index, nglass)
             ncalls += 1
             if fxc <= fxr:
@@ -317,13 +302,14 @@ def minimizer(n, index, nglass):
                     points[-1, i] = xc[i]
                 results[-1] = fxc
             else:
-                doshrink = True
+                for j in range(1, count + 1):
+                    for i in range(count):
+                        points[j, i] = points[0, i] + sigma * (points[j, i] - points[0, i])
+                    results[j], _ = merit_error(n, points[j], index, nglass)
+                ncalls += count
         else:  # Inside Contraction
             for i in range(count):
-                centroid = 0
-                for s in range(count):
-                    centroid += points[s, i]
-                xc[i] = (1 - psi) * centroid / count + psi * points[-1, i]
+                xc[i] = (1 - psi) * centroid[i] + psi * points[-1, i]
             fxcc, _ = merit_error(n, xc, index, nglass)
             ncalls += 1
             if fxcc < results[-1]:
@@ -331,13 +317,11 @@ def minimizer(n, index, nglass):
                     points[-1, i] = xc[i]
                 results[-1] = fxcc
             else:
-                doshrink = True
-        if doshrink:
-            for j in range(1, count + 1):
-                for i in range(count):
-                    points[j, i] = points[0, i] + sigma * (points[j, i] - points[0, i])
-                results[j], _ = merit_error(n, points[j], index, nglass)
-            ncalls += count
+                for j in range(1, count + 1):
+                    for i in range(count):
+                        points[j, i] = points[0, i] + sigma * (points[j, i] - points[0, i])
+                    results[j], _ = merit_error(n, points[j], index, nglass)
+                ncalls += count
         # sort
         for i in range(count + 1):
             x = results[i]
@@ -356,12 +340,12 @@ def minimizer(n, index, nglass):
     return points[0], results[0]
 
 
-@nb.cuda.jit((nb.i4[:], nb.f8[:, :], nb.f8[:]), fastmath=False)
+@nb.cuda.jit((nb.i4[:], nb.f4[:, :], nb.f4[:]), fastmath=False)
 def optimize(counter, ns, out):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
     index = nb.cuda.shared.array(1, nb.i4)
-    best = nb.cuda.shared.array(count, nb.f8)
+    best = nb.cuda.shared.array(count, nb.f4)
     bestVal, bestInd = np.inf, 0
     #n = nb.cuda.shared.array((count, nwaves), nb.f8)
     nglass = ns.shape[0]
@@ -392,10 +376,10 @@ def optimize(counter, ns, out):
 w = np.linspace(500, 820, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
-glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float64)
+glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
-output = np.empty(blockCount * (count + 2), np.float64)
+output = np.empty(blockCount * (count + 2), np.float32)
 counter = np.zeros((10,), np.int32)
 print('Starting')
 
