@@ -198,7 +198,7 @@ def merit_error(n, angles, ind, nglass):
     deltaC = delta_spectrum[nwaves // 2]
     deltaT = (delta_spectrum.max() - delta_spectrum.min())
     meanT = sum(transm_spectrum) / nwaves
-    transm_err = min(transmission_minimum - meanT, 0)
+    transm_err = max(transmission_minimum - meanT, 0)
     NL = nonlinearity(delta_spectrum)
     merit_err = weights.deviation * (deltaC - deltaC_target) ** 2 \
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
@@ -261,12 +261,12 @@ def minimizer(n, index, nglass):
     iterations = 1
     while ncalls < max_call and iterations < max_iter:
         # Tolerence Check
-        maxF, maxS = 0, 0
+        tolCheck = True
         for i in range(1, count + 1):
-            maxF = max(maxF, abs(results[0] - results[i]))
+            tolCheck &= abs(results[0] - results[i]) <= f_tolerance
             for j in range(count):
-                maxS = max(maxS, abs(points[0, j] - points[i, j]))
-        if maxS <= x_tolerance and maxF <= f_tolerance:
+                tolCheck &= abs(points[0, j] - points[i, j]) <= x_tolerance
+        if tolCheck:
             break
 
         for i in range(count):
