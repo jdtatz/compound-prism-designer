@@ -6,9 +6,10 @@ import numba.cuda
 from numbaCudaFallbacks import syncthreads_and, syncthreads_or, syncthreads_popc
 import math
 import operator
-from collections import namedtuple, OrderedDict
+from collections import OrderedDict
 import time
 from compoundprism.glasscat import read_glasscat, calc_n
+from simple import describe
 
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
@@ -26,8 +27,8 @@ transmission_minimum = 0.85
 inital_angles = np.full((count,), math.pi / 2, np.float32)
 inital_angles[1::2] *= -1
 base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=30, linearity=1000, transm=20)
-MeritWeights = namedtuple('MeritWeights', base_weights.keys())
-weights = MeritWeights(**base_weights)
+weights_dtype = np.dtype([(k, 'f4') for k in base_weights.keys()])
+weights = np.rec.array([tuple(base_weights.values())], dtype=weights_dtype)[0]
 
 
 @nb.cuda.jit(device=True)
@@ -139,7 +140,7 @@ def nonlinearity(delta):
 
 
 @nb.cuda.jit(device=True)
-def merit_error(n, angles, ind, nglass):
+def merit_error(n, angles, index, nglass):
     tid = nb.cuda.threadIdx.x
     nb.cuda.syncthreads()
     delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
@@ -147,7 +148,7 @@ def merit_error(n, angles, ind, nglass):
     mid = count // 2
     offAngle = sum(angles[:mid]) + angles[mid] / 2
     n1 = 1.0
-    n2 = n[ind[0] % nglass, tid]
+    n2 = n[index % nglass, tid]
     path0 = (start - radius) / math.cos(offAngle)
     path1 = (start + radius) / math.cos(offAngle)
     sideL = height / math.cos(offAngle)
@@ -161,7 +162,7 @@ def merit_error(n, angles, ind, nglass):
     T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
     for i in range(1, count + 1):
         n1 = n2
-        n2 = n[(ind[0] // (nglass ** i)) % nglass, tid] if i < count else 1.0
+        n2 = n[(index // (nglass ** i)) % nglass, tid] if i < count else 1.0
         alpha = angles[i - 1]
         incident = refracted - alpha
 
@@ -230,11 +231,8 @@ def minimizer(n, index, nglass):
         return points[0], np.inf
 
     for i in range(count):
-        points[0, i] = const_init_angles[i]
-    for k in range(count):
-        for i in range(count):
-            points[k + 1, i] = const_init_angles[i]
-        points[k + 1, k] *= (1 + nonzdelt)
+        points[:, i] = const_init_angles[i]
+        points[i + 1, i] *= (1 + nonzdelt)
 
     max_iter = count * 200
     max_call = count * 200
@@ -340,29 +338,19 @@ def minimizer(n, index, nglass):
     return points[0], results[0]
 
 
-@nb.cuda.jit((nb.i4[:], nb.f4[:, :], nb.f4[:]), fastmath=False)
-def optimize(counter, ns, out):
+@nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8), fastmath=False)
+def optimize(ns, out, start, stop):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
-    index = nb.cuda.shared.array(1, nb.i4)
+    bcount = nb.cuda.gridDim.x
     best = nb.cuda.shared.array(count, nb.f4)
     bestVal, bestInd = np.inf, 0
-    #n = nb.cuda.shared.array((count, nwaves), nb.f8)
     nglass = ns.shape[0]
-    top = nglass ** count
-    while True:
-        if tid == 0:
-            index[0] = nb.cuda.atomic.add(counter, 0, 1)
-        nb.cuda.syncthreads()
-        if index[0] >= top:
-            break
-        #for i in range(count):
-        #    n[i, tid] = ns[(index[0] // (nglass ** i)) % nglass, tid]
-        #nb.cuda.syncthreads()
+    for index in range(start + bid, stop, bcount):
         xmin, fx = minimizer(ns, index, nglass)
         if tid == 0 and fx < bestVal:
             bestVal = fx
-            bestInd = index[0]
+            bestInd = index
             for i in range(count):
                 best[i] = xmin[i]
     if tid == 0:
@@ -373,23 +361,26 @@ def optimize(counter, ns, out):
             out[outi + i + 2] = best[i]
 
 
-w = np.linspace(500, 820, nwaves, dtype=np.float64)
+w = np.linspace(600, 1000, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
 output = np.empty(blockCount * (count + 2), np.float32)
-counter = np.zeros((10,), np.int32)
 print('Starting')
 
-nb.cuda.profile_start()
 t1 = time.time()
-optimize[blockCount, nwaves](counter, glasses, output)
+optimize[blockCount, nwaves](glasses, output, 0, nglass ** count)
 dt = time.time() - t1
-nb.cuda.profile_stop()
 
 indices = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
 gs = [names[(int(output[indices + 1]) // (nglass ** i)) % nglass] for i in range(count)]
-print(output[indices], *gs, *(output[indices + 2:indices + (count + 2)] * 180 / np.pi))
+angles = output[indices + 2:indices + (count + 2)]
+print(output[indices], *gs, *(angles * 180 / np.pi))
 print(dt, 's')
+
+
+ns = np.stack(calc_n(gcat[name], w) for name in gs)
+status, err, NL, deltaT, deltaC, delta, transm = describe(ns, angles, weights, start, radius, height, theta0, deltaC_target, deltaT_target, transmission_minimum)
+print(err, NL, delta*180/np.pi, transm*100)
