@@ -1,4 +1,5 @@
 from itertools import product, starmap
+from collections import OrderedDict
 import numpy as np
 
 __all__ = ["calc_n", "read_glasscat", "glass_combos", "glass_paired"]
@@ -43,7 +44,7 @@ def calc_n(glass_dict, wm):
 
 
 def read_glasscat(catalog_filename):
-    glasscat = {}
+    glasscat = OrderedDict()
     with open(catalog_filename, 'r') as f:
         for line in f:
             if line.startswith('NM'):
