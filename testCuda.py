@@ -3,6 +3,7 @@ import os
 import numpy as np
 import numba as nb
 import numba.cuda
+import numba.cuda.random
 from numbaCudaFallbacks import syncthreads_and, syncthreads_or, syncthreads_popc
 import math
 import operator
@@ -48,7 +49,6 @@ def nonlinearity(delta):
 @nb.cuda.jit(device=True)
 def merit_error(n, angles, index, nglass):
     tid = nb.cuda.threadIdx.x
-    nb.cuda.syncthreads()
     delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
     transm_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
     mid = count // 2
@@ -99,7 +99,7 @@ def merit_error(n, angles, index, nglass):
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
         T *= 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
-    delta_spectrum[tid] = delta = theta0 - (refracted + offAngle)
+    delta_spectrum[tid] = theta0 - (refracted + offAngle)
     transm_spectrum[tid] = T
     nb.cuda.syncthreads()
     deltaC = delta_spectrum[nwaves // 2]
@@ -114,138 +114,79 @@ def merit_error(n, angles, index, nglass):
     return merit_err, True
 
 
+x_tolerance = 1e-4
+f_tolerance = 1e-4
+maxiter = 10
+pop_size = 15
+pop_size_m1 = pop_size - 1
+crossover_probability = np.float32(0.5)
+differential_weight = np.float32(0.8)
+upper_bound = np.float32(3*np.pi/4)
+lower_bound = np.float32(np.pi / 6)
+
+
 @nb.cuda.jit(device=True)
-def minimizer(n, index, nglass):
-    const_init_angles = nb.cuda.const.array_like(inital_angles)
-    points = nb.cuda.local.array((count_p1, count), nb.f4)
-    results = nb.cuda.local.array(count_p1, nb.f4)
-    # Share mutually exclusive used arrays to save space
-    xr = xc = sorter = nb.cuda.local.array(count, nb.f4)
-    centroid = xe = nb.cuda.local.array(count, nb.f4)
-
-    rho = 1
-    chi = 2
-    psi = 0.5
-    sigma = 0.5
-    nonzdelt = 0.05
-    zdelt = 0.00025
-    x_tolerance = 1e-4
-    f_tolerance = 1e-4
-    
-    _, break_early_test = merit_error(n, const_init_angles, index, nglass)
-    if not break_early_test:
-        return points[0], np.inf
-
-    for i in range(count):
-        points[:, i] = const_init_angles[i]
-        points[i + 1, i] *= (1 + nonzdelt)
-
-    max_iter = count * 200
-    max_call = count * 200
-
-    for k in range(count + 1):
-        results[k], _ = merit_error(n, points[k], index, nglass)
-    ncalls = count
-
-    # sort
-    for i in range(count + 1):
-        fx = results[i]
-        for k in range(count):
-            sorter[k] = points[i, k]
-        j = i - 1
-        while j >= 0 and results[j] > fx:
-            results[j + 1] = results[j]
-            for k in range(count):
-                points[j + 1, k] = points[j, k]
-            j -= 1
-        results[j + 1] = fx
-        for k in range(count):
-            points[j + 1, k] = sorter[k]
-
-    iterations = 1
-    while ncalls < max_call and iterations < max_iter:
-        # Tolerence Check
-        tolCheck = True
-        for i in range(1, count + 1):
-            tolCheck &= abs(results[0] - results[i]) <= f_tolerance
-            for j in range(count):
-                tolCheck &= abs(points[0, j] - points[i, j]) <= x_tolerance
-        if tolCheck:
+def diff_ev(n, index, nglass, rng):
+    tid = nb.cuda.threadIdx.x
+    rid = nb.cuda.blockIdx.x * count + tid
+    population = nb.cuda.shared.array((pop_size, count), nb.f4)
+    results = nb.cuda.shared.array(pop_size, nb.f4)
+    y = nb.cuda.shared.array(count, nb.f4)
+    fisher = nb.cuda.shared.array(pop_size_m1, nb.i4)
+    minInd, minVal = 0, np.float32(np.inf)
+    any_valid = False
+    isodd = (-1 if (tid % 2 == 1) else 1)
+    for i in range(pop_size):
+        if tid < count:
+            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+            angle = lower_bound + rand * (upper_bound - lower_bound)
+            population[i, tid] = math.copysign(angle, isodd)
+        nb.cuda.syncthreads()
+        fx, valid = merit_error(n, population[i], index, nglass)
+        any_valid |= valid
+        if fx < minVal:
+            minInd, minVal = i, fx
+        if tid == 0:
+            results[i] = fx
+    if not any_valid:
+        return population[0], np.float32(np.inf)
+    for _ in range(maxiter):
+        if syncthreads_and(tid >= pop_size or tid == minInd or abs(results[minInd] - results[tid]) <= f_tolerance):
             break
-
-        for i in range(count):
-            centroid[i] = center = sum(points[:-1, i]) / count
-            xr[i] = (1 + rho) * center - rho * points[-1, i]
-        fxr, _ = merit_error(n, xr, index, nglass)
-        ncalls += 1
-
-        if fxr < results[0]:  # Maybe Expansion?
-            for i in range(count):
-                xe[i] = (1 + rho * chi) * centroid[i] - rho * chi * points[-1, i]
-            fxe, _ = merit_error(n, xe, index, nglass)
-            ncalls += 1
-            if fxe < fxr:  # Expansion
-                for i in range(count):
-                    points[-1, i] = xe[i]
-                results[-1] = fxe
-            else:  # Reflection
-                for i in range(count):
-                    points[-1, i] = xr[i]
-                results[-1] = fxr
-        elif fxr < results[-2]:  # Reflection
-            for i in range(count):
-                points[-1, i] = xr[i]
-            results[-1] = fxr
-        elif fxr < results[-1]:  # Contraction
-            for i in range(count):
-                xc[i] = (1 + psi * rho) * centroid[i] - psi * rho * points[-1, i]
-            fxc, _ = merit_error(n, xc, index, nglass)
-            ncalls += 1
-            if fxc <= fxr:
-                for i in range(count):
-                    points[-1, i] = xc[i]
-                results[-1] = fxc
-            else:
-                for j in range(1, count + 1):
-                    for i in range(count):
-                        points[j, i] = points[0, i] + sigma * (points[j, i] - points[0, i])
-                    results[j], _ = merit_error(n, points[j], index, nglass)
-                ncalls += count
-        else:  # Inside Contraction
-            for i in range(count):
-                xc[i] = (1 - psi) * centroid[i] + psi * points[-1, i]
-            fxcc, _ = merit_error(n, xc, index, nglass)
-            ncalls += 1
-            if fxcc < results[-1]:
-                for i in range(count):
-                    points[-1, i] = xc[i]
-                results[-1] = fxcc
-            else:
-                for j in range(1, count + 1):
-                    for i in range(count):
-                        points[j, i] = points[0, i] + sigma * (points[j, i] - points[0, i])
-                    results[j], _ = merit_error(n, points[j], index, nglass)
-                ncalls += count
-        # sort
-        for i in range(count + 1):
-            x = results[i]
-            for k in range(count):
-                sorter[k] = points[i, k]
-            j = i - 1
-            while j >= 0 and results[j] > x:
-                results[j + 1] = results[j]
-                for k in range(count):
-                    points[j + 1, k] = points[j, k]
-                j -= 1
-            results[j + 1] = x
-            for k in range(count):
-                points[j + 1, k] = sorter[k]
-        iterations += 1
-    return points[0], results[0]
+        for x in range(pop_size):
+            if tid == 0:
+                for i in range(0, pop_size_m1):
+                    rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+                    j = np.int32(i * rand)
+                    fisher[i] = fisher[j]
+                    fisher[j] = (i if i < x else (i+1))
+                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+                fisher[0] = np.int32(count * rand)
+            nb.cuda.syncthreads()
+            R, a, b, c = fisher[0], fisher[1], fisher[2], fisher[3]
+            if tid < count:
+                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+                ri = np.int32(count * rand)
+                if tid == R or ri < crossover_probability:
+                    y[tid] = population[a, tid] + differential_weight * (population[b, tid] - population[c, tid])
+                else:
+                    y[tid] = population[x, tid]
+            fx = results[x]
+            nb.cuda.syncthreads()
+            fy, _ = merit_error(n, y, index, nglass)
+            if fx > fy:
+                if tid == 0:
+                    results[x] = fy
+                if tid < count:
+                    population[x, tid] = y[tid]
+                if fy < minVal:
+                    minInd, minVal = x, fy
+    nb.cuda.syncthreads()
+    return population[minInd], minVal
 
 
-@nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8), fastmath=False)
-def optimize(ns, out, start, stop):
+@nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=False)
+def optimize(ns, out, start, stop, rng):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
     bcount = nb.cuda.gridDim.x
@@ -253,12 +194,13 @@ def optimize(ns, out, start, stop):
     bestVal, bestInd = np.inf, 0
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
-        xmin, fx = minimizer(ns, index, nglass)
+        xmin, fx = diff_ev(ns, index, nglass, rng)
         if tid == 0 and fx < bestVal:
             bestVal = fx
             bestInd = index
             for i in range(count):
                 best[i] = xmin[i]
+        nb.cuda.syncthreads()
     if tid == 0:
         outi = bid * (count + 2)
         out[outi] = bestVal
@@ -278,7 +220,8 @@ print('Starting')
 
 t1 = time.time()
 with nb.cuda.gpus[0]:
-    optimize[blockCount, nwaves](glasses, output, 0, nglass ** count)
+    rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * count, seed=42)
+    optimize[blockCount, nwaves](glasses, output, 0, nglass ** count, rng_states)
 dt = time.time() - t1
 
 indices = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
