@@ -20,92 +20,16 @@ start = 2
 radius = 1.5
 height = 25
 theta0 = 0
-nwaves = 100
+nwaves = 64
 deltaC_target = 0 * math.pi / 180
 deltaT_target = 32 * math.pi / 180
 transmission_minimum = 0.85
-inital_angles = np.full((count,), math.pi / 2, np.float32)
+inital_angles = np.full((count,), math.pi / 3, np.float32)
 inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=30, linearity=1000, transm=20)
-weights_dtype = np.dtype([(k, 'f4') for k in base_weights.keys()])
-weights = np.rec.array([tuple(base_weights.values())], dtype=weights_dtype)[0]
-
-
-@nb.cuda.jit(device=True)
-def ilog2(n):
-    return int(math.log(n, 2))
-
-
-@nb.cuda.jit(device=True)
-def isPow2(num):
-    return not (num & (num - 1))
-
-
-@nb.cuda.jit(device=True)
-def roundToPow2(num):
-    return 1 << ilog2(num)
-
-
-def create_fold_func(func, warpSize=32):
-    @nb.cuda.jit(device=True)
-    def warpFold(value, foldLen):
-        for i in range(1, 1 + ilog2(foldLen)):
-            value = func(value, nb.cuda.shfl.xor(value, foldLen >> i, foldLen))
-        return value
-
-    @nb.cuda.jit(device=True)
-    def partialWarpFold(value, warpId, foldLen):
-        closestWarpSize = roundToPow2(foldLen)
-        temp = nb.cuda.shfl.down(value, closestWarpSize)
-        if warpId < foldLen - closestWarpSize:
-            value = func(value, temp)
-        value = warpFold(value, closestWarpSize)
-        return nb.cuda.shfl.idx(value, 0)
-
-    @nb.cuda.jit(device=True)
-    def fold(value, sharedArr, foldLen):
-        tID = nb.cuda.threadIdx.x
-        if foldLen <= warpSize and isPow2(foldLen):
-            return warpFold(value, foldLen)
-        elif foldLen <= warpSize:
-            return partialWarpFold(value, tID, foldLen)
-        else:
-            warpCount = (foldLen / warpSize + 1) if (foldLen % warpSize) else (foldLen / warpSize)
-            warpCountPow2 = roundToPow2(warpCount)
-            withinFullWarp = tID < foldLen - foldLen % warpSize
-            warpID = tID % warpSize
-            nb.cuda.syncthreads()
-            if isPow2(foldLen) or withinFullWarp:
-                value = warpFold(value, warpSize)
-            elif isPow2(foldLen % warpSize):
-                value = warpFold(value, foldLen % warpSize)
-            else:
-                value = partialWarpFold(value, warpID, foldLen % warpSize)
-            if warpID == 0:
-                sharedArr[tID // warpSize] = value
-            nb.cuda.syncthreads()
-            faster = (warpCount - 1) > (1 + ilog2(warpCountPow2) + (0 if isPow2(warpCount) else 1))
-            allWarpsFull = foldLen % warpSize == 0
-            partialBigEnough = foldLen % warpSize >= warpCountPow2
-
-            if faster and (allWarpsFull or partialBigEnough or withinFullWarp):
-                value = sharedArr[warpID % warpCount]
-                if not isPow2(warpCount) and warpID < warpCount - warpCountPow2:
-                    value = func(value, sharedArr[warpID + warpCountPow2])
-                value = warpFold(value, warpCountPow2)
-                value = nb.cuda.shfl.idx(value, 0)
-            else:
-                value = sharedArr[0]
-                for i in range(1, warpCount):
-                    value = func(value, sharedArr[i])
-            return value
-
-    return fold
-
-
-foldSum = create_fold_func(operator.add)
-foldMax = create_fold_func(max)
-foldMin = create_fold_func(min)
+base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=25, linearity=1000, transm=50)
+fs = list(base_weights.keys())
+weights_dtype = np.dtype([(k, 'f4') for k in fs])
+weights = np.rec.array([tuple(base_weights[k] for k in fs)], dtype=weights_dtype)[0]
 
 
 @nb.cuda.jit(device=True)
@@ -119,24 +43,6 @@ def nonlinearity(delta):
     for i in range(2, nwaves - 2):
         err += ((delta[i + 2] - delta[i]) - (delta[i] - delta[i - 2])) ** 2 / 16
     return math.sqrt(err)
-
-
-'''
-@nb.cuda.jit(device=True)
-def nonlinearity(delta):
-    """Calculate the nonlinearity of the given delta spectrum"""
-    if tid == 0:
-        err = (((delta[2] - delta[0]) / 2) - (delta[1] - delta[0])) ** 2
-    elif tid == 1:
-        err = (((delta[3] - delta[1]) / 2) - (delta[1] - delta[0])) ** 2 / 4
-    elif tid == nwaves - 1:
-        err = ((delta[-1] - delta[-2]) - ((delta[-1] - delta[-3]) / 2)) ** 2
-    elif tid == nwaves - 2:
-        err = ((delta[-1] - delta[-2]) - ((delta[-2] - delta[-4]) / 2)) ** 2 / 4
-    else:
-        err = ((delta[tid + 2] - delta[tid]) - (delta[tid] - delta[tid - 2])) ** 2 / 16
-    return math.sqrt(foldSum(err))
-'''
 
 
 @nb.cuda.jit(device=True)
@@ -361,7 +267,7 @@ def optimize(ns, out, start, stop):
             out[outi + i + 2] = best[i]
 
 
-w = np.linspace(600, 1000, nwaves, dtype=np.float64)
+w = np.linspace(650, 1000, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
@@ -371,7 +277,8 @@ output = np.empty(blockCount * (count + 2), np.float32)
 print('Starting')
 
 t1 = time.time()
-optimize[blockCount, nwaves](glasses, output, 0, nglass ** count)
+with nb.cuda.gpus[0]:
+    optimize[blockCount, nwaves](glasses, output, 0, nglass ** count)
 dt = time.time() - t1
 
 indices = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
@@ -380,7 +287,10 @@ angles = output[indices + 2:indices + (count + 2)]
 print(output[indices], *gs, *(angles * 180 / np.pi))
 print(dt, 's')
 
-
 ns = np.stack(calc_n(gcat[name], w) for name in gs)
-status, err, NL, deltaT, deltaC, delta, transm = describe(ns, angles, weights, start, radius, height, theta0, deltaC_target, deltaT_target, transmission_minimum)
-print(err, NL, delta*180/np.pi, transm*100)
+status, *ret = describe(ns, angles, weights, start, radius, height, theta0, deltaC_target, deltaT_target, transmission_minimum)
+if status:
+    err, NL, deltaT, deltaC, delta, transm = ret
+    print(err, NL, delta*180/np.pi, transm*100)
+else:
+    print('Fail', ret)
