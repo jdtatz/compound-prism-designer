@@ -26,7 +26,7 @@ deltaC_target = np.float32(0 * math.pi / 180)
 deltaT_target = np.float32(48 * math.pi / 180)
 transmission_minimum = np.float32(0.85)
 crit_angle_prop = np.float32(0.999)
-base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
+base_weights = OrderedDict(thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
 ks, vs = zip(*base_weights.items())
 weights_dtype = np.dtype([(k, 'f4') for k in ks])
 weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
@@ -68,9 +68,8 @@ def merit_error(n, angles, index, nglass):
     sideL = height / math.cos(offAngle)
     incident = theta0 + offAngle
     crit_angle = np.float32(math.pi / 2)
-    crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * crit_angle_prop)
-    if crit_violation_count > 0:
-        return weights.tir * crit_violation_count, False
+    if syncthreads_or(abs(incident) >= crit_angle * crit_angle_prop):
+        return
     refracted = math.asin((n1 / n2) * math.sin(incident))
     ci, cr = math.cos(incident), math.cos(refracted)
     T = np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
@@ -81,9 +80,8 @@ def merit_error(n, angles, index, nglass):
         incident = refracted - alpha
 
         crit_angle = math.asin(n2 / n1) if n2 < n1 else np.float32(np.pi / 2)
-        crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * crit_angle_prop)
-        if crit_violation_count > 0:
-            return weights.tir * crit_violation_count, False
+        if syncthreads_or(abs(incident) >= crit_angle * crit_angle_prop):
+            return
 
         if i <= mid:
             offAngle -= alpha
@@ -99,9 +97,8 @@ def merit_error(n, angles, index, nglass):
         else:
             path0 = sideR - (sideL - path0) * los
             path1 = sideR - (sideL - path1) * los
-        invalid_count = syncthreads_popc(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR)
-        if invalid_count > 0:
-            return weights.invalid * invalid_count, False
+        if syncthreads_or(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR):
+            return
         sideL = sideR
 
         refracted = math.asin((n1 / n2) * math.sin(incident))
@@ -119,7 +116,7 @@ def merit_error(n, angles, index, nglass):
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
-    return merit_err, True
+    return merit_err
 
 
 @nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
@@ -139,12 +136,15 @@ def diff_ev(n, index, nglass, rng):
             angle = lower_bound + rand * (upper_bound - lower_bound)
             population[i, tid] = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
-        fx, valid = merit_error(n, population[i], index, nglass)
-        any_valid |= valid
-        if fx < minVal:
-            minInd, minVal = i, fx
-        if tid == 0:
-            results[i] = fx if valid else np.float32(np.inf)
+        fx = merit_error(n, population[i], index, nglass)
+        if fx is not None:
+            any_valid = True
+            if fx < minVal:
+                minInd, minVal = i, fx
+            if tid == 0:
+                results[i] = fx
+        elif tid == 0:
+            results[i] = np.float32(np.inf)
     if not any_valid:
         return False, population[0], np.float32(np.inf)
     for _ in range(maxiter):
@@ -169,8 +169,8 @@ def diff_ev(n, index, nglass, rng):
                     y[tid] = population[x, tid]
             fx = results[x]
             nb.cuda.syncthreads()
-            fy, valid = merit_error(n, y, index, nglass)
-            if valid and fx > fy:
+            fy = merit_error(n, y, index, nglass)
+            if fy is not None and fy < fx:
                 if tid == 0:
                     results[x] = fy
                 if tid < count:
