@@ -23,11 +23,11 @@ def describe(n, angles, weights, start, radius, height, theta0, deltaC_target, d
         n2 = n[i] if i < count else 1.0
         alpha = angles[i - 1]
         incident = refracted - alpha
-
-        #crit_angle = np.arcsin(n2 / n1)
-        #crit_violation_count = np.sum(np.abs(incident) >= crit_angle * 0.999)
-        #if crit_violation_count > 0:
-        #    return False, weights.tir * crit_violation_count
+        
+        crit_angle = np.arcsin(np.minimum(n2 / n1, 1))
+        crit_violation_count = np.sum(np.abs(incident) >= crit_angle * 0.999)
+        if crit_violation_count > 0:
+            return False, weights.tir * crit_violation_count
 
         if i <= mid:
             offAngle -= alpha
@@ -43,9 +43,9 @@ def describe(n, angles, weights, start, radius, height, theta0, deltaC_target, d
         else:
             path0 = sideR - (sideL - path0) * los
             path1 = sideR - (sideL - path1) * los
-        #invalid_count = syncthreads_popc(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR)
-        #if invalid_count > 0:
-        #    return False, weights.invalid * invalid_count
+        invalid_count = np.sum(np.logical_or(np.logical_or(0 > path0, path0 > sideR), np.logical_or(0 > path1, path1 > sideR)))
+        if invalid_count > 0:
+            return False, weights.invalid * invalid_count
         sideL = sideR
 
         refracted = np.arcsin((n1 / n2) * np.sin(incident))
