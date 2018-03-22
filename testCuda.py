@@ -15,7 +15,7 @@ from simple import describe
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
-count = 4
+count = 3
 count_p1 = count + 1
 start = 2
 radius = 1.5
@@ -43,14 +43,14 @@ upper_bound = np.float32(2*np.pi/3)  # ~120 degrees
 @nb.cuda.jit(device=True)
 def nonlinearity(delta):
     """Calculate the nonlinearity of the given delta spectrum"""
-    g0 = (((delta[2] - delta[0]) / 2) - (delta[1] - delta[0])) ** 2
-    gn1 = ((delta[-1] - delta[-2]) - ((delta[-1] - delta[-3]) / 2)) ** 2
-    g1 = (((delta[3] - delta[1]) / 2) - (delta[1] - delta[0])) ** 2 / 4
-    gn2 = ((delta[-1] - delta[-2]) - ((delta[-2] - delta[-4]) / 2)) ** 2 / 4
+    g0 = (2 * delta[2] + 2 * delta[0] - 4 * delta[1]) ** 2
+    gn1 = (2 * delta[-1] - 4 * delta[-2] + 2 * delta[-3]) ** 2
+    g1 = (delta[3] - 3 * delta[1] + 2 * delta[0]) ** 2
+    gn2 = (2 * delta[-1] - 3 * delta[-2] + delta[-4]) ** 2
     err = g0 + g1 + gn2 + gn1
     for i in range(2, nwaves - 2):
-        err += ((delta[i + 2] - delta[i]) - (delta[i] - delta[i - 2])) ** 2 / 16
-    return math.sqrt(err)
+        err += (delta[i + 2] + delta[i - 2] - 2 * delta[i]) ** 2
+    return math.sqrt(err) / 4
 
 
 @nb.cuda.jit(device=True)
@@ -118,10 +118,10 @@ def merit_error(n, angles, index, nglass):
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
-    return merit_err, True
+    return np.float32(merit_err), True
 
 
-@nb.cuda.jit(device=True)
+@nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
 def diff_ev(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
     rid = nb.cuda.blockIdx.x * count + tid
@@ -131,7 +131,7 @@ def diff_ev(n, index, nglass, rng):
     fisher = nb.cuda.shared.array(pop_size_m1, nb.i4)
     minInd, minVal = 0, np.float32(np.inf)
     any_valid = False
-    isodd = (-1 if (tid % 2 == 1) else 1)
+    isodd = np.float32(-1 if (tid % 2 == 1) else 1)
     for i in range(pop_size):
         if tid < count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
@@ -177,16 +177,16 @@ def diff_ev(n, index, nglass, rng):
                 if fy < minVal:
                     minInd, minVal = x, fy
     nb.cuda.syncthreads()
-    return True, population[minInd], minVal
+    return True, population[minInd], np.float32(minVal)
 
 
-@nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=False)
+@nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=True)
 def optimize(ns, out, start, stop, rng):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
     bcount = nb.cuda.gridDim.x
     best = nb.cuda.shared.array(count, nb.f4)
-    bestVal, bestInd = np.inf, 0
+    bestVal, bestInd = np.float32(np.inf), 0
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
         valid, xmin, fx = diff_ev(ns, index, nglass, rng)
@@ -214,7 +214,7 @@ output = np.empty(blockCount * (count + 2), np.float32)
 print('Starting')
 
 t1 = time.time()
-with nb.cuda.gpus[1]:
+with nb.cuda.gpus[0]:
     rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * count, seed=42)
     optimize[blockCount, nwaves](glasses, output, 0, nglass ** count, rng_states)
 dt = time.time() - t1
