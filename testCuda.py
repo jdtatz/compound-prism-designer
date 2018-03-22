@@ -15,7 +15,7 @@ from simple import describe
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
-count = 3
+count = 4
 count_p1 = count + 1
 start = 2
 radius = 1.5
@@ -23,14 +23,21 @@ height = 25
 theta0 = 0
 nwaves = 64
 deltaC_target = 0 * math.pi / 180
-deltaT_target = 32 * math.pi / 180
+deltaT_target = 48 * math.pi / 180
 transmission_minimum = 0.85
-inital_angles = np.full((count,), math.pi / 3, np.float32)
-inital_angles[1::2] *= -1
-base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=5, dispersion=25, linearity=1000, transm=50)
-fs = list(base_weights.keys())
-weights_dtype = np.dtype([(k, 'f4') for k in fs])
-weights = np.rec.array([tuple(base_weights[k] for k in fs)], dtype=weights_dtype)[0]
+base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
+ks, vs = zip(*base_weights.items())
+weights_dtype = np.dtype([(k, 'f4') for k in ks])
+weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
+
+f_atol = 1e-2
+maxiter = 10
+pop_size = 18
+pop_size_m1 = pop_size - 1
+crossover_probability = np.float32(0.6)
+differential_weight = np.float32(0.8)
+lower_bound = np.float32(np.pi/18)  # ~10 degrees
+upper_bound = np.float32(2*np.pi/3)  # ~120 degrees
 
 
 @nb.cuda.jit(device=True)
@@ -114,17 +121,6 @@ def merit_error(n, angles, index, nglass):
     return merit_err, True
 
 
-x_tolerance = 1e-4
-f_tolerance = 1e-4
-maxiter = 10
-pop_size = 15
-pop_size_m1 = pop_size - 1
-crossover_probability = np.float32(0.5)
-differential_weight = np.float32(0.8)
-upper_bound = np.float32(3*np.pi/4)
-lower_bound = np.float32(np.pi / 6)
-
-
 @nb.cuda.jit(device=True)
 def diff_ev(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
@@ -147,34 +143,33 @@ def diff_ev(n, index, nglass, rng):
         if fx < minVal:
             minInd, minVal = i, fx
         if tid == 0:
-            results[i] = fx
+            results[i] = fx if valid else np.inf
     if not any_valid:
-        return population[0], np.float32(np.inf)
+        return False, population[0], np.float32(np.inf)
     for _ in range(maxiter):
-        if syncthreads_and(tid >= pop_size or tid == minInd or abs(results[minInd] - results[tid]) <= f_tolerance):
+        if syncthreads_and(tid >= pop_size or tid == minInd or abs(results[minInd] - results[tid]) <= f_atol):
             break
         for x in range(pop_size):
             if tid == 0:
                 for i in range(0, pop_size_m1):
                     rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                     j = np.int32(i * rand)
-                    fisher[i] = fisher[j]
-                    fisher[j] = (i if i < x else (i+1))
+                    fisher[i], fisher[j] = fisher[j], (i if i < x else (i+1))
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                 fisher[0] = np.int32(count * rand)
             nb.cuda.syncthreads()
-            R, a, b, c = fisher[0], fisher[1], fisher[2], fisher[3]
+            R, a, b, c = fisher[:4]
             if tid < count:
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                ri = np.int32(count * rand)
-                if tid == R or ri < crossover_probability:
-                    y[tid] = population[a, tid] + differential_weight * (population[b, tid] - population[c, tid])
+                if tid == R or rand < crossover_probability:
+                    trial = population[a, tid] + differential_weight * (population[b, tid] - population[c, tid])
+                    y[tid] = math.copysign(max(min(abs(trial), upper_bound), lower_bound), isodd)
                 else:
                     y[tid] = population[x, tid]
             fx = results[x]
             nb.cuda.syncthreads()
-            fy, _ = merit_error(n, y, index, nglass)
-            if fx > fy:
+            fy, valid = merit_error(n, y, index, nglass)
+            if valid and fx > fy:
                 if tid == 0:
                     results[x] = fy
                 if tid < count:
@@ -182,7 +177,7 @@ def diff_ev(n, index, nglass, rng):
                 if fy < minVal:
                     minInd, minVal = x, fy
     nb.cuda.syncthreads()
-    return population[minInd], minVal
+    return True, population[minInd], minVal
 
 
 @nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=False)
@@ -194,8 +189,8 @@ def optimize(ns, out, start, stop, rng):
     bestVal, bestInd = np.inf, 0
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
-        xmin, fx = diff_ev(ns, index, nglass, rng)
-        if tid == 0 and fx < bestVal:
+        valid, xmin, fx = diff_ev(ns, index, nglass, rng)
+        if tid == 0 and valid and fx < bestVal:
             bestVal = fx
             bestInd = index
             for i in range(count):
@@ -219,7 +214,7 @@ output = np.empty(blockCount * (count + 2), np.float32)
 print('Starting')
 
 t1 = time.time()
-with nb.cuda.gpus[0]:
+with nb.cuda.gpus[1]:
     rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * count, seed=42)
     optimize[blockCount, nwaves](glasses, output, 0, nglass ** count, rng_states)
 dt = time.time() - t1
@@ -230,10 +225,10 @@ angles = output[indices + 2:indices + (count + 2)]
 print(output[indices], *gs, *(angles * 180 / np.pi))
 print(dt, 's')
 
-ns = np.stack(calc_n(gcat[name], w) for name in gs)
+ns = np.stack(calc_n(gcat[name], w) for name in gs).astype(np.float32)
 status, *ret = describe(ns, angles, weights, start, radius, height, theta0, deltaC_target, deltaT_target, transmission_minimum)
 if status:
     err, NL, deltaT, deltaC, delta, transm = ret
     print(err, NL, delta*180/np.pi, transm*100)
 else:
-    print('Fail', ret)
+    print('Fail', *ret)
