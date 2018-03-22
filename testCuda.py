@@ -34,7 +34,6 @@ weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
 f_atol = np.float32(1e-2)
 maxiter = 10
 pop_size = 18
-pop_size_m1 = pop_size - 1
 crossover_probability = np.float32(0.6)
 differential_weight = np.float32(0.8)
 lower_bound = np.float32(np.pi/18)  # ~10 degrees
@@ -126,7 +125,7 @@ def diff_ev(n, index, nglass, rng):
     population = nb.cuda.shared.array((pop_size, count), nb.f4)
     results = nb.cuda.shared.array(pop_size, nb.f4)
     y = nb.cuda.shared.array(count, nb.f4)
-    fisher = nb.cuda.shared.array(pop_size_m1, nb.i4)
+    sharedVar = nb.cuda.shared.array(4, nb.i4)
     minInd, minVal = 0, np.float32(np.inf)
     any_valid = False
     isodd = np.float32(-1 if (tid % 2 == 1) else 1)
@@ -152,14 +151,13 @@ def diff_ev(n, index, nglass, rng):
             break
         for x in range(pop_size):
             if tid == 0:
-                for i in range(0, pop_size_m1):
-                    rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                    j = np.int32(i * rand)
-                    fisher[i], fisher[j] = fisher[j], (i if i < x else (i+1))
-                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                fisher[0] = np.int32(count * rand)
+                sharedVar[:] = x
+                for i in range(1, 4):
+                    while sharedVar[i] in sharedVar[:i]:
+                        sharedVar[i] = pop_size * nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+                sharedVar[0] = count * nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
             nb.cuda.syncthreads()
-            R, a, b, c = fisher[:4]
+            R, a, b, c = sharedVar
             if tid < count:
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                 if tid == R or rand < crossover_probability:

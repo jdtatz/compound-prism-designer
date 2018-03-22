@@ -217,6 +217,26 @@ def overload_cuda_method(typ, attr):
     return decorate
 
 
+
+@numba.cuda.cudaimpl.lower('in', nb.types.Any, nb.types.IterableType)
+def lower_seq_in(context, builder, sig, args):
+    def in_impl(v, arr):
+        for elem in arr:
+            if elem == v:
+                return True
+        return False
+    return context.compile_internal(builder, in_impl, sig, args)
+
+
+@nb.cuda.cudadecl.intrinsic
+class Cuda_seq_in(nb.typing.templates.AbstractTemplate):
+    key = 'in'
+
+    def generic(self, args, kws):
+        assert len(args) == 2 and isinstance(args[1], nb.types.IterableType)
+        return nb.b1(*args)
+
+
 @overload_cuda(sum)
 def overload_cuda_sum(seq):
     if isinstance(seq, nb.types.Array):
