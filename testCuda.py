@@ -185,24 +185,19 @@ def diff_ev(n, index, nglass, rng):
 def optimize(ns, out, start, stop, rng):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
+    oid = bid * (count + 2)
     bcount = nb.cuda.gridDim.x
-    best = nb.cuda.shared.array(count, nb.f4)
-    bestVal, bestInd = np.float32(np.inf), 0
+    bestVal = np.float32(np.inf)
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
         valid, xmin, fx = diff_ev(ns, index, nglass, rng)
-        if tid == 0 and valid and fx < bestVal:
+        if tid < count and valid and fx < bestVal:
             bestVal = fx
-            bestInd = index
-            for i in range(count):
-                best[i] = xmin[i]
+            if tid == 0:
+                out[oid] = fx
+                out[oid + 1] = index
+            out[oid + tid + 2] = xmin[tid]
         nb.cuda.syncthreads()
-    if tid == 0:
-        outi = bid * (count + 2)
-        out[outi] = bestVal
-        out[outi + 1] = bestInd
-        for i in range(count):
-            out[outi + i + 2] = best[i]
 
 
 w = np.linspace(650, 1000, nwaves, dtype=np.float64)
