@@ -17,20 +17,21 @@ os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
 count = 3
 count_p1 = count + 1
-start = 2
-radius = 1.5
-height = 25
-theta0 = 0
+start = np.float32(2)
+radius = np.float32(1.5)
+height = np.float32(25)
+theta0 = np.float32(0)
 nwaves = 64
-deltaC_target = 0 * math.pi / 180
-deltaT_target = 48 * math.pi / 180
-transmission_minimum = 0.85
+deltaC_target = np.float32(0 * math.pi / 180)
+deltaT_target = np.float32(48 * math.pi / 180)
+transmission_minimum = np.float32(0.85)
+crit_angle_prop = np.float32(0.999)
 base_weights = OrderedDict(tir=50, invalid=50, thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
 ks, vs = zip(*base_weights.items())
 weights_dtype = np.dtype([(k, 'f4') for k in ks])
 weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
 
-f_atol = 1e-2
+f_atol = np.float32(1e-2)
 maxiter = 10
 pop_size = 18
 pop_size_m1 = pop_size - 1
@@ -40,7 +41,7 @@ lower_bound = np.float32(np.pi/18)  # ~10 degrees
 upper_bound = np.float32(2*np.pi/3)  # ~120 degrees
 
 
-@nb.cuda.jit(device=True)
+@nb.cuda.jit(nb.f4(nb.f4[:]), device=True)
 def nonlinearity(delta):
     """Calculate the nonlinearity of the given delta spectrum"""
     g0 = (2 * delta[2] + 2 * delta[0] - 4 * delta[1]) ** 2
@@ -59,28 +60,28 @@ def merit_error(n, angles, index, nglass):
     delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
     transm_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
     mid = count // 2
-    offAngle = sum(angles[:mid]) + angles[mid] / 2
-    n1 = 1.0
+    offAngle = sum(angles[:mid]) + angles[mid] / np.float32(2)
+    n1 = np.float32(1)
     n2 = n[index % nglass, tid]
     path0 = (start - radius) / math.cos(offAngle)
     path1 = (start + radius) / math.cos(offAngle)
     sideL = height / math.cos(offAngle)
     incident = theta0 + offAngle
-    crit_angle = math.pi / 2
-    crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * 0.999)
+    crit_angle = np.float32(math.pi / 2)
+    crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * crit_angle_prop)
     if crit_violation_count > 0:
         return weights.tir * crit_violation_count, False
     refracted = math.asin((n1 / n2) * math.sin(incident))
     ci, cr = math.cos(incident), math.cos(refracted)
-    T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
+    T = np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
     for i in range(1, count + 1):
         n1 = n2
-        n2 = n[(index // (nglass ** i)) % nglass, tid] if i < count else 1.0
+        n2 = n[(index // (nglass ** i)) % nglass, tid] if i < count else np.float32(1)
         alpha = angles[i - 1]
         incident = refracted - alpha
 
-        crit_angle = math.asin(n2 / n1) if n2 < n1 else (math.pi / 2)
-        crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * 0.999)
+        crit_angle = math.asin(n2 / n1) if n2 < n1 else np.float32(np.pi / 2)
+        crit_violation_count = syncthreads_popc(abs(incident) >= crit_angle * crit_angle_prop)
         if crit_violation_count > 0:
             return weights.tir * crit_violation_count, False
 
@@ -89,8 +90,8 @@ def merit_error(n, angles, index, nglass):
         elif i > mid + 1:
             offAngle += alpha
         sideR = height / math.cos(offAngle)
-        t1 = math.pi / 2 - refracted * math.copysign(1, alpha)
-        t2 = math.pi - abs(alpha) - t1
+        t1 = np.float32(np.pi / 2) - refracted * math.copysign(np.float32(1), alpha)
+        t2 = np.float32(np.pi) - abs(alpha) - t1
         los = math.sin(t1) / math.sin(t2)
         if alpha > 0:
             path0 *= los
@@ -105,20 +106,20 @@ def merit_error(n, angles, index, nglass):
 
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
-        T *= 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
+        T *= np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
     delta_spectrum[tid] = theta0 - (refracted + offAngle)
     transm_spectrum[tid] = T
     nb.cuda.syncthreads()
     deltaC = delta_spectrum[nwaves // 2]
     deltaT = (delta_spectrum.max() - delta_spectrum.min())
-    meanT = sum(transm_spectrum) / nwaves
-    transm_err = max(transmission_minimum - meanT, 0)
+    meanT = sum(transm_spectrum) / np.float32(nwaves)
+    transm_err = max(transmission_minimum - meanT, np.float32(0))
     NL = nonlinearity(delta_spectrum)
     merit_err = weights.deviation * (deltaC - deltaC_target) ** 2 \
                 + weights.dispersion * (deltaT - deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
-    return np.float32(merit_err), True
+    return merit_err, True
 
 
 @nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
@@ -143,7 +144,7 @@ def diff_ev(n, index, nglass, rng):
         if fx < minVal:
             minInd, minVal = i, fx
         if tid == 0:
-            results[i] = fx if valid else np.inf
+            results[i] = fx if valid else np.float32(np.inf)
     if not any_valid:
         return False, population[0], np.float32(np.inf)
     for _ in range(maxiter):

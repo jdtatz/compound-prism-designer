@@ -220,8 +220,9 @@ def overload_cuda_method(typ, attr):
 @overload_cuda(sum)
 def overload_cuda_sum(seq):
     if isinstance(seq, nb.types.Array):
+        zero = seq.dtype(0)
         def sum_impl(arr):
-            s = 0
+            s = zero
             for v in arr:
                 s += v
             return s
