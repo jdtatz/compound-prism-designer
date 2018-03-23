@@ -38,6 +38,10 @@ ks, vs = zip(*base_weights.items())
 weights_dtype = np.dtype([(k, 'f4') for k in ks])
 weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
 
+sample_size = 10
+steps = 15
+dr = np.float32(np.pi / 30)
+
 
 @nb.cuda.jit(device=True)
 def nonlinearity(delta):
@@ -117,101 +121,6 @@ def merit_error(n, angles, index, nglass):
     return merit_err
 
 
-f_atol = np.float32(1e-2)
-maxiter = 10
-pop_size = 18
-crossover_probability = np.float32(0.6)
-differential_weight = np.float32(0.8)
-
-
-@nb.cuda.jit(device=True)
-def diff_ev(n, index, nglass, rng):
-    tid = nb.cuda.threadIdx.x
-    rid = nb.cuda.blockIdx.x * count + tid
-    population = nb.cuda.shared.array((pop_size, count), nb.f4)
-    results = nb.cuda.shared.array(pop_size, nb.f4)
-    y = nb.cuda.shared.array(count, nb.f4)
-    sharedVar = nb.cuda.shared.array(4, nb.i4)
-    minInd, minVal = 0, np.float32(np.inf)
-    any_valid = False
-    isodd = np.float32(-1 if (tid % 2 == 1) else 1)
-    for i in range(pop_size):
-        if tid < count:
-            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
-            population[i, tid] = math.copysign(angle, isodd)
-        nb.cuda.syncthreads()
-        fx = merit_error(n, population[i], index, nglass)
-        if fx is not None:
-            any_valid = True
-            if fx < minVal:
-                minInd, minVal = i, fx
-            if tid == 0:
-                results[i] = fx
-        elif tid == 0:
-            results[i] = np.float32(np.inf)
-    if not any_valid:
-        return False, np.float32(0), np.float32(np.inf)
-    for _ in range(maxiter):
-        if syncthreads_and(tid >= pop_size or tid == minInd or abs(results[minInd] - results[tid]) <= f_atol):
-            break
-        for x in range(pop_size):
-            if tid == 0:
-                sharedVar[:] = x
-                for i in range(1, 4):
-                    while sharedVar[i] in sharedVar[:i]:
-                        sharedVar[i] = pop_size * nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                sharedVar[0] = count * nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            nb.cuda.syncthreads()
-            R, a, b, c = sharedVar
-            if tid < count:
-                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                if tid == R or rand < crossover_probability:
-                    trial = population[a, tid] + differential_weight * (population[b, tid] - population[c, tid])
-                    y[tid] = math.copysign(max(min(abs(trial), config.upper_bound), config.lower_bound), isodd)
-                else:
-                    y[tid] = population[x, tid]
-            fx = results[x]
-            nb.cuda.syncthreads()
-            fy = merit_error(n, y, index, nglass)
-            if fy is not None and fy < fx:
-                if tid == 0:
-                    results[x] = fy
-                if tid < count:
-                    population[x, tid] = y[tid]
-                if fy < minVal:
-                    minInd, minVal = x, fy
-    nb.cuda.syncthreads()
-    return True, population[minInd, tid] if tid < count else np.float32(0), np.float32(minVal)
-
-sample_size = 30
-
-
-@nb.cuda.jit(device=True)
-def random_sample(n, index, nglass, rng):
-    tid = nb.cuda.threadIdx.x
-    isodd = np.float32(-1 if (tid % 2 == 1) else 1)
-    rid = nb.cuda.blockIdx.x * count + tid
-    best = np.float32(0)
-    bestVal = np.float32(np.inf)
-    trial = nb.cuda.shared.array(count, nb.f4)
-    for _ in range(sample_size):
-        if tid < count:
-            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
-            trial[tid] = math.copysign(angle, isodd)
-        nb.cuda.syncthreads()
-        trialVal = merit_error(n, trial, index, nglass)
-        if tid < count and trialVal is not None and trialVal < bestVal:
-            bestVal = trialVal
-            best = trial[tid]
-    return True, best, bestVal
-
-sample_size = 10
-steps = 15
-dr = np.float32(np.pi / 30)
-
-
 @nb.cuda.jit(device=True)
 def random_search(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
@@ -232,6 +141,9 @@ def random_search(n, index, nglass, rng):
             bestVal = trialVal
             best = trial[tid]
     for _ in range(steps):
+        if tid == 0:
+            normed[0] = 0
+        nb.cuda.syncthreads()
         if tid < count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
             trial[tid] = v = 2 * rand - 1
@@ -251,24 +163,25 @@ def random_search(n, index, nglass, rng):
     return True, best, bestVal
 
 
-@nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=True)
+out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', count)])
+out_type = nb.from_dtype(out_dtype)
+
+
+@nb.cuda.jit((nb.f4[:, :], out_type[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=True)
 def optimize(ns, out, start, stop, rng):
     tid = nb.cuda.threadIdx.x
     bid = nb.cuda.blockIdx.x
-    oid = bid * (count + 2)
     bcount = nb.cuda.gridDim.x
     bestVal = np.float32(np.inf)
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
-        # valid, xmin, fx = diff_ev(ns, index, nglass, rng)
-        # valid, xmin, fx = random_sample(ns, index, nglass, rng)
         valid, xmin, fx = random_search(ns, index, nglass, rng)
         if tid < count and valid and fx < bestVal:
             bestVal = fx
             if tid == 0:
-                out[oid] = fx
-                out[oid + 1] = index
-            out[oid + tid + 2] = xmin
+                out[bid].value = fx
+                out[bid].index = index
+            out[bid].angles[tid] = xmin
         nb.cuda.syncthreads()
 
 
@@ -278,7 +191,7 @@ nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
-output = np.empty(blockCount * (count + 2), np.float32)
+output = np.recarray(blockCount, out_type)
 print('Starting')
 
 t1 = time.time()
@@ -287,10 +200,9 @@ with nb.cuda.gpus[1]:
     optimize[blockCount, nwaves](glasses, output, 0, nglass ** count, rng_states)
 dt = time.time() - t1
 
-indices = (count + 2) * np.where(output[::(count + 2)] == np.min(output[::(count + 2)]))[0][0]
-gs = [names[(int(output[indices + 1]) // (nglass ** i)) % nglass] for i in range(count)]
-angles = output[indices + 2:indices + (count + 2)]
-print(output[indices], *gs, *(angles * 180 / np.pi))
+value, ind, angles = output[np.argmin(output.value)]
+gs = [names[(ind // (nglass ** i)) % nglass] for i in range(count)]
+print(value, *gs, *np.rad2deg(angles))
 print(dt, 's')
 
 ns = np.stack(calc_n(gcat[name], w) for name in gs).astype(np.float32)
