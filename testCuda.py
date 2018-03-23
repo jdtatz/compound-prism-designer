@@ -16,28 +16,27 @@ os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
 count = 3
-count_p1 = count + 1
-start = np.float32(2)
-radius = np.float32(1.5)
-height = np.float32(25)
-theta0 = np.float32(0)
 nwaves = 64
-deltaC_target = np.float32(0 * math.pi / 180)
-deltaT_target = np.float32(48 * math.pi / 180)
-transmission_minimum = np.float32(0.85)
-crit_angle_prop = np.float32(0.999)
+
+config_dict = OrderedDict(theta0=0,
+                     start=2,
+                     radius=1.5,
+                     height=25,
+                     deltaC_target=0,
+                     deltaT_target=np.deg2rad(48),
+                     transmission_minimum=0.85,
+                     crit_angle_prop=0.999,
+                          lower_bound=np.deg2rad(10),
+                          upper_bound=np.deg2rad(120)
+                    )
+ks, vs = zip(*config_dict.items())
+config_dtype = np.dtype([(k, 'f4') for k in ks])
+config = np.rec.array([tuple(vs)], dtype=config_dtype)[0]
+
 base_weights = OrderedDict(thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
 ks, vs = zip(*base_weights.items())
 weights_dtype = np.dtype([(k, 'f4') for k in ks])
 weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
-
-f_atol = np.float32(1e-2)
-maxiter = 10
-pop_size = 18
-crossover_probability = np.float32(0.6)
-differential_weight = np.float32(0.8)
-lower_bound = np.float32(np.pi/18)  # ~10 degrees
-upper_bound = np.float32(2*np.pi/3)  # ~120 degrees
 
 
 @nb.cuda.jit(device=True)
@@ -48,7 +47,7 @@ def nonlinearity(delta):
     g1 = (delta[3] - 3 * delta[1] + 2 * delta[0]) ** 2
     gn2 = (2 * delta[-1] - 3 * delta[-2] + delta[-4]) ** 2
     err = g0 + g1 + gn2 + gn1
-    for i in range(2, nwaves - 2):
+    for i in range(2, delta.shape[0] - 2):
         err += (delta[i + 2] + delta[i - 2] - 2 * delta[i]) ** 2
     return math.sqrt(err) / 4
 
@@ -62,12 +61,12 @@ def merit_error(n, angles, index, nglass):
     offAngle = sum(angles[:mid]) + angles[mid] / np.float32(2)
     n1 = np.float32(1)
     n2 = n[index % nglass, tid]
-    path0 = (start - radius) / math.cos(offAngle)
-    path1 = (start + radius) / math.cos(offAngle)
-    sideL = height / math.cos(offAngle)
-    incident = theta0 + offAngle
+    path0 = (config.start - config.radius) / math.cos(offAngle)
+    path1 = (config.start + config.radius) / math.cos(offAngle)
+    sideL = config.height / math.cos(offAngle)
+    incident = config.theta0 + offAngle
     crit_angle = np.float32(math.pi / 2)
-    if syncthreads_or(abs(incident) >= crit_angle * crit_angle_prop):
+    if syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
         return
     refracted = math.asin((n1 / n2) * math.sin(incident))
     ci, cr = math.cos(incident), math.cos(refracted)
@@ -79,14 +78,14 @@ def merit_error(n, angles, index, nglass):
         incident = refracted - alpha
 
         crit_angle = math.asin(n2 / n1) if n2 < n1 else np.float32(np.pi / 2)
-        if syncthreads_or(abs(incident) >= crit_angle * crit_angle_prop):
+        if syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
             return
 
         if i <= mid:
             offAngle -= alpha
         elif i > mid + 1:
             offAngle += alpha
-        sideR = height / math.cos(offAngle)
+        sideR = config.height / math.cos(offAngle)
         t1 = np.float32(np.pi / 2) - refracted * math.copysign(np.float32(1), alpha)
         t2 = np.float32(np.pi) - abs(alpha) - t1
         los = math.sin(t1) / math.sin(t2)
@@ -103,19 +102,26 @@ def merit_error(n, angles, index, nglass):
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
         T *= np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
-    delta_spectrum[tid] = theta0 - (refracted + offAngle)
+    delta_spectrum[tid] = config.theta0 - (refracted + offAngle)
     transm_spectrum[tid] = T
     nb.cuda.syncthreads()
     deltaC = delta_spectrum[nwaves // 2]
     deltaT = (delta_spectrum.max() - delta_spectrum.min())
     meanT = sum(transm_spectrum) / np.float32(nwaves)
-    transm_err = max(transmission_minimum - meanT, np.float32(0))
+    transm_err = max(config.transmission_minimum - meanT, np.float32(0))
     NL = nonlinearity(delta_spectrum)
-    merit_err = weights.deviation * (deltaC - deltaC_target) ** 2 \
-                + weights.dispersion * (deltaT - deltaT_target) ** 2 \
+    merit_err = weights.deviation * (deltaC - config.deltaC_target) ** 2 \
+                + weights.dispersion * (deltaT - config.deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
     return merit_err
+
+
+f_atol = np.float32(1e-2)
+maxiter = 10
+pop_size = 18
+crossover_probability = np.float32(0.6)
+differential_weight = np.float32(0.8)
 
 
 @nb.cuda.jit(device=True)
@@ -132,7 +138,7 @@ def diff_ev(n, index, nglass, rng):
     for i in range(pop_size):
         if tid < count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = lower_bound + rand * (upper_bound - lower_bound)
+            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
             population[i, tid] = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
         fx = merit_error(n, population[i], index, nglass)
@@ -162,7 +168,7 @@ def diff_ev(n, index, nglass, rng):
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                 if tid == R or rand < crossover_probability:
                     trial = population[a, tid] + differential_weight * (population[b, tid] - population[c, tid])
-                    y[tid] = math.copysign(max(min(abs(trial), upper_bound), lower_bound), isodd)
+                    y[tid] = math.copysign(max(min(abs(trial), config.upper_bound), config.lower_bound), isodd)
                 else:
                     y[tid] = population[x, tid]
             fx = results[x]
@@ -192,7 +198,7 @@ def random_sample(n, index, nglass, rng):
     for _ in range(sample_size):
         if tid < count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = lower_bound + rand * (upper_bound - lower_bound)
+            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
             trial[tid] = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
@@ -218,7 +224,7 @@ def random_search(n, index, nglass, rng):
     for _ in range(sample_size):
         if tid < count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = lower_bound + rand * (upper_bound - lower_bound)
+            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
             trial[tid] = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
@@ -236,7 +242,7 @@ def random_search(n, index, nglass, rng):
             normed[0] = math.sqrt(normed[0]) * dr * rand ** (1 / count)
         nb.cuda.syncthreads()
         if tid < count:
-            trial[tid] = math.copysign(max(min(abs(best + normed[0] * trial[tid]), upper_bound), lower_bound), isodd)
+            trial[tid] = math.copysign(max(min(abs(best + normed[0] * trial[tid]), config.upper_bound), config.lower_bound), isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
         if tid < count and trialVal is not None and trialVal < bestVal:
@@ -288,7 +294,7 @@ print(output[indices], *gs, *(angles * 180 / np.pi))
 print(dt, 's')
 
 ns = np.stack(calc_n(gcat[name], w) for name in gs).astype(np.float32)
-status, *ret = describe(ns, angles, weights, start, radius, height, theta0, deltaC_target, deltaT_target, transmission_minimum)
+status, *ret = describe(ns, angles, config, weights)
 if status:
     err, NL, deltaT, deltaC, delta, transm = ret
     print(err, NL, delta*180/np.pi, transm*100)
