@@ -40,7 +40,7 @@ lower_bound = np.float32(np.pi/18)  # ~10 degrees
 upper_bound = np.float32(2*np.pi/3)  # ~120 degrees
 
 
-@nb.cuda.jit(nb.f4(nb.f4[:]), device=True)
+@nb.cuda.jit(device=True)
 def nonlinearity(delta):
     """Calculate the nonlinearity of the given delta spectrum"""
     g0 = (2 * delta[2] + 2 * delta[0] - 4 * delta[1]) ** 2
@@ -118,7 +118,7 @@ def merit_error(n, angles, index, nglass):
     return merit_err
 
 
-@nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
+@nb.cuda.jit(device=True)
 def diff_ev(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
     rid = nb.cuda.blockIdx.x * count + tid
@@ -181,7 +181,7 @@ def diff_ev(n, index, nglass, rng):
 sample_size = 30
 
 
-@nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
+@nb.cuda.jit(device=True)
 def random_sample(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
     isodd = np.float32(-1 if (tid % 2 == 1) else 1)
@@ -206,7 +206,7 @@ steps = 15
 dr = np.float32(np.pi / 30)
 
 
-@nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
+@nb.cuda.jit(device=True)
 def random_search(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
     isodd = np.float32(-1 if (tid % 2 == 1) else 1)
