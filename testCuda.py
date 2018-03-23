@@ -145,7 +145,7 @@ def diff_ev(n, index, nglass, rng):
         elif tid == 0:
             results[i] = np.float32(np.inf)
     if not any_valid:
-        return False, population[0], np.float32(np.inf)
+        return False, np.float32(0), np.float32(np.inf)
     for _ in range(maxiter):
         if syncthreads_and(tid >= pop_size or tid == minInd or abs(results[minInd] - results[tid]) <= f_atol):
             break
@@ -176,7 +176,73 @@ def diff_ev(n, index, nglass, rng):
                 if fy < minVal:
                     minInd, minVal = x, fy
     nb.cuda.syncthreads()
-    return True, population[minInd], np.float32(minVal)
+    return True, population[minInd, tid] if tid < count else np.float32(0), np.float32(minVal)
+
+sample_size = 30
+
+
+@nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
+def random_sample(n, index, nglass, rng):
+    tid = nb.cuda.threadIdx.x
+    isodd = np.float32(-1 if (tid % 2 == 1) else 1)
+    rid = nb.cuda.blockIdx.x * count + tid
+    best = np.float32(0)
+    bestVal = np.float32(np.inf)
+    trial = nb.cuda.shared.array(count, nb.f4)
+    for _ in range(sample_size):
+        if tid < count:
+            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+            angle = lower_bound + rand * (upper_bound - lower_bound)
+            trial[tid] = math.copysign(angle, isodd)
+        nb.cuda.syncthreads()
+        trialVal = merit_error(n, trial, index, nglass)
+        if tid < count and trialVal is not None and trialVal < bestVal:
+            bestVal = trialVal
+            best = trial[tid]
+    return True, best, bestVal
+
+sample_size = 10
+steps = 15
+dr = np.float32(np.pi / 30)
+
+
+@nb.cuda.jit((nb.f4[:, :], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), device=True)
+def random_search(n, index, nglass, rng):
+    tid = nb.cuda.threadIdx.x
+    isodd = np.float32(-1 if (tid % 2 == 1) else 1)
+    rid = nb.cuda.blockIdx.x * count + tid
+    best = np.float32(0)
+    bestVal = np.float32(np.inf)
+    trial = nb.cuda.shared.array(count, nb.f4)
+    normed = nb.cuda.shared.array(1, nb.f4)
+    for _ in range(sample_size):
+        if tid < count:
+            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+            angle = lower_bound + rand * (upper_bound - lower_bound)
+            trial[tid] = math.copysign(angle, isodd)
+        nb.cuda.syncthreads()
+        trialVal = merit_error(n, trial, index, nglass)
+        if tid < count and trialVal is not None and trialVal < bestVal:
+            bestVal = trialVal
+            best = trial[tid]
+    for _ in range(steps):
+        if tid < count:
+            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+            trial[tid] = v = 2 * rand - 1
+            nb.cuda.atomic.add(normed, 0, v**2)
+        nb.cuda.syncthreads()
+        if tid == 0:
+            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+            normed[0] = math.sqrt(normed[0]) * dr * rand ** (1 / count)
+        nb.cuda.syncthreads()
+        if tid < count:
+            trial[tid] = math.copysign(max(min(abs(best + normed[0] * trial[tid]), upper_bound), lower_bound), isodd)
+        nb.cuda.syncthreads()
+        trialVal = merit_error(n, trial, index, nglass)
+        if tid < count and trialVal is not None and trialVal < bestVal:
+            bestVal = trialVal
+            best = trial[tid]
+    return True, best, bestVal
 
 
 @nb.cuda.jit((nb.f4[:, :], nb.f4[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=True)
@@ -188,13 +254,15 @@ def optimize(ns, out, start, stop, rng):
     bestVal = np.float32(np.inf)
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
-        valid, xmin, fx = diff_ev(ns, index, nglass, rng)
+        # valid, xmin, fx = diff_ev(ns, index, nglass, rng)
+        # valid, xmin, fx = random_sample(ns, index, nglass, rng)
+        valid, xmin, fx = random_search(ns, index, nglass, rng)
         if tid < count and valid and fx < bestVal:
             bestVal = fx
             if tid == 0:
                 out[oid] = fx
                 out[oid + 1] = index
-            out[oid + tid + 2] = xmin[tid]
+            out[oid + tid + 2] = xmin
         nb.cuda.syncthreads()
 
 
@@ -208,7 +276,7 @@ output = np.empty(blockCount * (count + 2), np.float32)
 print('Starting')
 
 t1 = time.time()
-with nb.cuda.gpus[0]:
+with nb.cuda.gpus[1]:
     rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * count, seed=42)
     optimize[blockCount, nwaves](glasses, output, 0, nglass ** count, rng_states)
 dt = time.time() - t1
