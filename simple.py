@@ -2,10 +2,11 @@ import numpy as np
 
 
 def describe(n, angles, config, weights):
+    assert np.all(np.abs(angles) < np.pi), 'Need Radians not Degrees'
     count, nwaves = n.shape
     mid = count // 2
     offAngle = np.sum(angles[:mid]) + angles[mid] / 2
-    n1 = 1.0
+    n1 = 1
     n2 = n[0]
     path0 = (config.start - config.radius) / np.cos(offAngle)
     path1 = (config.start + config.radius) / np.cos(offAngle)
@@ -14,20 +15,20 @@ def describe(n, angles, config, weights):
     crit_angle = np.pi / 2
     crit_violation_count = np.sum(np.abs(incident) >= crit_angle * config.crit_angle_prop)
     if crit_violation_count > 0:
-        return False, weights.tir * crit_violation_count
+        return 0
     refracted = np.arcsin((n1 / n2) * np.sin(incident))
     ci, cr = np.cos(incident), np.cos(refracted)
     T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
     for i in range(1, count + 1):
         n1 = n2
-        n2 = n[i] if i < count else 1.0
+        n2 = n[i] if i < count else 1
         alpha = angles[i - 1]
         incident = refracted - alpha
         
         crit_angle = np.arcsin(np.minimum(n2 / n1, 1))
         crit_violation_count = np.sum(np.abs(incident) >= crit_angle * config.crit_angle_prop)
         if crit_violation_count > 0:
-            return False, weights.tir * crit_violation_count
+            return i
 
         if i <= mid:
             offAngle -= alpha
@@ -45,7 +46,7 @@ def describe(n, angles, config, weights):
             path1 = sideR - (sideL - path1) * los
         invalid_count = np.sum(np.logical_or(np.logical_or(0 > path0, path0 > sideR), np.logical_or(0 > path1, path1 > sideR)))
         if invalid_count > 0:
-            return False, weights.invalid * invalid_count
+            return i
         sideL = sideR
 
         refracted = np.arcsin((n1 / n2) * np.sin(incident))
@@ -62,4 +63,4 @@ def describe(n, angles, config, weights):
                 + weights.dispersion * (deltaT - config.deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
-    return True, merit_err, NL, deltaT, deltaC, delta_spectrum, transm_spectrum
+    return merit_err, NL, deltaT, deltaC, delta_spectrum, transm_spectrum

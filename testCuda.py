@@ -1,10 +1,10 @@
-#!/usr/bin/env python3.6
+#!/usr/bin/env python3
 import os
 import numpy as np
+from numbaCudaFallbacks import syncthreads_and, syncthreads_or, syncthreads_popc, create_reduce
 import numba as nb
 import numba.cuda
 import numba.cuda.random
-from numbaCudaFallbacks import syncthreads_and, syncthreads_or, syncthreads_popc
 import math
 import operator
 from collections import OrderedDict
@@ -18,17 +18,24 @@ os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 count = 3
 nwaves = 64
 
+warp_size = 32
+warp_count = int(np.ceil(nwaves / warp_size))
+sum_count_f32 = create_reduce(operator.add, count)
+sum_nwaves_f32 = create_reduce(operator.add, nwaves)
+max_nwaves_f32 = create_reduce(max, nwaves)
+min_nwaves_f32 = create_reduce(min, nwaves)
+
 config_dict = OrderedDict(theta0=0,
-                     start=2,
-                     radius=1.5,
-                     height=25,
-                     deltaC_target=0,
-                     deltaT_target=np.deg2rad(48),
-                     transmission_minimum=0.85,
-                     crit_angle_prop=0.999,
+                          start=2,
+                          radius=1.5,
+                          height=25,
+                          deltaC_target=0,
+                          deltaT_target=np.deg2rad(48),
+                          transmission_minimum=0.85,
+                          crit_angle_prop=0.999,
                           lower_bound=np.deg2rad(10),
                           upper_bound=np.deg2rad(120)
-                    )
+                         )
 ks, vs = zip(*config_dict.items())
 config_dtype = np.dtype([(k, 'f4') for k in ks])
 config = np.rec.array([tuple(vs)], dtype=config_dtype)[0]
@@ -39,30 +46,34 @@ weights_dtype = np.dtype([(k, 'f4') for k in ks])
 weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
 
 sample_size = 10
-steps = 15
-dr = np.float32(np.pi / 30)
+steps = 5
+dr = np.float32(np.deg2rad(6))
 
 
 @nb.cuda.jit(device=True)
-def nonlinearity(delta):
+def nonlinearity(delta, buffer):
     """Calculate the nonlinearity of the given delta spectrum"""
-    g0 = (2 * delta[2] + 2 * delta[0] - 4 * delta[1]) ** 2
-    gn1 = (2 * delta[-1] - 4 * delta[-2] + 2 * delta[-3]) ** 2
-    g1 = (delta[3] - 3 * delta[1] + 2 * delta[0]) ** 2
-    gn2 = (2 * delta[-1] - 3 * delta[-2] + delta[-4]) ** 2
-    err = g0 + g1 + gn2 + gn1
-    for i in range(2, delta.shape[0] - 2):
-        err += (delta[i + 2] + delta[i - 2] - 2 * delta[i]) ** 2
-    return math.sqrt(err) / 4
+    tid = nb.cuda.threadIdx.x
+    if tid == 0:
+        err = (2 * delta[2] + 2 * delta[0] - 4 * delta[1]) ** 2
+    elif tid == nwaves - 1:
+        err = (2 * delta[-1] - 4 * delta[-2] + 2 * delta[-3]) ** 2
+    elif tid == 1:
+        err = (delta[3] - 3 * delta[1] + 2 * delta[0]) ** 2
+    elif tid == nwaves - 2:
+        err = (2 * delta[-1] - 3 * delta[-2] + delta[-4]) ** 2
+    else:
+        err = (delta[tid + 2] + delta[tid - 2] - 2 * delta[tid]) ** 2
+    return math.sqrt(sum_nwaves_f32(err, buffer)) / 4
 
 
 @nb.cuda.jit(device=True)
 def merit_error(n, angles, index, nglass):
     tid = nb.cuda.threadIdx.x
     delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
-    transm_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
+    buffer = nb.cuda.shared.array(warp_count, nb.f4)
     mid = count // 2
-    offAngle = sum(angles[:mid]) + angles[mid] / np.float32(2)
+    offAngle = angles[:mid].sum() + angles[mid] / np.float32(2)
     n1 = np.float32(1)
     n2 = n[index % nglass, tid]
     path0 = (config.start - config.radius) / math.cos(offAngle)
@@ -106,14 +117,12 @@ def merit_error(n, angles, index, nglass):
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
         T *= np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
-    delta_spectrum[tid] = config.theta0 - (refracted + offAngle)
-    transm_spectrum[tid] = T
-    nb.cuda.syncthreads()
+    delta_spectrum[tid] = delta = config.theta0 - (refracted + offAngle)
+    deltaT = (max_nwaves_f32(delta, buffer) - min_nwaves_f32(delta, buffer))
     deltaC = delta_spectrum[nwaves // 2]
-    deltaT = (delta_spectrum.max() - delta_spectrum.min())
-    meanT = sum(transm_spectrum) / np.float32(nwaves)
+    meanT = sum_nwaves_f32(T, buffer) / np.float32(nwaves)
     transm_err = max(config.transmission_minimum - meanT, np.float32(0))
-    NL = nonlinearity(delta_spectrum)
+    NL = nonlinearity(delta_spectrum, buffer)
     merit_err = weights.deviation * (deltaC - config.deltaC_target) ** 2 \
                 + weights.dispersion * (deltaT - config.deltaT_target) ** 2 \
                 + weights.linearity * NL \
@@ -141,20 +150,14 @@ def random_search(n, index, nglass, rng):
             bestVal = trialVal
             best = trial[tid]
     for _ in range(steps):
-        if tid == 0:
-            normed[0] = 0
-        nb.cuda.syncthreads()
         if tid < count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            trial[tid] = v = 2 * rand - 1
-            nb.cuda.atomic.add(normed, 0, v**2)
-        nb.cuda.syncthreads()
-        if tid == 0:
-            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            normed[0] = math.sqrt(normed[0]) * dr * rand ** (1 / count)
-        nb.cuda.syncthreads()
-        if tid < count:
-            trial[tid] = math.copysign(max(min(abs(best + normed[0] * trial[tid]), config.upper_bound), config.lower_bound), isodd)
+            xi = 2 * rand - 1
+            if tid == 0:
+                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+                normed[0] = dr * rand ** (1 / count)
+            test = best + normed[0] * xi / math.sqrt(sum_count_f32(xi**2))
+            trial[tid] = math.copysign(max(min(abs(test), config.upper_bound), config.lower_bound), isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
         if tid < count and trialVal is not None and trialVal < bestVal:
@@ -206,9 +209,9 @@ print(value, *gs, *np.rad2deg(angles))
 print(dt, 's')
 
 ns = np.stack(calc_n(gcat[name], w) for name in gs).astype(np.float32)
-status, *ret = describe(ns, angles, config, weights)
-if status:
+ret = describe(ns, angles, config, weights)
+if isinstance(ret, int):
+    print('Failed at interface', ret)
+else:
     err, NL, deltaT, deltaC, delta, transm = ret
     print(err, NL, delta*180/np.pi, transm*100)
-else:
-    print('Fail', *ret)
