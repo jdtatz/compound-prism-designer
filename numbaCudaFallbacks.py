@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import numba as nb
 import numba.typing
@@ -309,7 +310,7 @@ def add_nvvm_intrinsic(name, fname, signature, make_global=True):
     @numba.cuda.cudaimpl.lower(stub, *signature.args)
     def lower_nvvm_intrinsic(context, builder, sig, args):
         lmod = builder.module
-        func = lmod.get_or_insert_function(llvm_signature, name=fname)
+        func = nb.cgutils.insert_pure_function(lmod, llvm_signature, name=fname)
         return builder.call(func, args)
 
     @nb.cuda.cudadecl.intrinsic
@@ -328,6 +329,7 @@ syncthreads_or = add_nvvm_intrinsic('syncthreads_or', 'llvm.nvvm.barrier0.or', n
 syncthreads_popc = add_nvvm_intrinsic('syncthreads_popc', 'llvm.nvvm.barrier0.popc', nb.i4(nb.i4))
 laneid = add_nvvm_intrinsic('laneid', 'llvm.nvvm.read.ptx.sreg.laneid', nb.i4())
 ctlz = add_nvvm_intrinsic('ctlz', 'llvm.ctlz.i32', nb.i4(nb.i4))
+warp_sync = add_nvvm_intrinsic('warp_sync', 'llvm.nvvm.bar.warp.sync', nb.void(nb.i4))
 
 
 
@@ -340,24 +342,18 @@ shfl_sync_llvm_sign = lc.Type.function(lc.Type.struct((lc.Type.int(32), lc.Type.
 
 @numba.cuda.cudaimpl.lower(shfl_sync, nb.i4, nb.i4, nb.i4, nb.i4, nb.i4)
 def lower_shfl_sync_intrinsic(context, builder, sig, args):
-    fn = builder.module.get_or_insert_function(shfl_sync_llvm_sign, name='llvm.nvvm.shfl.sync.i32')
-    fn.attributes.add("readonly")
-    fn.attributes.add("nounwind")
+    fn = nb.cgutils.insert_pure_function(builder.module, shfl_sync_llvm_sign, 'llvm.nvvm.shfl.sync.i32')
     return builder.call(fn, args, tail=True)
 
 
 @numba.cuda.cudaimpl.lower(shfl_sync, nb.i4, nb.i4, nb.f4, nb.i4, nb.i4)
 def lower_shfl_sync_intrinsic(context, builder, sig, args):
-    casted = builder.bitcast(args[2], lc.Type.int(32))
-    new_args = (args[0], args[1], casted, args[3], args[4])
-    fn = builder.module.get_or_insert_function(shfl_sync_llvm_sign, name='llvm.nvvm.shfl.sync.i32')
-    fn.attributes.add("readonly")
-    fn.attributes.add("nounwind")
-    shfled = builder.call(fn, new_args, tail=True)
-    val = builder.extract_value(shfled, 0)
-    tester = builder.extract_value(shfled, 1)
-    ret = builder.bitcast(val, lc.Type.float())
-    return nb.cgutils.make_anonymous_struct(builder, (ret, tester))
+    casted_args = (args[0], args[1], builder.bitcast(args[2], lc.Type.int(32)), args[3], args[4])
+    fn = nb.cgutils.insert_pure_function(builder.module, shfl_sync_llvm_sign, 'llvm.nvvm.shfl.sync.i32')
+    rstruct = builder.call(fn, casted_args, tail=True)
+    ival, pred = builder.extract_value(rstruct, 0), builder.extract_value(rstruct, 1)
+    fval = builder.bitcast(ival, lc.Type.float())
+    return nb.cgutils.make_anonymous_struct(builder, (fval, pred))
 
 
 @nb.cuda.cudadecl.intrinsic
@@ -365,84 +361,74 @@ class CudaShflSyncTemplate(nb.typing.templates.AbstractTemplate):
     key = shfl_sync
     def generic(self, args, kws):
         vty = args[2]
-        assert vty == nb.i4 or vty == nb.f4
-        return nb.types.Tuple((vty, nb.boolean))(nb.i4, nb.i4, vty, nb.i4, nb.i4)
+        if vty == nb.i4 or vty == nb.i8 or vty == nb.f4:
+            return nb.types.Tuple((vty, nb.boolean))(nb.i4, nb.i4, vty, nb.i4, nb.i4)
 
 nb.cuda.cudadecl.intrinsic_global(shfl_sync, nb.types.Function(CudaShflSyncTemplate))
 
 
-def create_reduce(func, size, ntype=nb.f4):
-    warp_size = np.int32(32)
-    mask = np.int32(0xffffffff)
-    packing = np.int32(0x1f)
+@nb.cuda.jit(nb.i4(nb.i4), device=True)
+def ilog2(v):
+    """
+    l2 = 0
+        while v > 1:
+            v >>= 1
+            l2 += 1
+        return l2
+    """
+    return 31 - ctlz(v)
 
-    if size <= warp_size and not (size & (size - 1)):
-        @nb.cuda.jit(ntype(ntype), device=True)
-        def reduce(val):
-            for i in range(np.int32(31) - ctlz(size)):
+
+def create_reduce(func, ntype=nb.f4):
+    warp_size = np.int32(32)
+    mask = 0xffffffff
+    packing = 0x1f
+
+    @nb.cuda.jit(ntype(ntype, nb.i4), device=True)
+    def reduce(val, width):
+        if width <= warp_size and not (width & (width - 1)):
+            for i in range(ilog2(width)):
                 val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
             return val
-    elif size <= warp_size:
-        closest_pow2 = np.int32(2 ** int(np.log2(size)))
-        diff = np.int32(size - closest_pow2)
-
-        @nb.cuda.jit(ntype(ntype), device=True)
-        def reduce(val):
+        elif width <= warp_size:
+            closest_pow2 = np.int32(1 << ilog2(width))
+            diff = np.int32(width - closest_pow2)
             lid = laneid()
             temp = shfl_sync(mask, 2, val, closest_pow2, packing)[0]
             if lid < diff:
                 val = func(val, temp)
-            for i in range(np.int32(31) - ctlz(closest_pow2)):
+            for i in range(ilog2(width)):
                 val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
             return shfl_sync(mask, 0, val, 0, packing)[0]
-    else:
-        warp_count = int(np.ceil(size / warp_size))
-        warp_count_p2 = np.int32(2 ** int(np.log2(warp_count)))
-        cutoff = size - size % warp_size
-        all_warps_full = np.bool(size % warp_size == 0)
-        last_warp_size = size % warp_size
-        is_last_warp_size_p2 = np.bool(not (last_warp_size & (last_warp_size - 1)))
-        closest_pow2 = 0 if all_warps_full else np.int32(2 ** int(np.log2(last_warp_size)))
-        diff = np.int32(last_warp_size - closest_pow2)
-        faster = np.bool((warp_count - 1) > (1 + int(np.log2(warp_count_p2)) + (0 if (not (warp_count & (warp_count - 1))) else 1)))
-        partial_is_big_enough = np.bool(last_warp_size >= warp_count_p2)
-        @nb.cuda.jit(ntype(ntype, ntype[:]), device=True)
-        def reduce(val, buffer):
+        else:
+            warp_count = int(math.ceil(width / warp_size))
+            last_warp_size = width % warp_size
             nb.cuda.syncthreads()
+            buffer = nb.cuda.shared.array(0, ntype)
             tid = nb.cuda.threadIdx.x
             lid = laneid()
-            withinFullWarp = tid < cutoff
             nb.cuda.syncthreads()
-            if all_warps_full or withinFullWarp:
-                for i in range(np.int32(31) - ctlz(warp_size)):
+            if (last_warp_size == 0) or (tid < width - last_warp_size):
+                for i in range(ilog2(warp_size)):
                     val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
-            elif is_last_warp_size_p2:
-                for i in range(np.int32(31) - ctlz(last_warp_size)):
+            elif not (last_warp_size & (last_warp_size - 1)):
+                for i in range(ilog2(last_warp_size)):
                     val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
             else:
-                temp = shfl_sync(mask, 2, val, closest_pow2, packing)[0]
-                if lid < diff:
+                closest_lpow2 = np.int32(1 << ilog2(last_warp_size))
+                temp = shfl_sync(mask, 2, val, closest_lpow2, packing)[0]
+                if lid < last_warp_size - closest_lpow2:
                     val = func(val, temp)
-                for i in range(np.int32(31) - ctlz(closest_pow2)):
+                for i in range(ilog2(closest_lpow2)):
                     val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
             if lid == 0:
                 buffer[tid // warp_size] = val
             nb.cuda.syncthreads()
-            if faster and (all_warps_full or partial_is_big_enough or withinFullWarp):
-                if lid < warp_count:
-                    val = buffer[lid]
-                if warp_count != warp_count_p2 and lid < warp_count - warp_count_p2:
-                    val = func(val, buffer[lid + warp_count_p2])
-                for i in range(np.int32(31) - ctlz(warp_count_p2)):
-                    val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
-                val = shfl_sync(mask, 0, val, 0, packing)[0]
-            else:
-                val = buffer[0]
-                for i in range(1, warp_count):
-                    val = func(val, buffer[i])
+            val = buffer[0]
+            for i in range(1, warp_count):
+                val = func(val, buffer[i])
             return val
     return reduce
-
 
 
 if __name__ == "__main__":
@@ -452,13 +438,12 @@ if __name__ == "__main__":
     import operator
 
     block_size = 68
-    summer = create_reduce(operator.add, block_size)
+    summer = create_reduce(operator.add)
 
     @nb.cuda.jit((nb.f4[:],))
     def test(arr):
         tid = nb.cuda.threadIdx.x
-        buffer = nb.cuda.shared.array(block_size, nb.f4)
-        val = summer(tid, buffer)
+        val = summer(tid, block_size)
         arr[tid] = val
 
     # testF = nb.cuda.jit(nb.f4[:])(test)
@@ -467,6 +452,6 @@ if __name__ == "__main__":
     # print(testA)
 
     testA = np.empty(block_size, np.float32)
-    test[1, block_size](testA)
+    test[1, block_size, None, 4*block_size](testA)
     print(testA)
     print(test.ptx)
