@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import numpy as np
-from numbaCudaFallbacks import syncthreads_or, create_reduce
+from numbaCudaFallbacks import syncthreads_or, reduce
 import numba as nb
 import numba.cuda
 import numba.cuda.random
@@ -18,10 +18,6 @@ os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
 count = 3
 nwaves = 64
-
-reduce_add_f32 = create_reduce(operator.add)
-reduce_max_f32 = create_reduce(max)
-reduce_min_f32 = create_reduce(min)
 
 config_dict = OrderedDict(theta0=0,
                           start=2,
@@ -68,7 +64,7 @@ def nonlinearity(delta):
     else:
         err = (delta_spectrum[tid + 2] + delta_spectrum[tid - 2] - 2 * delta)
     nb.cuda.syncthreads()
-    return math.sqrt(reduce_add_f32(err ** 2, nwaves)) / 4
+    return math.sqrt(reduce(operator.add, np.float32(err**2), nwaves)) / 4
 
 
 @nb.cuda.jit(device=True)
@@ -124,8 +120,8 @@ def merit_error(n, angles, index, nglass):
     delta = config.theta0 - (refracted + offAngle)
     if tid == nwaves // 2:
         deltaC[0] = delta
-    deltaT = (reduce_max_f32(delta, nwaves) - reduce_min_f32(delta, nwaves))
-    meanT = reduce_add_f32(T, nwaves) / np.float32(nwaves)
+    deltaT = (reduce(max, delta, nwaves) - reduce(min, delta, nwaves))
+    meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)
     transm_err = max(config.transmission_minimum - meanT, np.float32(0))
     NL = nonlinearity(delta)
     merit_err = weights.deviation * (deltaC[0] - config.deltaC_target) ** 2 \
@@ -162,7 +158,7 @@ def random_search(n, index, nglass, rng):
             if tid == 0:
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                 normed[0] = dr * rand ** (1 / count)
-            test = best + normed[0] * xi / math.sqrt(reduce_add_f32(xi**2, count))
+            test = best + normed[0] * xi / math.sqrt(reduce(operator.add, np.float32(xi**2), count))
             trial[tid] = math.copysign(max(min(abs(test), config.upper_bound), config.lower_bound), isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
