@@ -361,7 +361,7 @@ class CudaShflSyncTemplate(nb.typing.templates.AbstractTemplate):
     key = shfl_sync
     def generic(self, args, kws):
         vty = args[2]
-        if vty == nb.i4 or vty == nb.i8 or vty == nb.f4:
+        if vty == nb.i4 or vty == nb.f4:
             return nb.types.Tuple((vty, nb.boolean))(nb.i4, nb.i4, vty, nb.i4, nb.i4)
 
 nb.cuda.cudadecl.intrinsic_global(shfl_sync, nb.types.Function(CudaShflSyncTemplate))
@@ -379,14 +379,26 @@ def ilog2(v):
     return 31 - ctlz(v)
 
 
-def create_reduce(func, ntype=nb.f4):
-    warp_size = np.int32(32)
-    mask = 0xffffffff
-    packing = 0x1f
+@nb.cuda.jit(nb.b1(nb.i4), device=True)
+def is_pow_2(v):
+    return not (v & (v - 1))
 
-    @nb.cuda.jit(ntype(ntype, nb.i4), device=True)
-    def reduce(val, width):
-        if width <= warp_size and not (width & (width - 1)):
+
+
+class reduce(nb.cuda.stubs.Stub):
+    _description_ = '<reduce()>'
+
+
+@numba.cuda.cudaimpl.lower(reduce, nb.types.BaseFunction, nb.i4, nb.i4)
+@numba.cuda.cudaimpl.lower(reduce, nb.types.BaseFunction, nb.f4, nb.i4)
+def lower_reduce(context, builder, sig, args):
+    warp_size = np.int32(32)
+    mask = np.int32(0xffffffff)
+    packing = np.int32(0x1f)
+    func = sig.args[0].typing_key
+    ntype = sig.args[1]
+    def reduce_impl(val, width):
+        if width <= warp_size and is_pow_2(width):
             for i in range(ilog2(width)):
                 val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
             return val
@@ -411,7 +423,7 @@ def create_reduce(func, ntype=nb.f4):
             if (last_warp_size == 0) or (tid < width - last_warp_size):
                 for i in range(ilog2(warp_size)):
                     val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
-            elif not (last_warp_size & (last_warp_size - 1)):
+            elif is_pow_2(last_warp_size):
                 for i in range(ilog2(last_warp_size)):
                     val = func(val, shfl_sync(mask, 3, val, 1 << i, packing)[0])
             else:
@@ -428,7 +440,21 @@ def create_reduce(func, ntype=nb.f4):
             for i in range(1, warp_count):
                 val = func(val, buffer[i])
             return val
-    return reduce
+    return context.compile_internal(builder, reduce_impl, ntype(ntype, nb.i4), (args[1], args[2]))
+
+
+
+@nb.cuda.cudadecl.intrinsic
+class CudaReduceTemplate(nb.typing.templates.AbstractTemplate):
+    key = reduce
+    support_literals = False
+
+    def generic(self, args, kws):
+        func, val, width = args
+        if isinstance(func, nb.types.BaseFunction) and val == nb.f4:  #(val == nb.i4 or val == nb.f4):
+            return val(func, val, nb.i4)
+
+nb.cuda.cudadecl.intrinsic_global(reduce, nb.types.Function(CudaReduceTemplate))
 
 
 if __name__ == "__main__":
@@ -437,13 +463,12 @@ if __name__ == "__main__":
     os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
     import operator
 
-    block_size = 68
-    summer = create_reduce(operator.add)
+    block_size = 64
 
     @nb.cuda.jit((nb.f4[:],))
     def test(arr):
         tid = nb.cuda.threadIdx.x
-        val = summer(tid, block_size)
+        val = reduce(operator.add, np.float32(tid), block_size)
         arr[tid] = val
 
     # testF = nb.cuda.jit(nb.f4[:])(test)
@@ -454,4 +479,4 @@ if __name__ == "__main__":
     testA = np.empty(block_size, np.float32)
     test[1, block_size, None, 4*block_size](testA)
     print(testA)
-    print(test.ptx)
+    print(test.inspect_llvm())
