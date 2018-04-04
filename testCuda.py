@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 import os
 import numpy as np
-from numbaCudaFallbacks import syncthreads_and, syncthreads_or, syncthreads_popc, create_reduce
+from numbaCudaFallbacks import syncthreads_or, create_reduce
 import numba as nb
 import numba.cuda
 import numba.cuda.random
 import math
 import operator
 from collections import OrderedDict
+from itertools import repeat
 import time
 from compoundprism.glasscat import read_glasscat, calc_n
 from simple import describe
@@ -18,12 +19,9 @@ os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 count = 3
 nwaves = 64
 
-warp_size = 32
-warp_count = int(np.ceil(nwaves / warp_size))
-sum_count_f32 = create_reduce(operator.add, count)
-sum_nwaves_f32 = create_reduce(operator.add, nwaves)
-max_nwaves_f32 = create_reduce(max, nwaves)
-min_nwaves_f32 = create_reduce(min, nwaves)
+reduce_add_f32 = create_reduce(operator.add)
+reduce_max_f32 = create_reduce(max)
+reduce_min_f32 = create_reduce(min)
 
 config_dict = OrderedDict(theta0=0,
                           start=2,
@@ -37,12 +35,12 @@ config_dict = OrderedDict(theta0=0,
                           upper_bound=np.deg2rad(120)
                          )
 ks, vs = zip(*config_dict.items())
-config_dtype = np.dtype([(k, 'f4') for k in ks])
+config_dtype = np.dtype(list(zip(ks, repeat('f4'))))
 config = np.rec.array([tuple(vs)], dtype=config_dtype)[0]
 
 base_weights = OrderedDict(thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
 ks, vs = zip(*base_weights.items())
-weights_dtype = np.dtype([(k, 'f4') for k in ks])
+weights_dtype = np.dtype(list(zip(ks, repeat('f4'))))
 weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
 
 sample_size = 10
@@ -51,27 +49,33 @@ dr = np.float32(np.deg2rad(6))
 
 
 @nb.cuda.jit(device=True)
-def nonlinearity(delta, buffer):
+def nonlinearity(delta):
     """Calculate the nonlinearity of the given delta spectrum"""
+    nb.cuda.syncthreads()
+    delta_spectrum = nb.cuda.shared.array(0, nb.f4)
     tid = nb.cuda.threadIdx.x
+    # nwaves = nb.cuda.blockDim.x
+    delta_spectrum[tid] = delta
+    nb.cuda.syncthreads()
     if tid == 0:
-        err = (2 * delta[2] + 2 * delta[0] - 4 * delta[1]) ** 2
+        err = (2 * delta_spectrum[2] + 2 * delta - 4 * delta_spectrum[1])
     elif tid == nwaves - 1:
-        err = (2 * delta[-1] - 4 * delta[-2] + 2 * delta[-3]) ** 2
+        err = (2 * delta - 4 * delta_spectrum[nwaves-2] + 2 * delta_spectrum[nwaves-3])
     elif tid == 1:
-        err = (delta[3] - 3 * delta[1] + 2 * delta[0]) ** 2
+        err = (delta_spectrum[3] - 3 * delta + 2 * delta_spectrum[0])
     elif tid == nwaves - 2:
-        err = (2 * delta[-1] - 3 * delta[-2] + delta[-4]) ** 2
+        err = (2 * delta_spectrum[nwaves-1] - 3 * delta + delta_spectrum[nwaves-4])
     else:
-        err = (delta[tid + 2] + delta[tid - 2] - 2 * delta[tid]) ** 2
-    return math.sqrt(sum_nwaves_f32(err, buffer)) / 4
+        err = (delta_spectrum[tid + 2] + delta_spectrum[tid - 2] - 2 * delta)
+    nb.cuda.syncthreads()
+    return math.sqrt(reduce_add_f32(err ** 2, nwaves)) / 4
 
 
 @nb.cuda.jit(device=True)
 def merit_error(n, angles, index, nglass):
     tid = nb.cuda.threadIdx.x
-    delta_spectrum = nb.cuda.shared.array(nwaves, nb.f4)
-    buffer = nb.cuda.shared.array(warp_count, nb.f4)
+    # nwaves = nb.cuda.blockDim.x
+    deltaC = nb.cuda.shared.array(1, nb.f4)
     mid = count // 2
     offAngle = angles[:mid].sum() + angles[mid] / np.float32(2)
     n1 = np.float32(1)
@@ -117,16 +121,18 @@ def merit_error(n, angles, index, nglass):
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
         T *= np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
-    delta_spectrum[tid] = delta = config.theta0 - (refracted + offAngle)
-    deltaT = (max_nwaves_f32(delta, buffer) - min_nwaves_f32(delta, buffer))
-    deltaC = delta_spectrum[nwaves // 2]
-    meanT = sum_nwaves_f32(T, buffer) / np.float32(nwaves)
+    delta = config.theta0 - (refracted + offAngle)
+    if tid == nwaves // 2:
+        deltaC[0] = delta
+    deltaT = (reduce_max_f32(delta, nwaves) - reduce_min_f32(delta, nwaves))
+    meanT = reduce_add_f32(T, nwaves) / np.float32(nwaves)
     transm_err = max(config.transmission_minimum - meanT, np.float32(0))
-    NL = nonlinearity(delta_spectrum, buffer)
-    merit_err = weights.deviation * (deltaC - config.deltaC_target) ** 2 \
+    NL = nonlinearity(delta)
+    merit_err = weights.deviation * (deltaC[0] - config.deltaC_target) ** 2 \
                 + weights.dispersion * (deltaT - config.deltaT_target) ** 2 \
                 + weights.linearity * NL \
                 + weights.transm * transm_err
+    nb.cuda.syncthreads()
     return merit_err
 
 
@@ -156,7 +162,7 @@ def random_search(n, index, nglass, rng):
             if tid == 0:
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                 normed[0] = dr * rand ** (1 / count)
-            test = best + normed[0] * xi / math.sqrt(sum_count_f32(xi**2))
+            test = best + normed[0] * xi / math.sqrt(reduce_add_f32(xi**2, count))
             trial[tid] = math.copysign(max(min(abs(test), config.upper_bound), config.lower_bound), isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
@@ -188,19 +194,24 @@ def optimize(ns, out, start, stop, rng):
         nb.cuda.syncthreads()
 
 
+with open('prism.ll', 'w') as f:
+    f.write(optimize.inspect_llvm())
+with open('prism.ptx', 'w') as f:
+    f.write(optimize.ptx)
+
 w = np.linspace(650, 1000, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
-output = np.recarray(blockCount, out_type)
+output = np.recarray(blockCount, out_dtype)
 print('Starting')
 
 t1 = time.time()
-with nb.cuda.gpus[1]:
+with nb.cuda.gpus[0]:
     rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * count, seed=42)
-    optimize[blockCount, nwaves](glasses, output, 0, nglass ** count, rng_states)
+    optimize[blockCount, nwaves, None, 4*nwaves](glasses, output, 0, nglass ** count, rng_states)
 dt = time.time() - t1
 
 value, ind, angles = output[np.argmin(output.value)]
