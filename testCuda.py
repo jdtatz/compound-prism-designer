@@ -16,7 +16,8 @@ from simple import describe
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
-count = 3
+prism_count = 3
+angle_count = prism_count + 1
 nwaves = 64
 
 config_dict = OrderedDict(theta0=0,
@@ -72,33 +73,30 @@ def merit_error(n, angles, index, nglass):
     tid = nb.cuda.threadIdx.x
     # nwaves = nb.cuda.blockDim.x
     deltaC = nb.cuda.shared.array(1, nb.f4)
-    mid = count // 2
-    offAngle = angles[:mid].sum() + angles[mid] / np.float32(2)
     n1 = np.float32(1)
     n2 = n[index % nglass, tid]
-    path0 = (config.start - config.radius) / math.cos(offAngle)
-    path1 = (config.start + config.radius) / math.cos(offAngle)
-    sideL = config.height / math.cos(offAngle)
-    incident = config.theta0 + offAngle
+    path0 = (config.start - config.radius) / math.cos(angles[0])
+    path1 = (config.start + config.radius) / math.cos(angles[0])
+    sideL = config.height / math.cos(angles[0])
+    incident = config.theta0 + angles[0]
+    offAngle = angles[1]
     crit_angle = np.float32(math.pi / 2)
     if syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
         return
     refracted = math.asin((n1 / n2) * math.sin(incident))
     ci, cr = math.cos(incident), math.cos(refracted)
     T = np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
-    for i in range(1, count + 1):
+    for i in range(1, angle_count):
         n1 = n2
-        n2 = n[(index // (nglass ** i)) % nglass, tid] if i < count else np.float32(1)
-        alpha = angles[i - 1]
+        n2 = n[(index // (nglass ** i)) % nglass, tid] if i < prism_count else np.float32(1)
+        alpha = angles[i] if i > 1 else (angles[1] + angles[0])
         incident = refracted - alpha
 
         crit_angle = math.asin(n2 / n1) if n2 < n1 else np.float32(np.pi / 2)
         if syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
             return
 
-        if i <= mid:
-            offAngle -= alpha
-        elif i > mid + 1:
+        if i > 1:
             offAngle += alpha
         sideR = config.height / math.cos(offAngle)
         t1 = np.float32(np.pi / 2) - refracted * math.copysign(np.float32(1), alpha)
@@ -135,40 +133,42 @@ def merit_error(n, angles, index, nglass):
 @nb.cuda.jit(device=True)
 def random_search(n, index, nglass, rng):
     tid = nb.cuda.threadIdx.x
-    isodd = np.float32(-1 if (tid % 2 == 1) else 1)
-    rid = nb.cuda.blockIdx.x * count + tid
+    isodd = np.float32(-1 if (tid > 1 and tid % 2 == 0) else 1)
+    rid = nb.cuda.blockIdx.x * angle_count + tid
     best = np.float32(0)
     bestVal = np.float32(np.inf)
-    trial = nb.cuda.shared.array(count, nb.f4)
+    trial = nb.cuda.shared.array(angle_count, nb.f4)
     normed = nb.cuda.shared.array(1, nb.f4)
+    lbound = config.lower_bound if (tid > 1) else (config.lower_bound / np.float32(2))
+    ubound = config.upper_bound if (tid > 1) else (config.upper_bound / np.float32(2))
     for _ in range(sample_size):
-        if tid < count:
+        if tid < angle_count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
+            angle = lbound + rand * (ubound - lbound)
             trial[tid] = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
-        if tid < count and trialVal is not None and trialVal < bestVal:
+        if tid < angle_count and trialVal is not None and trialVal < bestVal:
             bestVal = trialVal
             best = trial[tid]
     for _ in range(steps):
-        if tid < count:
+        if tid < angle_count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
             xi = 2 * rand - 1
             if tid == 0:
                 rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                normed[0] = dr * rand ** (1 / count)
-            test = best + normed[0] * xi / math.sqrt(reduce(operator.add, np.float32(xi**2), count))
-            trial[tid] = math.copysign(max(min(abs(test), config.upper_bound), config.lower_bound), isodd)
+                normed[0] = dr * rand ** (1 / angle_count)
+            test = best + normed[0] * xi / math.sqrt(reduce(operator.add, np.float32(xi**2), angle_count))
+            trial[tid] = math.copysign(max(min(abs(test), ubound), lbound), isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
-        if tid < count and trialVal is not None and trialVal < bestVal:
+        if tid < angle_count and trialVal is not None and trialVal < bestVal:
             bestVal = trialVal
             best = trial[tid]
     return True, best, bestVal
 
 
-out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', count)])
+out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', angle_count)])
 out_type = nb.from_dtype(out_dtype)
 
 
@@ -181,7 +181,7 @@ def optimize(ns, out, start, stop, rng):
     nglass = ns.shape[0]
     for index in range(start + bid, stop, bcount):
         valid, xmin, fx = random_search(ns, index, nglass, rng)
-        if tid < count and valid and fx < bestVal:
+        if tid < angle_count and valid and fx < bestVal:
             bestVal = fx
             if tid == 0:
                 out[bid].value = fx
@@ -206,12 +206,12 @@ print('Starting')
 
 t1 = time.time()
 with nb.cuda.gpus[0]:
-    rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * count, seed=42)
-    optimize[blockCount, nwaves, None, 4*nwaves](glasses, output, 0, nglass ** count, rng_states)
+    rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * angle_count, seed=42)
+    optimize[blockCount, nwaves, None, 4*nwaves](glasses, output, 0, nglass ** prism_count, rng_states)
 dt = time.time() - t1
 
 value, ind, angles = output[np.argmin(output.value)]
-gs = [names[(ind // (nglass ** i)) % nglass] for i in range(count)]
+gs = [names[(ind // (nglass ** i)) % nglass] for i in range(prism_count)]
 print(value, *gs, *np.rad2deg(angles))
 print(dt, 's')
 

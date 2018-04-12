@@ -4,14 +4,13 @@ import numpy as np
 def describe(n, angles, config, weights):
     assert np.all(np.abs(angles) < np.pi), 'Need Radians not Degrees'
     count, nwaves = n.shape
-    mid = count // 2
-    offAngle = np.sum(angles[:mid]) + angles[mid] / 2
     n1 = 1
     n2 = n[0]
-    path0 = (config.start - config.radius) / np.cos(offAngle)
-    path1 = (config.start + config.radius) / np.cos(offAngle)
-    sideL = config.height / np.cos(offAngle)
-    incident = config.theta0 + offAngle
+    path0 = (config.start - config.radius) / np.cos(angles[0])
+    path1 = (config.start + config.radius) / np.cos(angles[0])
+    sideL = config.height / np.cos(angles[0])
+    incident = config.theta0 + angles[0]
+    offAngle = angles[1]
     crit_angle = np.pi / 2
     crit_violation_count = np.sum(np.abs(incident) >= crit_angle * config.crit_angle_prop)
     if crit_violation_count > 0:
@@ -22,7 +21,7 @@ def describe(n, angles, config, weights):
     for i in range(1, count + 1):
         n1 = n2
         n2 = n[i] if i < count else 1
-        alpha = angles[i - 1]
+        alpha = angles[i] if i > 1 else (angles[1] + angles[0])
         incident = refracted - alpha
         
         crit_angle = np.arcsin(np.minimum(n2 / n1, 1))
@@ -30,9 +29,7 @@ def describe(n, angles, config, weights):
         if crit_violation_count > 0:
             return i
 
-        if i <= mid:
-            offAngle -= alpha
-        elif i > mid + 1:
+        if i > 1:
             offAngle += alpha
         sideR = config.height / np.cos(offAngle)
         t1 = np.pi / 2 - refracted * np.copysign(1, alpha)
