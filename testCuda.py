@@ -211,9 +211,10 @@ glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 blockCount = 512
 gpus = nb.cuda.gpus  # [nb.cuda.gpus[1]]
 ngpu = len(gpus)
+output = np.recarray(ngpu * blockCount, dtype=out_dtype)
+outputs = [output[slice(*b)] for b in subsect(ngpu * blockCount, ngpu)]
 streams = []
 outs = []
-outputs = []
 print('Starting')
 
 t1 = time.time()
@@ -226,12 +227,11 @@ for gpu, bounds in zip(gpus, subsect(nglass ** prism_count, ngpu)):
         optimize[blockCount, nwaves, s, 4*nwaves](d_ns, d_out, *bounds, rng_states)
         outs.append(d_out)
         streams.append(s)
-for gpu, s, d_out in zip(gpus, streams, outs):
+for gpu, s, d_out, h_out in zip(gpus, streams, outs, outputs):
     with gpu:
-        outputs.append(d_out.copy_to_host(stream=s))
+        d_out.copy_to_host(ary=h_out, stream=s)
         s.synchronize()
 dt = time.time() - t1
-output = np.concatenate(outputs)
 
 value, ind, angles = output[np.argmin(output['value'])]
 gs = [names[(ind // (nglass ** i)) % nglass] for i in range(prism_count)]
