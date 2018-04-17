@@ -153,8 +153,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
                 best = trial[tid]
         for _ in range(steps):
             if tid < angle_count:
-                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                xi = 2 * rand - 1
+                xi = nb.cuda.random.xoroshiro128p_normal_float32(rng, rid)
                 if tid == 0:
                     rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
                     normed[0] = dr * rand ** (1 / angle_count)
