@@ -48,7 +48,6 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
     @nb.cuda.jit(device=True)
     def nonlinearity(delta):
         """Calculate the nonlinearity of the given delta spectrum"""
-        nb.cuda.syncthreads()
         delta_spectrum = nb.cuda.shared.array(0, nb.f4)
         tid = nb.cuda.threadIdx.x
         # nwaves = nb.cuda.blockDim.x
@@ -64,7 +63,6 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
             err = (2 * delta_spectrum[nwaves - 1] - 3 * delta + delta_spectrum[nwaves - 4])
         else:
             err = (delta_spectrum[tid + 2] + delta_spectrum[tid - 2] - 2 * delta)
-        nb.cuda.syncthreads()
         return math.sqrt(reduce(operator.add, np.float32(err ** 2), nwaves)) / 4
 
     @nb.cuda.jit(device=True)
@@ -186,10 +184,19 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
     return optimize, config, out_dtype
 
 
+def subsect(end, n):
+    start = 0
+    step = int(np.ceil(end/n))
+    while start+step < end:
+        yield (start, start+step)
+        start += step
+    if start < end:
+        yield (start, end)
+
 prism_count = 3
 angle_count = prism_count + 1
 nwaves = 64
-optimize, config, out_dtype = create_optimizer(3, nwaves)
+optimize, config, out_dtype = create_optimizer(prism_count, nwaves)
 
 with open('prism.ll', 'w') as f:
     f.write(optimize.inspect_llvm())
@@ -202,16 +209,31 @@ nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
-output = np.recarray(blockCount, out_dtype)
+gpus = nb.cuda.gpus  # [nb.cuda.gpus[1]]
+ngpu = len(gpus)
+streams = []
+outs = []
+outputs = []
 print('Starting')
 
 t1 = time.time()
-with nb.cuda.gpus[0]:
-    rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * angle_count, seed=42)
-    optimize[blockCount, nwaves, None, 4*nwaves](glasses, output, 0, nglass ** prism_count, rng_states)
+for gpu, bounds in zip(gpus, subsect(nglass ** prism_count, ngpu)):
+    with gpu:
+        s = nb.cuda.stream()
+        rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * angle_count, seed=42, stream=s)
+        d_ns = nb.cuda.to_device(glasses, stream=s)
+        d_out = nb.cuda.device_array(blockCount, dtype=out_dtype, stream=s)
+        optimize[blockCount, nwaves, s, 4*nwaves](d_ns, d_out, *bounds, rng_states)
+        outs.append(d_out)
+        streams.append(s)
+for gpu, s, d_out in zip(gpus, streams, outs):
+    with gpu:
+        outputs.append(d_out.copy_to_host(stream=s))
+        s.synchronize()
 dt = time.time() - t1
+output = np.concatenate(outputs)
 
-value, ind, angles = output[np.argmin(output.value)]
+value, ind, angles = output[np.argmin(output['value'])]
 gs = [names[(ind // (nglass ** i)) % nglass] for i in range(prism_count)]
 print(value, *gs, *np.rad2deg(angles))
 print(dt, 's')
