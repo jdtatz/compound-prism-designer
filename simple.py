@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def describe(n, angles, config, weights):
+def describe(n, angles, config):
     assert np.all(np.abs(angles) < np.pi), 'Need Radians not Degrees'
     count, nwaves = n.shape
     n1 = 1
@@ -50,14 +50,14 @@ def describe(n, angles, config, weights):
         ci, cr = np.cos(incident), np.cos(refracted)
         T *= 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
     delta_spectrum = config.theta0 - (refracted + offAngle)
-    transm_spectrum = T
+    transmission_spectrum = T
     deltaC = delta_spectrum[nwaves // 2]
     deltaT = (delta_spectrum.max() - delta_spectrum.min())
-    meanT = np.sum(transm_spectrum) / nwaves
-    transm_err = np.max(config.transmission_minimum - meanT, 0)
+    meanT = np.sum(transmission_spectrum) / nwaves
+    transmission_err = np.max(config.transmission_minimum - meanT, 0)
     NL = np.sqrt(np.sum(np.gradient(np.gradient(delta_spectrum)) ** 2))
-    merit_err = weights.deviation * (deltaC - config.deltaC_target) ** 2 \
-                + weights.dispersion * (deltaT - config.deltaT_target) ** 2 \
-                + weights.linearity * NL \
-                + weights.transm * transm_err
-    return merit_err, NL, deltaT, deltaC, delta_spectrum, transm_spectrum
+    merit_err = config.weight_deviation * (deltaC - config.deltaC_target) ** 2 \
+                + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
+                + config.weight_linearity * NL \
+                + config.weight_transmission * transmission_err
+    return merit_err, NL, deltaT, deltaC, delta_spectrum, transmission_spectrum

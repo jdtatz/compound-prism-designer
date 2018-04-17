@@ -29,16 +29,17 @@ config_dict = OrderedDict(theta0=0,
                           transmission_minimum=0.85,
                           crit_angle_prop=0.999,
                           lower_bound=np.deg2rad(10),
-                          upper_bound=np.deg2rad(120)
-                         )
-ks, vs = zip(*config_dict.items())
-config_dtype = np.dtype(list(zip(ks, repeat('f4'))))
-config = np.rec.array([tuple(vs)], dtype=config_dtype)[0]
+                          upper_bound=np.deg2rad(120),
+                          weight_deviation=15,
+                          weight_dispersion=25,
+                          weight_linearity=1000,
+                          weight_transmission=35
+                          )
+config_dtype = np.dtype(list(zip(config_dict.keys(), repeat('f4'))))
+config = np.rec.array([tuple(config_dict.values())], dtype=config_dtype)[0]
 
-base_weights = OrderedDict(thin=2.5, deviation=15, dispersion=25, linearity=1000, transm=35)
-ks, vs = zip(*base_weights.items())
-weights_dtype = np.dtype(list(zip(ks, repeat('f4'))))
-weights = np.rec.array([tuple(vs)], dtype=weights_dtype)[0]
+out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', angle_count)])
+out_type = nb.from_dtype(out_dtype)
 
 sample_size = 10
 steps = 5
@@ -120,12 +121,12 @@ def merit_error(n, angles, index, nglass):
         deltaC[0] = delta
     deltaT = (reduce(max, delta, nwaves) - reduce(min, delta, nwaves))
     meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)
-    transm_err = max(config.transmission_minimum - meanT, np.float32(0))
+    transmission_err = max(config.transmission_minimum - meanT, np.float32(0))
     NL = nonlinearity(delta)
-    merit_err = weights.deviation * (deltaC[0] - config.deltaC_target) ** 2 \
-                + weights.dispersion * (deltaT - config.deltaT_target) ** 2 \
-                + weights.linearity * NL \
-                + weights.transm * transm_err
+    merit_err = config.weight_deviation * (deltaC[0] - config.deltaC_target) ** 2 \
+                + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
+                + config.weight_linearity * NL \
+                + config.weight_transmission * transmission_err
     nb.cuda.syncthreads()
     return merit_err
 
@@ -166,10 +167,6 @@ def random_search(n, index, nglass, rng):
             bestVal = trialVal
             best = trial[tid]
     return True, best, bestVal
-
-
-out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', angle_count)])
-out_type = nb.from_dtype(out_dtype)
 
 
 @nb.cuda.jit((nb.f4[:, :], out_type[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=True)
@@ -216,7 +213,7 @@ print(value, *gs, *np.rad2deg(angles))
 print(dt, 's')
 
 ns = np.stack(calc_n(gcat[name], w) for name in gs).astype(np.float32)
-ret = describe(ns, angles, config, weights)
+ret = describe(ns, angles, config)
 if isinstance(ret, int):
     print('Failed at interface', ret)
 else:
