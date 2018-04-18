@@ -211,25 +211,22 @@ glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 blockCount = 512
 gpus = nb.cuda.gpus  # [nb.cuda.gpus[1]]
 ngpu = len(gpus)
-output = np.recarray(ngpu * blockCount, dtype=out_dtype)
-outputs = [output[slice(*b)] for b in subsect(ngpu * blockCount, ngpu)]
+output = nb.cuda.pinned_array(ngpu * blockCount, dtype=out_dtype)
 streams = []
-outs = []
 print('Starting')
 
 t1 = time.time()
-for gpu, bounds in zip(gpus, subsect(nglass ** prism_count, ngpu)):
+for gpu, bounds, sbounds in zip(gpus, subsect(nglass ** prism_count, ngpu), subsect(ngpu * blockCount, ngpu)):
     with gpu:
         s = nb.cuda.stream()
         rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * angle_count, seed=42, stream=s)
         d_ns = nb.cuda.to_device(glasses, stream=s)
         d_out = nb.cuda.device_array(blockCount, dtype=out_dtype, stream=s)
         optimize[blockCount, nwaves, s, 4*nwaves](d_ns, d_out, *bounds, rng_states)
-        outs.append(d_out)
+        d_out.copy_to_host(ary=output[slice(*sbounds)], stream=s)
         streams.append(s)
-for gpu, s, d_out, h_out in zip(gpus, streams, outs, outputs):
+for gpu, s in zip(gpus, streams):
     with gpu:
-        d_out.copy_to_host(ary=h_out, stream=s)
         s.synchronize()
 dt = time.time() - t1
 
