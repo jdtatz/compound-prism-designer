@@ -17,23 +17,25 @@ os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
 base_config_dict = OrderedDict(theta0=0,
-                               start=2,
-                               radius=1.5,
-                               height=25,
+                               start=1,
+                               radius=0.5,
+                               height=10,
+                               max_size=60,
                                deltaC_target=0,
                                deltaT_target=np.deg2rad(48),
                                transmission_minimum=0.85,
                                crit_angle_prop=0.999,
-                               lower_bound=np.deg2rad(10),
+                               lower_bound=np.deg2rad(2),
                                upper_bound=np.deg2rad(120),
                                weight_deviation=15,
                                weight_dispersion=25,
                                weight_linearity=1000,
-                               weight_transmission=35
+                               weight_transmission=35,
+                               weight_thinness=1
                                )
 
 
-def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, steps=5, dr=np.deg2rad(6)):
+def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.deg2rad(60)):
     dr = np.float32(dr)
     angle_count = prism_count + 1
 
@@ -84,6 +86,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
         ci, cr = math.cos(incident), math.cos(refracted)
         T = np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 +
                              ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / np.float32(2)
+        size = np.float32(0)
         for i in range(1, angle_count):
             n1 = n2
             n2 = n[(index // (nglass ** i)) % nglass, tid] if i < prism_count else np.float32(1)
@@ -108,6 +111,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
                 path1 = sideR - (sideL - path1) * los
             if syncthreads_or(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR):
                 return
+            size += math.sqrt(sideL**2 + sideR**2 - np.float32(2)*sideL*sideR*math.cos(alpha))
             sideL = sideR
 
             refracted = math.asin((n1 / n2) * math.sin(incident))
@@ -124,7 +128,8 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
         merit_err = config.weight_deviation * (deltaC[0] - config.deltaC_target) ** 2 \
                     + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
                     + config.weight_linearity * NL \
-                    + config.weight_transmission * transmission_err
+                    + config.weight_transmission * transmission_err \
+                    + config.weight_thinness * max(size - config.max_size, np.float32(0))
         nb.cuda.syncthreads()
         return merit_err
 
@@ -134,35 +139,33 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, sample_size=10, s
         isodd = np.float32(-1 if (tid > 1 and tid % 2 == 0) else 1)
         rid = nb.cuda.blockIdx.x * angle_count + tid
         best = np.float32(0)
-        bestVal = np.float32(np.inf)
+        bestVal = np.float32(0)
+        found = False
         trial = nb.cuda.shared.array(angle_count, nb.f4)
-        normed = nb.cuda.shared.array(1, nb.f4)
         lbound = config.lower_bound if (tid > 1) else (config.lower_bound / np.float32(2))
         ubound = config.upper_bound if (tid > 1) else (config.upper_bound / np.float32(2))
-        for _ in range(sample_size):
-            if tid < angle_count:
-                rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                angle = lbound + rand * (ubound - lbound)
-                trial[tid] = math.copysign(angle, isodd)
-            nb.cuda.syncthreads()
-            trialVal = merit_error(n, trial, index, nglass)
-            if tid < angle_count and trialVal is not None and trialVal < bestVal:
-                bestVal = trialVal
-                best = trial[tid]
-        for _ in range(steps):
+        if tid < angle_count:
+            rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
+            angle = lbound + rand * (ubound - lbound)
+            trial[tid] = best = math.copysign(angle, isodd)
+        nb.cuda.syncthreads()
+        trialVal = merit_error(n, trial, index, nglass)
+        if tid < angle_count and trialVal is not None:
+            bestVal = trialVal
+            found = True
+        for rs in range(steps):
             if tid < angle_count:
                 xi = nb.cuda.random.xoroshiro128p_normal_float32(rng, rid)
-                if tid == 0:
-                    rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-                    normed[0] = dr * rand ** (1 / angle_count)
-                test = best + normed[0] * xi / math.sqrt(reduce(operator.add, np.float32(xi ** 2), angle_count))
+                sphere = xi / math.sqrt(reduce(operator.add, np.float32(xi ** 2), angle_count))
+                test = best + sphere * dr * math.exp(-np.float32(rs)/np.float32(steps)) * np.float32(1 if tid > 1 else 0.5)
                 trial[tid] = math.copysign(max(min(abs(test), ubound), lbound), isodd)
             nb.cuda.syncthreads()
             trialVal = merit_error(n, trial, index, nglass)
-            if tid < angle_count and trialVal is not None and trialVal < bestVal:
+            if tid < angle_count and trialVal is not None and (not found or trialVal < bestVal):
                 bestVal = trialVal
                 best = trial[tid]
-        return True, best, bestVal
+                found = True
+        return found, best, bestVal
 
     @nb.cuda.jit((nb.f4[:, :], out_type[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=True)
     def optimize(ns, out, start, stop, rng):
@@ -209,7 +212,8 @@ nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
-gpus = nb.cuda.gpus  # [nb.cuda.gpus[1]]
+#gpus = nb.cuda.gpus
+gpus = [nb.cuda.gpus[0]]
 ngpu = len(gpus)
 output = nb.cuda.pinned_array(ngpu * blockCount, dtype=out_dtype)
 streams = []
@@ -240,5 +244,5 @@ ret = describe(ns, angles, config)
 if isinstance(ret, int):
     print('Failed at interface', ret)
 else:
-    err, NL, deltaT, deltaC, delta, transm = ret
-    print(err, NL, np.rad2deg(delta), transm * 100)
+    err, NL, deltaT, deltaC, size, delta, transm = ret
+    print(err, NL, size, np.rad2deg(delta), transm * 100)

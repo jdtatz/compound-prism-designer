@@ -18,6 +18,7 @@ def describe(n, angles, config):
     refracted = np.arcsin((n1 / n2) * np.sin(incident))
     ci, cr = np.cos(incident), np.cos(refracted)
     T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
+    size = 0
     for i in range(1, count + 1):
         n1 = n2
         n2 = n[i] if i < count else 1
@@ -44,6 +45,7 @@ def describe(n, angles, config):
         invalid_count = np.sum(np.logical_or(np.logical_or(0 > path0, path0 > sideR), np.logical_or(0 > path1, path1 > sideR)))
         if invalid_count > 0:
             return i
+        size += np.sqrt(sideL**2 + sideR**2 - 2*sideL*sideR*np.cos(alpha))
         sideL = sideR
 
         refracted = np.arcsin((n1 / n2) * np.sin(incident))
@@ -59,5 +61,6 @@ def describe(n, angles, config):
     merit_err = config.weight_deviation * (deltaC - config.deltaC_target) ** 2 \
                 + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
                 + config.weight_linearity * NL \
-                + config.weight_transmission * transmission_err
-    return merit_err, NL, deltaT, deltaC, delta_spectrum, transmission_spectrum
+                + config.weight_transmission * transmission_err \
+                + config.weight_thinness * max(size - config.max_size, 0)
+    return merit_err, NL, deltaT, deltaC, size, delta_spectrum, transmission_spectrum
