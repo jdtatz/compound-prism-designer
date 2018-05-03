@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import numpy as np
-from numbaCudaFallbacks import syncthreads_or, reduce
+from numbaCudaFallbacks import laneid
 import numba as nb
 import numba.cuda
 import numba.cuda.random
@@ -16,27 +16,82 @@ from simple import describe
 os.environ['NUMBAPRO_NVVM'] = '/usr/local/cuda/nvvm/lib64/libnvvm.so'
 os.environ['NUMBAPRO_LIBDEVICE'] = '/usr/local/cuda/nvvm/libdevice/'
 
+
+warp_size = np.int32(32)
+mask = np.int32(0xffffffff)
+packing = np.int32(0x1f)
+rtype = nb.f4
+@nb.cuda.jit(device=True)
+def reduce(func, val, width):
+    def ilog2(v):
+        return 31 - nb.cuda.clz(np.int32(v))
+    def is_pow_2(v):
+        return not (v & (v - 1))
+    if width <= warp_size and is_pow_2(width):
+        for i in range(ilog2(width)):
+            val = func(val, nb.cuda.shfl_xor_sync(mask, val, 1 << i))
+        return val
+    elif width <= warp_size:
+        closest_pow2 = np.int32(1 << ilog2(width))
+        diff = np.int32(width - closest_pow2)
+        lid = laneid()
+        temp = nb.cuda.shfl_down_sync(mask, val, closest_pow2)
+        if lid < diff:
+            val = func(val, temp)
+        for i in range(ilog2(width)):
+            val = func(val, nb.cuda.shfl_xor_sync(mask, val, 1 << i))
+        return nb.cuda.shfl_sync(mask, val, 0)
+    else:
+        warp_count = int(math.ceil(width / warp_size))
+        last_warp_size = width % warp_size
+        nb.cuda.syncthreads()
+        buffer = nb.cuda.shared.array(0, rtype)
+        tid = nb.cuda.threadIdx.x
+        lid = laneid()
+        nb.cuda.syncthreads()
+        if (last_warp_size == 0) or (tid < width - last_warp_size):
+            for i in range(ilog2(warp_size)):
+                val = func(val, nb.cuda.shfl_xor_sync(mask, val, 1 << i))
+        elif is_pow_2(last_warp_size):
+            for i in range(ilog2(last_warp_size)):
+                val = func(val, nb.cuda.shfl_xor_sync(mask, val, 1 << i))
+        else:
+            closest_lpow2 = np.int32(1 << ilog2(last_warp_size))
+            temp = nb.cuda.shfl_down_sync(mask, val, closest_lpow2)
+            if lid < last_warp_size - closest_lpow2:
+                val = func(val, temp)
+            for i in range(ilog2(closest_lpow2)):
+                val = func(val, nb.cuda.shfl_xor_sync(mask, val, 1 << i))
+        if lid == 0:
+            buffer[tid // warp_size] = val
+        nb.cuda.syncthreads()
+        val = buffer[0]
+        for i in range(1, warp_count):
+            val = func(val, buffer[i])
+        return val
+
+
 base_config_dict = OrderedDict(theta0=0,
                                start=1,
                                radius=0.5,
-                               height=10,
-                               max_size=60,
+                               height=5,
+                               max_size=40,
                                deltaC_target=0,
-                               deltaT_target=np.deg2rad(48),
-                               transmission_minimum=0.85,
+                               deltaT_target=np.deg2rad(16),
                                crit_angle_prop=0.999,
                                lower_bound=np.deg2rad(2),
                                upper_bound=np.deg2rad(120),
                                weight_deviation=15,
-                               weight_dispersion=25,
+                               weight_dispersion=250,
                                weight_linearity=1000,
-                               weight_transmission=35,
+                               weight_transmission=30,
                                weight_thinness=1
                                )
 
 
 def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.deg2rad(60)):
     dr = np.float32(dr)
+    factor = np.float32(3 / steps)
     angle_count = prism_count + 1
 
     config_keys = list(base_config_dict.keys())
@@ -80,7 +135,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.d
         incident = config.theta0 + angles[0]
         offAngle = angles[1]
         crit_angle = np.float32(math.pi / 2)
-        if syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
+        if nb.cuda.syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
             return
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
@@ -94,7 +149,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.d
             incident = refracted - alpha
 
             crit_angle = math.asin(n2 / n1) if n2 < n1 else np.float32(np.pi / 2)
-            if syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
+            if nb.cuda.syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
                 return
 
             if i > 1:
@@ -109,7 +164,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.d
             else:
                 path0 = sideR - (sideL - path0) * los
                 path1 = sideR - (sideL - path1) * los
-            if syncthreads_or(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR):
+            if nb.cuda.syncthreads_or(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR):
                 return
             size += math.sqrt(sideL**2 + sideR**2 - np.float32(2)*sideL*sideR*math.cos(alpha))
             sideL = sideR
@@ -123,14 +178,12 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.d
             deltaC[0] = delta
         deltaT = (reduce(max, delta, nwaves) - reduce(min, delta, nwaves))
         meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)
-        transmission_err = max(config.transmission_minimum - meanT, np.float32(0))
         NL = nonlinearity(delta)
         merit_err = config.weight_deviation * (deltaC[0] - config.deltaC_target) ** 2 \
                     + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
                     + config.weight_linearity * NL \
-                    + config.weight_transmission * transmission_err \
+                    + config.weight_transmission * (np.float32(1) - meanT) \
                     + config.weight_thinness * max(size - config.max_size, np.float32(0))
-        nb.cuda.syncthreads()
         return merit_err
 
     @nb.cuda.jit(device=True)
@@ -157,7 +210,7 @@ def create_optimizer(prism_count=3, nwaves=64, config_dict={}, steps=20, dr=np.d
             if tid < angle_count:
                 xi = nb.cuda.random.xoroshiro128p_normal_float32(rng, rid)
                 sphere = xi / math.sqrt(reduce(operator.add, np.float32(xi ** 2), angle_count))
-                test = best + sphere * dr * math.exp(-np.float32(rs)/np.float32(steps)) * np.float32(1 if tid > 1 else 0.5)
+                test = best + sphere * dr * math.exp(-np.float32(rs)*factor) * np.float32(1 if tid > 1 else 0.5)
                 trial[tid] = math.copysign(max(min(abs(test), ubound), lbound), isodd)
             nb.cuda.syncthreads()
             trialVal = merit_error(n, trial, index, nglass)
@@ -212,8 +265,8 @@ nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
 blockCount = 512
-#gpus = nb.cuda.gpus
-gpus = [nb.cuda.gpus[0]]
+gpus = nb.cuda.gpus
+#gpus = [nb.cuda.gpus[0]]
 ngpu = len(gpus)
 output = nb.cuda.pinned_array(ngpu * blockCount, dtype=out_dtype)
 streams = []

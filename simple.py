@@ -56,7 +56,7 @@ def describe(n, angles, config):
     deltaC = delta_spectrum[nwaves // 2]
     deltaT = (delta_spectrum.max() - delta_spectrum.min())
     meanT = np.sum(transmission_spectrum) / nwaves
-    transmission_err = np.max(config.transmission_minimum - meanT, 0)
+    transmission_err = np.max(1 - meanT, 0)
     NL = np.sqrt(np.sum(np.gradient(np.gradient(delta_spectrum)) ** 2))
     merit_err = config.weight_deviation * (deltaC - config.deltaC_target) ** 2 \
                 + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
