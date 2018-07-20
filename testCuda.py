@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import numpy as np
-from numbaCudaFallbacks import laneid
 import numba as nb
 import numba.cuda
 import numba.cuda.random
@@ -34,7 +33,7 @@ def reduce(func, val, width):
     elif width <= warp_size:
         closest_pow2 = np.int32(1 << ilog2(width))
         diff = np.int32(width - closest_pow2)
-        lid = laneid()
+        lid = nb.cuda.laneid
         temp = nb.cuda.shfl_down_sync(mask, val, closest_pow2)
         if lid < diff:
             val = func(val, temp)
@@ -47,7 +46,7 @@ def reduce(func, val, width):
         nb.cuda.syncthreads()
         buffer = nb.cuda.shared.array(0, rtype)
         tid = nb.cuda.threadIdx.x
-        lid = laneid()
+        lid = nb.cuda.laneid
         nb.cuda.syncthreads()
         if (last_warp_size == 0) or (tid < width - last_warp_size):
             for i in range(ilog2(warp_size)):
