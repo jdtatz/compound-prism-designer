@@ -28,7 +28,7 @@ def describe(n, angles, config):
     refracted = np.arcsin((n1 / n2) * np.sin(incident))
     ci, cr = np.cos(incident), np.cos(refracted)
     T = 1 - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)) ** 2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)) ** 2) / 2
-    size = 0
+    size = pts[1, 0]
     for i in range(1, count + 1):
         n1 = n2
         n2 = n[i] if i < count else 1
@@ -42,6 +42,10 @@ def describe(n, angles, config):
 
         if i > 1:
             offAngle += alpha
+        inc = config.height * np.tan(np.abs(offAngle))
+        size += inc
+        pts[i+1, 0] = pts[i, 0] + inc
+
         sideR = config.height / np.cos(offAngle)
         t1 = np.pi / 2 - refracted * np.copysign(1, alpha)
         t2 = np.pi - np.abs(alpha) - t1
@@ -54,17 +58,15 @@ def describe(n, angles, config):
         else:
             path0 = sideR - (sideL - path0) * los
             path1 = sideR - (sideL - path1) * los
-            ptsL[:, i, 1] = config.height - np.cos(offAngle) * (sideR - path0)
-            ptsU[:, i, 1] = config.height - np.cos(offAngle) * (sideR - path1)
+            ptsL[:, i, 1] = config.height - np.cos(offAngle) * path0
+            ptsU[:, i, 1] = config.height - np.cos(offAngle) * path1
         ptsL[:, i, 0] = pts[i, 0] + np.sin(abs(offAngle)) * path0
         ptsU[:, i, 0] = pts[i, 0] + np.sin(abs(offAngle)) * path1
 
         invalid_count = np.sum(np.logical_or(np.logical_or(0 > path0, path0 > sideR), np.logical_or(0 > path1, path1 > sideR)))
         if invalid_count > 0:
             return i
-        size += np.sqrt(sideL**2 + sideR**2 - 2*sideL*sideR*np.cos(alpha))
         sideL = sideR
-        pts[i+1, 0] = size
 
         refracted = np.arcsin((n1 / n2) * np.sin(incident))
         ci, cr = np.cos(incident), np.cos(refracted)
@@ -85,8 +87,9 @@ def describe(n, angles, config):
 
     dwg = Drawing('figure.svg')
     for i, tri in enumerate(triangles):
-        dwg.add(dwg.polygon(tri.tolist(), fill=('gray' if i%2 else 'white')))
-    dwg.add(dwg.polyline(ptsU[-1].tolist(), stroke='red', stroke_width=0.1, fill='none'))
+        dwg.add(dwg.polygon((100 * tri).tolist(), fill=('gray' if i%2 else 'white')))
+    dwg.add(dwg.polyline((100 * ptsU[-1]).tolist(), stroke='red', stroke_width=1, fill='none'))
+
     dwg.save()
 
     return merit_err, NL, deltaT, deltaC, size, delta_spectrum, transmission_spectrum
