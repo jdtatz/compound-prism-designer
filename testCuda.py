@@ -143,7 +143,7 @@ def create_optimizer(prism_count=3,
         refracted = math.asin((n1 / n2) * math.sin(incident))
         ci, cr = math.cos(incident), math.cos(refracted)
         T = np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))**2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))**2) / np.float32(2)
-        size = np.float32(0)
+        size = np.float32(config.height * math.tan(angles[0]))
         for i in range(1, angle_count):
             n1 = n2
             n2 = n[(index // (nglass**i)) % nglass, tid] if i < prism_count else np.float32(1)
@@ -156,6 +156,7 @@ def create_optimizer(prism_count=3,
 
             if i > 1:
                 offAngle += alpha
+            size += np.float32(config.height * math.tan(abs(offAngle)))
             sideR = config.height / math.cos(offAngle)
             t1 = np.float32(np.pi / 2) - refracted * math.copysign(np.float32(1), alpha)
             t2 = np.float32(np.pi) - abs(alpha) - t1
@@ -168,7 +169,6 @@ def create_optimizer(prism_count=3,
                 path1 = sideR - (sideL - path1) * los
             if nb.cuda.syncthreads_or(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR):
                 return
-            size += math.sqrt(sideL**2 + sideR**2 - np.float32(2) * sideL * sideR * math.cos(alpha))
             sideL = sideR
 
             refracted = math.asin((n1 / n2) * math.sin(incident))
