@@ -71,7 +71,7 @@ def reduce(func, val, width):
 
 base_config_dict = OrderedDict(
     theta0=0,
-    start=1,
+    start=4.25,
     radius=0.5,
     height=5,
     max_size=40,
@@ -135,13 +135,12 @@ def create_optimizer(prism_count=3,
         n2 = n[index % nglass, tid]
         norm_angle = -angles[0]
         norm = -math.cos(norm_angle), -math.sin(norm_angle)
-        prism_x = config.height * abs(norm[1] / norm[0])
-        prism_y = config.height
+        size = config.height * abs(norm[1] / norm[0])
         ray_dir = math.cos(config.theta0), math.sin(config.theta0)
-        ray_path = prism_x - (config.height - config.start) * abs(norm[1] / norm[0]), config.start
+        ray_path = size - (config.height - config.start) * abs(norm[1] / norm[0]), config.start
         # Snell's Law
         r = n1 / n2
-        ci = -ray_dir[0]*norm[0]-ray_dir[1]*norm[1]
+        ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
         cr = math.sqrt(np.float32(1) - r * r * (np.float32(1) - ci * ci))
         inner = r * ci - cr
         ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
@@ -156,11 +155,11 @@ def create_optimizer(prism_count=3,
 
             norm_angle += alpha
             norm = -math.cos(norm_angle), -math.sin(norm_angle)
-            prism_x += config.height * abs(norm[1] / norm[0])
-            prism_y ^= config.height
+            size += config.height * abs(norm[1] / norm[0])
+            prism_y = np.float32(0) if i % 2 else config.height
             ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
             # Line-Plane Intersection
-            d = (norm[0]*(ray_path[0] - prism_x) + norm[1]*(ray_path[1] - prism_y)) / ci
+            d = (norm[0]*(ray_path[0] - size) + norm[1]*(ray_path[1] - prism_y)) / ci
             ray_path = d * ray_dir[0] + ray_path[0], d * ray_dir[1] + ray_path[1]
             if nb.cuda.syncthreads_or(ray_path[1] <= 0 or ray_path[1] >= config.height):
                 return
@@ -173,7 +172,7 @@ def create_optimizer(prism_count=3,
             Rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
             T *= np.float32(1) - (Rs * Rs + Rp * Rp) / np.float32(2)
         delta = math.acos(ray_dir[0])
-        if nb.cuda.syncthreads_or(not math.isfinite(delta)):
+        if nb.cuda.syncthreads_or(math.isnan(delta)):
             return
         if tid == 0:
             shared_delta[0] = delta
@@ -183,9 +182,8 @@ def create_optimizer(prism_count=3,
             shared_delta[2] = delta
         meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)  # implicit sync
         deltaC = shared_delta[1]
-        deltaT = abs(shared_delta[2] - shared_delta[0])  # implicit sync
-        NL = nonlinearity(delta)
-        size = prism_x
+        deltaT = abs(shared_delta[2] - shared_delta[0])
+        NL = nonlinearity(delta)  # implicit sync
         merit_err = config.weight_deviation * (deltaC - config.deltaC_target) ** 2 \
                     + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
                     + config.weight_linearity * NL \
