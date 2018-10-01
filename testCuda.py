@@ -129,58 +129,64 @@ def create_optimizer(prism_count=3,
     def merit_error(n, angles, index, nglass):
         tid = nb.cuda.threadIdx.x
         # nwaves = nb.cuda.blockDim.x
-        deltaC = nb.cuda.shared.array(1, nb.f4)
+        shared_delta = nb.cuda.shared.array(3, nb.f4)
+        # Initial Values
         n1 = np.float32(1)
         n2 = n[index % nglass, tid]
-        path0 = (config.start - config.radius) / math.cos(angles[0])
-        path1 = (config.start + config.radius) / math.cos(angles[0])
-        sideL = config.height / math.cos(angles[0])
-        incident = config.theta0 + angles[0]
-        offAngle = angles[1]
-        crit_angle = np.float32(math.pi / 2)
-        if nb.cuda.syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
-            return
-        refracted = math.asin((n1 / n2) * math.sin(incident))
-        ci, cr = math.cos(incident), math.cos(refracted)
-        T = np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))**2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))**2) / np.float32(2)
-        size = np.float32(config.height * math.tan(angles[0]))
+        norm_angle = -angles[0]
+        norm = -math.cos(norm_angle), -math.sin(norm_angle)
+        prism_x = config.height * abs(norm[1] / norm[0])
+        prism_y = config.height
+        ray_dir = math.cos(config.theta0), math.sin(config.theta0)
+        ray_path = prism_x - (config.height - config.start) * abs(norm[1] / norm[0]), config.start
+        # Snell's Law
+        r = n1 / n2
+        ci = -ray_dir[0]*norm[0]-ray_dir[1]*norm[1]
+        cr = math.sqrt(np.float32(1) - r * r * (np.float32(1) - ci * ci))
+        inner = r * ci - cr
+        ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
+        # Surface Transmittance / Fresnel Equation
+        Rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
+        Rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
+        T = np.float32(1) - (Rs * Rs + Rp * Rp) / np.float32(2)
         for i in range(1, angle_count):
             n1 = n2
             n2 = n[(index // (nglass**i)) % nglass, tid] if i < prism_count else np.float32(1)
             alpha = angles[i] if i > 1 else (angles[1] + angles[0])
-            incident = refracted - alpha
 
-            crit_angle = math.asin(n2 / n1) if n2 < n1 else np.float32(np.pi / 2)
-            if nb.cuda.syncthreads_or(abs(incident) >= crit_angle * config.crit_angle_prop):
+            norm_angle += alpha
+            norm = -math.cos(norm_angle), -math.sin(norm_angle)
+            prism_x += config.height * abs(norm[1] / norm[0])
+            prism_y ^= config.height
+            ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
+            # Line-Plane Intersection
+            d = (norm[0]*(ray_path[0] - prism_x) + norm[1]*(ray_path[1] - prism_y)) / ci
+            ray_path = d * ray_dir[0] + ray_path[0], d * ray_dir[1] + ray_path[1]
+            if nb.cuda.syncthreads_or(ray_path[1] <= 0 or ray_path[1] >= config.height):
                 return
-
-            if i > 1:
-                offAngle += alpha
-            size += np.float32(config.height * math.tan(abs(offAngle)))
-            sideR = config.height / math.cos(offAngle)
-            t1 = np.float32(np.pi / 2) - refracted * math.copysign(np.float32(1), alpha)
-            t2 = np.float32(np.pi) - abs(alpha) - t1
-            los = math.sin(t1) / math.sin(t2)
-            if alpha > 0:
-                path0 *= los
-                path1 *= los
-            else:
-                path0 = sideR - (sideL - path0) * los
-                path1 = sideR - (sideL - path1) * los
-            if nb.cuda.syncthreads_or(0 > path0 or path0 > sideR or 0 > path1 or path1 > sideR):
-                return
-            sideL = sideR
-
-            refracted = math.asin((n1 / n2) * math.sin(incident))
-            ci, cr = math.cos(incident), math.cos(refracted)
-            T *= np.float32(1) - (((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))**2 + ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))**2) / np.float32(2)
-        delta = config.theta0 - (refracted + offAngle)
-        if tid == nwaves // 2:
-            deltaC[0] = delta
-        deltaT = (reduce(max, delta, nwaves) - reduce(min, delta, nwaves))
-        meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)
+            # Snell's Law
+            cr = math.sqrt(np.float32(1) - r * r * (np.float32(1) - ci * ci))
+            inner = r * ci - cr
+            ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
+            # Surface Transmittance / Fresnel Equation
+            Rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
+            Rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
+            T *= np.float32(1) - (Rs * Rs + Rp * Rp) / np.float32(2)
+        delta = math.acos(ray_dir[0])
+        if nb.cuda.syncthreads_or(not math.isfinite(delta)):
+            return
+        if tid == 0:
+            shared_delta[0] = delta
+        elif tid == nwaves // 2:
+            shared_delta[1] = delta
+        elif tid == nwaves - 1:
+            shared_delta[2] = delta
+        meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)  # implicit sync
+        deltaC = shared_delta[1]
+        deltaT = abs(shared_delta[2] - shared_delta[0])  # implicit sync
         NL = nonlinearity(delta)
-        merit_err = config.weight_deviation * (deltaC[0] - config.deltaC_target) ** 2 \
+        size = prism_x
+        merit_err = config.weight_deviation * (deltaC - config.deltaC_target) ** 2 \
                     + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
                     + config.weight_linearity * NL \
                     + config.weight_transmission * (np.float32(1) - meanT) \
