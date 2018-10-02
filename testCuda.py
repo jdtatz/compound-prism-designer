@@ -9,7 +9,7 @@ from collections import OrderedDict
 from itertools import repeat
 import time
 from compoundprism.glasscat import read_glasscat, calc_n
-from simple import describe
+from reference import describe
 
 warp_size = np.int32(32)
 mask = np.uint32(0xffffffff)
@@ -141,7 +141,10 @@ def create_optimizer(prism_count=3,
         # Snell's Law
         r = n1 / n2
         ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
-        cr = math.sqrt(np.float32(1) - r * r * (np.float32(1) - ci * ci))
+        cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
+        if nb.cuda.syncthreads_or(cr_sq < 0):
+            return
+        cr = math.sqrt(cr_sq)
         inner = r * ci - cr
         ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
         # Surface Transmittance / Fresnel Equation
@@ -151,12 +154,13 @@ def create_optimizer(prism_count=3,
         for i in range(1, angle_count):
             n1 = n2
             n2 = n[(index // (nglass**i)) % nglass, tid] if i < prism_count else np.float32(1)
+            r = n1 / n2
             alpha = angles[i] if i > 1 else (angles[1] + angles[0])
 
             norm_angle += alpha
             norm = -math.cos(norm_angle), -math.sin(norm_angle)
             size += config.height * abs(norm[1] / norm[0])
-            prism_y = np.float32(0) if i % 2 else config.height
+            prism_y = np.float32(0) if i % 2 == 1 else config.height
             ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
             # Line-Plane Intersection
             d = (norm[0]*(ray_path[0] - size) + norm[1]*(ray_path[1] - prism_y)) / ci
@@ -164,7 +168,10 @@ def create_optimizer(prism_count=3,
             if nb.cuda.syncthreads_or(ray_path[1] <= 0 or ray_path[1] >= config.height):
                 return
             # Snell's Law
-            cr = math.sqrt(np.float32(1) - r * r * (np.float32(1) - ci * ci))
+            cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
+            if nb.cuda.syncthreads_or(cr_sq < 0):
+                return
+            cr = math.sqrt(cr_sq)
             inner = r * ci - cr
             ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
             # Surface Transmittance / Fresnel Equation
@@ -172,8 +179,6 @@ def create_optimizer(prism_count=3,
             Rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
             T *= np.float32(1) - (Rs * Rs + Rp * Rp) / np.float32(2)
         delta = math.acos(ray_dir[0])
-        if nb.cuda.syncthreads_or(math.isnan(delta)):
-            return
         if tid == 0:
             shared_delta[0] = delta
         elif tid == nwaves // 2:
@@ -304,4 +309,4 @@ if isinstance(ret, int):
     print('Failed at interface', ret)
 else:
     err, NL, deltaT, deltaC, size, delta, transm = ret
-    print(err, NL, size, np.rad2deg(delta), transm * 100)
+    print(f"error: {err} NL: {NL} size: {size} delta: {np.rad2deg(delta)} T: {transm *100}")
