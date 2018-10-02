@@ -10,9 +10,7 @@ def describe(n, angles, config):
     prism_vertices[::2, 1] = 0
     prism_vertices[1::2, 1] = config["height"]
     prism_vertices[0, 0] = 0
-    prism_vertices[1:, 0] = np.add.accumulate(config["height"] *
-                                              np.tan(np.abs((angles[0], *np.add.accumulate(angles[1:])))))
-    print(prism_vertices)
+    prism_vertices[1:, 0] = np.add.accumulate(config["height"] * np.tan(np.abs(angles)))
     ray_path = np.empty((nwaves, count + 1, 2))
     ray_dir = np.empty((nwaves, count + 1, 2))
     ray_init_dir = np.array((np.cos(config["theta0"]), np.sin(config["theta0"])))
@@ -22,8 +20,8 @@ def describe(n, angles, config):
     n1 = 1
     n2 = n[0]
     r = n1 / n2
-    norm_angle = -angles[0]
-    norm = np.array((-np.cos(norm_angle), -np.sin(norm_angle)))
+    # Rotation of (-1, 0) by angle[0] CW
+    norm = np.array((-np.cos(-angles[0]), -np.sin(-angles[0])))
     # Snell's Law
     ci = -(ray_init_dir @ norm)
     cr_sq = 1 - r * r * (1 - ci * ci)
@@ -43,10 +41,9 @@ def describe(n, angles, config):
         n1 = n2
         n2 = n[i] if i < count else 1
         r = n1 / n2
-        alpha = angles[i] if i > 1 else (angles[1] + angles[0])
-        norm_angle += alpha
-        norm[0] = -np.cos(norm_angle)
-        norm[1] = -np.sin(norm_angle)
+        # Rotation of (-1, 0) by angle[i] CCW
+        norm[0] = -np.cos(angles[i])
+        norm[1] = -np.sin(angles[i])
         # Snell's Law
         ci = -(ray_dir[:, i - 1] @ norm)
         cr_sq = 1 - r * r * (1 - ci * ci)
@@ -81,6 +78,11 @@ def describe(n, angles, config):
                 + config["weight_thinness"] * max(size - config["max_size"], 0)
 
     triangles = np.stack((prism_vertices[:-2], prism_vertices[1:-1], prism_vertices[2:]), axis=1)
+    # Mirror for svg
+    triangles[:, :, 1] *= -1
+    triangles[:, :, 1] += config["height"]
+    ray_path[:, :, 1] *= -1
+    ray_path[:, :, 1] += config["height"]
     dwg = Drawing('figure.svg')
     for i, tri in enumerate(triangles):
         dwg.add(dwg.polygon((100 * tri).tolist(), fill=('gray' if i % 2 else 'white')))

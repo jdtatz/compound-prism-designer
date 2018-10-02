@@ -79,7 +79,7 @@ base_config_dict = OrderedDict(
     deltaT_target=np.deg2rad(16),
     crit_angle_prop=0.999,
     lower_bound=np.deg2rad(2),
-    upper_bound=np.deg2rad(120),
+    upper_bound=np.deg2rad(80),
     weight_deviation=15,
     weight_dispersion=250,
     weight_linearity=1000,
@@ -133,13 +133,13 @@ def create_optimizer(prism_count=3,
         # Initial Values
         n1 = np.float32(1)
         n2 = n[index % nglass, tid]
-        norm_angle = -angles[0]
-        norm = -math.cos(norm_angle), -math.sin(norm_angle)
+        r = n1 / n2
+        # Rotation of (-1, 0) by angle[0] CW
+        norm = -math.cos(-angles[0]), -math.sin(-angles[0])
         size = config.height * abs(norm[1] / norm[0])
         ray_dir = math.cos(config.theta0), math.sin(config.theta0)
         ray_path = size - (config.height - config.start) * abs(norm[1] / norm[0]), config.start
         # Snell's Law
-        r = n1 / n2
         ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
         cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
         if nb.cuda.syncthreads_or(cr_sq < 0):
@@ -155,10 +155,8 @@ def create_optimizer(prism_count=3,
             n1 = n2
             n2 = n[(index // (nglass**i)) % nglass, tid] if i < prism_count else np.float32(1)
             r = n1 / n2
-            alpha = angles[i] if i > 1 else (angles[1] + angles[0])
-
-            norm_angle += alpha
-            norm = -math.cos(norm_angle), -math.sin(norm_angle)
+            # Rotation of (-1, 0) by angle[i] CCW
+            norm = -math.cos(angles[i]), -math.sin(angles[i])
             size += config.height * abs(norm[1] / norm[0])
             prism_y = np.float32(0) if i % 2 == 1 else config.height
             ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
@@ -205,8 +203,8 @@ def create_optimizer(prism_count=3,
         bestVal = np.float32(0)
         found = False
         trial = nb.cuda.shared.array(angle_count, nb.f4)
-        lbound = config.lower_bound if (tid > 1) else (config.lower_bound / np.float32(2))
-        ubound = config.upper_bound if (tid > 1) else (config.upper_bound / np.float32(2))
+        lbound = config.lower_bound  # if (tid > 1) else (config.lower_bound / np.float32(2))
+        ubound = config.upper_bound  # if (tid > 1) else (config.upper_bound / np.float32(2))
         if tid < angle_count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
             angle = lbound + rand * (ubound - lbound)
