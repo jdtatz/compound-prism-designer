@@ -76,7 +76,7 @@ base_config_dict = OrderedDict(
     height=5,
     max_size=40,
     deltaC_target=0,
-    deltaT_target=np.deg2rad(16),
+    deltaT_target=np.deg2rad(24),
     crit_angle_prop=0.999,
     lower_bound=np.deg2rad(2),
     upper_bound=np.deg2rad(80),
@@ -135,7 +135,7 @@ def create_optimizer(prism_count=3,
         n2 = n[index % nglass, tid]
         r = n1 / n2
         # Rotation of (-1, 0) by angle[0] CW
-        norm = -math.cos(-angles[0]), -math.sin(-angles[0])
+        norm = -math.cos(angles[0]), -math.sin(angles[0])
         size = config.height * abs(norm[1] / norm[0])
         ray_dir = math.cos(config.theta0), math.sin(config.theta0)
         ray_path = size - (config.height - config.start) * abs(norm[1] / norm[0]), config.start
@@ -197,17 +197,15 @@ def create_optimizer(prism_count=3,
     @nb.cuda.jit(device=True)
     def random_search(n, index, nglass, rng):
         tid = nb.cuda.threadIdx.x
-        isodd = np.float32(-1 if (tid > 1 and tid % 2 == 0) else 1)
+        isodd = np.float32(-1 if (tid % 2 == 0) else 1)
         rid = nb.cuda.blockIdx.x * angle_count + tid
         best = np.float32(0)
         bestVal = np.float32(0)
         found = False
         trial = nb.cuda.shared.array(angle_count, nb.f4)
-        lbound = config.lower_bound  # if (tid > 1) else (config.lower_bound / np.float32(2))
-        ubound = config.upper_bound  # if (tid > 1) else (config.upper_bound / np.float32(2))
         if tid < angle_count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
-            angle = lbound + rand * (ubound - lbound)
+            angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
             trial[tid] = best = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
@@ -218,8 +216,8 @@ def create_optimizer(prism_count=3,
             if tid < angle_count:
                 xi = nb.cuda.random.xoroshiro128p_normal_float32(rng, rid)
                 sphere = xi / math.sqrt(reduce(operator.add, np.float32(xi**2), angle_count))
-                test = best + sphere * dr * math.exp(-np.float32(rs) * factor) * np.float32(1 if tid > 1 else 0.5)
-                trial[tid] = math.copysign(max(min(abs(test), ubound), lbound), isodd)
+                test = best + sphere * dr * math.exp(-np.float32(rs) * factor)
+                trial[tid] = math.copysign(max(min(abs(test), config.upper_bound), config.lower_bound), isodd)
             nb.cuda.syncthreads()
             trialVal = merit_error(n, trial, index, nglass)
             if tid < angle_count and trialVal is not None and (not found or trialVal < bestVal):
