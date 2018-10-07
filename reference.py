@@ -1,4 +1,5 @@
 import numpy as np
+import numba as nb
 from svgwrite import Drawing
 
 
@@ -31,9 +32,9 @@ def describe(n, angles, config):
     ray_dir[:, 0, 0] = ray_init_dir[0] * r + normals[0, 0] * inner
     ray_dir[:, 0, 1] = ray_init_dir[1] * r + normals[0, 1] * inner
     # Surface Transmittance / Fresnel Equation
-    Rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)
-    Rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)
-    T = 1 - (Rs * Rs + Rp * Rp) / 2
+    fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)
+    fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)
+    transmittance = 1 - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / 2
     # Iterate over surfaces
     for i in range(1, count + 1):
         # New Surface Values
@@ -56,21 +57,20 @@ def describe(n, angles, config):
         if np.any(np.logical_or(ray_path[:, i, 1] <= 0, ray_path[:, i, 1] >= config["height"])):
             return
         # Surface Transmittance / Fresnel Equation
-        Rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)
-        Rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)
-        T *= 1 - (Rs * Rs + Rp * Rp) / 2
+        fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)
+        fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)
+        transmittance *= 1 - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / 2
     delta_spectrum = np.arccos(ray_dir[:, -1, 0])
-    transmission_spectrum = T
-    deltaC = delta_spectrum[nwaves // 2]
-    deltaT = np.abs(delta_spectrum[-1] - delta_spectrum[0])
-    meanT = np.sum(transmission_spectrum) / nwaves
-    transmission_err = np.max(1 - meanT, 0)
-    NL = np.sqrt(np.sum(np.gradient(np.gradient(delta_spectrum)) ** 2))
+    deviation = delta_spectrum[nwaves // 2]
+    dispersion = np.abs(delta_spectrum[-1] - delta_spectrum[0])
+    mean_transmittance = np.sum(transmittance) / nwaves
+    transmittance_err = np.max(1 - mean_transmittance, 0)
+    nonlin = np.sqrt(np.sum(np.gradient(np.gradient(delta_spectrum)) ** 2))
     size = prism_vertices[-1, 0]
-    merit_err = config["weight_deviation"] * (deltaC - config["deltaC_target"]) ** 2 \
-                + config["weight_dispersion"] * (deltaT - config["deltaT_target"]) ** 2 \
-                + config["weight_linearity"] * NL \
-                + config["weight_transmission"] * transmission_err \
+    merit_err = config["weight_deviation"] * (deviation - config["deviation_target"]) ** 2 \
+                + config["weight_dispersion"] * (dispersion - config["dispersion_target"]) ** 2 \
+                + config["weight_linearity"] * nonlin \
+                + config["weight_transmittance"] * transmittance_err \
                 + config["weight_thinness"] * max(size - config["max_size"], 0)
 
     triangles = np.stack((prism_vertices[:-2], prism_vertices[1:-1], prism_vertices[2:]), axis=1)
@@ -87,4 +87,4 @@ def describe(n, angles, config):
     dwg.add(dwg.polyline((10 * ray_path[-1]).tolist(), stroke='blue', stroke_width=1, fill='none'))
     dwg.save()
 
-    return merit_err, NL, deltaT, deltaC, size, delta_spectrum, transmission_spectrum
+    return merit_err, nonlin, dispersion, deviation, size, delta_spectrum, transmittance
