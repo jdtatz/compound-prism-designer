@@ -304,4 +304,4 @@ if isinstance(ret, int):
     print('Failed at interface', ret)
 else:
     err, NL, dispersion, deviation, size, delta, transm = ret
-    print(f"error: {err} NL: {NL} size: {size} delta: {np.rad2deg(delta)} T: {transm *100}")
+    print(f"error: {err}\nNL: {NL}\nsize: {size}\ndelta: {np.rad2deg(delta)}\nT: {transm *100}")
