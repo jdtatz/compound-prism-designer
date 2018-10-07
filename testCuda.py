@@ -71,19 +71,18 @@ def reduce(func, val, width):
 
 base_config_dict = OrderedDict(
     theta0=0,
-    start=4.25,
+    start=0.9,
     radius=0.5,
-    height=5,
+    height=1,
     max_size=40,
-    deltaC_target=0,
-    deltaT_target=np.deg2rad(24),
-    crit_angle_prop=0.999,
+    deviation_target=0,
+    dispersion_target=np.deg2rad(24),
     lower_bound=np.deg2rad(2),
     upper_bound=np.deg2rad(80),
-    weight_deviation=15,
+    weight_deviation=25,
     weight_dispersion=250,
     weight_linearity=1000,
-    weight_transmission=30,
+    weight_transmittance=30,
     weight_thinness=1
 )
 
@@ -95,14 +94,14 @@ def create_optimizer(prism_count=3,
                      dr=np.deg2rad(60)):
     dr = np.float32(dr)
     factor = np.float32(3 / steps)
-    angle_count = prism_count + 1
+    surface_count = prism_count + 1
 
     config_keys = list(base_config_dict.keys())
     config_values = tuple(config_dict.get(key, base_config_dict[key]) for key in config_keys)
     config_dtype = np.dtype(list(zip(config_keys, repeat('f4'))))
     config = np.rec.array([config_values], dtype=config_dtype)[0]
 
-    out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', angle_count)])
+    out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('angles', 'f4', surface_count)])
     out_type = nb.from_dtype(out_dtype)
 
     @nb.cuda.jit(device=True)
@@ -148,10 +147,10 @@ def create_optimizer(prism_count=3,
         inner = r * ci - cr
         ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
         # Surface Transmittance / Fresnel Equation
-        Rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
-        Rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
-        T = np.float32(1) - (Rs * Rs + Rp * Rp) / np.float32(2)
-        for i in range(1, angle_count):
+        fresnel_rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
+        fresnel_rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
+        transmittance = np.float32(1) - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / np.float32(2)
+        for i in range(1, surface_count):
             n1 = n2
             n2 = n[(index // (nglass**i)) % nglass, tid] if i < prism_count else np.float32(1)
             r = n1 / n2
@@ -173,9 +172,9 @@ def create_optimizer(prism_count=3,
             inner = r * ci - cr
             ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
             # Surface Transmittance / Fresnel Equation
-            Rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
-            Rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
-            T *= np.float32(1) - (Rs * Rs + Rp * Rp) / np.float32(2)
+            fresnel_rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
+            fresnel_rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
+            transmittance *= np.float32(1) - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / np.float32(2)
         delta = math.acos(ray_dir[0])
         if tid == 0:
             shared_delta[0] = delta
@@ -183,14 +182,14 @@ def create_optimizer(prism_count=3,
             shared_delta[1] = delta
         elif tid == nwaves - 1:
             shared_delta[2] = delta
-        meanT = reduce(operator.add, T, nwaves) / np.float32(nwaves)  # implicit sync
-        deltaC = shared_delta[1]
-        deltaT = abs(shared_delta[2] - shared_delta[0])
-        NL = nonlinearity(delta)  # implicit sync
-        merit_err = config.weight_deviation * (deltaC - config.deltaC_target) ** 2 \
-                    + config.weight_dispersion * (deltaT - config.deltaT_target) ** 2 \
-                    + config.weight_linearity * NL \
-                    + config.weight_transmission * (np.float32(1) - meanT) \
+        mean_transmittance = reduce(operator.add, transmittance, nwaves) / np.float32(nwaves)  # implicit sync
+        deviation = shared_delta[1]
+        dispersion = abs(shared_delta[2] - shared_delta[0])
+        nonlin = nonlinearity(delta)  # implicit sync
+        merit_err = config.weight_deviation * (deviation - config.deviation_target) ** 2 \
+                    + config.weight_dispersion * (dispersion - config.dispersion_target) ** 2 \
+                    + config.weight_linearity * nonlin \
+                    + config.weight_transmittance * (np.float32(1) - mean_transmittance) \
                     + config.weight_thinness * max(size - config.max_size, np.float32(0))
         return merit_err
 
@@ -198,29 +197,29 @@ def create_optimizer(prism_count=3,
     def random_search(n, index, nglass, rng):
         tid = nb.cuda.threadIdx.x
         isodd = np.float32(-1 if (tid % 2 == 0) else 1)
-        rid = nb.cuda.blockIdx.x * angle_count + tid
+        rid = nb.cuda.blockIdx.x * surface_count + tid
         best = np.float32(0)
         bestVal = np.float32(0)
         found = False
-        trial = nb.cuda.shared.array(angle_count, nb.f4)
-        if tid < angle_count:
+        trial = nb.cuda.shared.array(surface_count, nb.f4)
+        if tid < surface_count:
             rand = nb.cuda.random.xoroshiro128p_uniform_float32(rng, rid)
             angle = config.lower_bound + rand * (config.upper_bound - config.lower_bound)
             trial[tid] = best = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
         trialVal = merit_error(n, trial, index, nglass)
-        if tid < angle_count and trialVal is not None:
+        if tid < surface_count and trialVal is not None:
             bestVal = trialVal
             found = True
         for rs in range(steps):
-            if tid < angle_count:
+            if tid < surface_count:
                 xi = nb.cuda.random.xoroshiro128p_normal_float32(rng, rid)
-                sphere = xi / math.sqrt(reduce(operator.add, np.float32(xi**2), angle_count))
+                sphere = xi / math.sqrt(reduce(operator.add, np.float32(xi**2), surface_count))
                 test = best + sphere * dr * math.exp(-np.float32(rs) * factor)
                 trial[tid] = math.copysign(max(min(abs(test), config.upper_bound), config.lower_bound), isodd)
             nb.cuda.syncthreads()
             trialVal = merit_error(n, trial, index, nglass)
-            if tid < angle_count and trialVal is not None and (not found or trialVal < bestVal):
+            if tid < surface_count and trialVal is not None and (not found or trialVal < bestVal):
                 bestVal = trialVal
                 best = trial[tid]
                 found = True
@@ -235,7 +234,7 @@ def create_optimizer(prism_count=3,
         nglass = ns.shape[0]
         for index in range(start + bid, stop, bcount):
             valid, xmin, fx = random_search(ns, index, nglass, rng)
-            if tid < angle_count and valid and fx < bestVal:
+            if tid < surface_count and valid and fx < bestVal:
                 bestVal = fx
                 if tid == 0:
                     out[bid].value = fx
@@ -304,5 +303,5 @@ ret = describe(ns, angles, config)
 if isinstance(ret, int):
     print('Failed at interface', ret)
 else:
-    err, NL, deltaT, deltaC, size, delta, transm = ret
+    err, NL, dispersion, deviation, size, delta, transm = ret
     print(f"error: {err} NL: {NL} size: {size} delta: {np.rad2deg(delta)} T: {transm *100}")
