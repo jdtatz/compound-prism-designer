@@ -120,8 +120,9 @@ def describe(n, angles, config):
             np.all(np.logical_or(0 < ray_path[:, :, 1], ray_path[:, :, 1] < config["height"]))):
         return
     # * Lens
+    lens_n = config["lens_n"]
     radius = 10
-    diameter = config["height"] + 5
+    diameter = 1.25 * config["height"]
     lens_dir = ray_dir[nwaves // 2, -1]
     center = ray_path[nwaves // 2, -1] + 2 * config["height"] * ray_dir[nwaves // 2, -1]
     c1 = center + lens_dir * np.sqrt(radius * radius - diameter * diameter / 4)
@@ -129,15 +130,18 @@ def describe(n, angles, config):
     r90 = np.array([[0, -1], [1, 0]])
     up = center + diameter / 2 * (r90 @ lens_dir)
     down = center - diameter / 2 * (r90 @ lens_dir)
-    lens_path, lens_dir, lens_t = spectro_ray_trace(config["lens_n"], ray_path[:, -1], ray_dir[:, -1], center, lens_dir, diameter, radius)
+    lens_path, lens_dir, lens_t = spectro_ray_trace(lens_n, ray_path[:, -1], ray_dir[:, -1], center, lens_dir, diameter, radius)
     # * Spectrometer
-    origin = center + 2 * config["height"] * ray_dir[nwaves // 2, -1]
+    w = radius - np.sqrt(radius * radius - diameter * diameter / 4)
+    focal_len = 1 / ((lens_n - 1) * (2 / radius + (lens_n - 1)*w/(lens_n * radius * radius)))
+    dist = np.mean(focal_len)
+    origin = center + dist * ray_dir[nwaves // 2, -1]
     norm = -ray_dir[nwaves // 2, -1]
     ci = -np.dot(lens_dir[:, -1], norm)
     d = np.dot(lens_path[:, -1] - origin, norm) / ci
     spec_pos = np.stack((d * lens_dir[:, -1, 0] + lens_path[:, -1, 0], d * lens_dir[:, -1, 1] + lens_path[:, -1, 1]), 1)
-    top = origin + config["height"] * -r90 @ norm
-    bottom = origin + config["height"] * r90 @ norm
+    top = origin + config["height"] / 2 * -r90 @ norm
+    bottom = origin + config["height"] / 2 * r90 @ norm
     # Calc Error
     delta_spectrum = np.arccos(ray_dir[:, -1, 0])
     deviation = delta_spectrum[nwaves // 2]
