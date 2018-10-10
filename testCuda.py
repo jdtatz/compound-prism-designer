@@ -71,9 +71,9 @@ def reduce(func, val, width):
 
 base_config_dict = OrderedDict(
     theta0=0,
-    start=0.9,
+    start=9,
     radius=0.5,
-    height=1,
+    height=10,
     max_size=40,
     deviation_target=0,
     dispersion_target=np.deg2rad(24),
@@ -269,6 +269,10 @@ w = np.linspace(650, 1000, nwaves, dtype=np.float64)
 gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
+
+config = OrderedDict(zip(config.dtype.names, config))
+lens_glass = 'N-BK7'
+config['lens_n'] = calc_n(gcat[lens_glass], w)
 
 blockCount = 512
 gpus = nb.cuda.gpus
