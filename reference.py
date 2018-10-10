@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
     "void(float32[:], float32[:], float32[:], float32, float32, float32[:, :], float32[:, :], float32[:])",
     "void(float64[:], float64[:], float64[:], float64, float64, float64[:, :], float64[:, :], float64[:])"
 ],
-    "(p),(s),(d),(),()->(s, d),(s, d),(s)", cache=True)
+    "(p),(s),(d),(),()->(s, d),(s, d),(s)", nopython=True, cache=True, target='cpu')
 def raytrace(n, angles, init_dir, height, start, ray_path, ray_dir, transmittance):
     # First Surface
     n1 = 1
@@ -18,7 +18,7 @@ def raytrace(n, angles, init_dir, height, start, ray_path, ray_dir, transmittanc
     ray_path[0, 0] = size - (height - start) * abs(norm[1] / norm[0])
     ray_path[0, 1] = start
     # Snell's Law
-    ci = -np.dot(init_dir, norm)
+    ci = -(init_dir[0] * norm[0] + init_dir[1] * norm[1])
     cr = np.sqrt(1 - r * r * (1 - ci * ci))
     inner = r * ci - cr
     ray_dir[0, 0] = init_dir[0] * r + norm[0] * inner
@@ -36,14 +36,14 @@ def raytrace(n, angles, init_dir, height, start, ray_path, ray_dir, transmittanc
         norm = -np.cos(angles[i]), -np.sin(angles[i])
         size += height * abs(norm[1] / norm[0])
         # Snell's Law
-        ci = -np.dot(ray_dir[i - 1], norm)
+        ci = -(ray_dir[i - 1, 0] * norm[0] + ray_dir[i - 1, 1] * norm[1])
         cr = np.sqrt(1 - r * r * (1 - ci * ci))
         inner = r * ci - cr
         ray_dir[i, 0] = ray_dir[i - 1, 0] * r + norm[0] * inner
         ray_dir[i, 1] = ray_dir[i - 1, 1] * r + norm[1] * inner
         # Line-Plane Intersection
         vertex = size, 0 if i % 2 else height
-        d = (np.dot(ray_path[i - 1] - vertex, norm)) / ci
+        d = ((ray_path[i - 1, 0] - vertex[0]) * norm[0] + (ray_path[i - 1, 1] - vertex[1]) * norm[1]) / ci
         ray_path[i, 0] = d * ray_dir[i - 1, 0] + ray_path[i - 1, 0]
         ray_path[i, 1] = d * ray_dir[i - 1, 1] + ray_path[i - 1, 1]
         # Surface Transmittance / Fresnel Equation
