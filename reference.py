@@ -90,19 +90,19 @@ def ray_trace(n, angles, init_dir, height, start, curvature, ray_path, ray_dir, 
     transmittance[-1] = 1 - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / 2
 
 
-def describe(n, angles, config):
+def describe(n, angles, curvature, config):
     assert np.all(np.abs(angles) < np.pi), 'Need Radians not Degrees'
     count, nwaves = n.shape
     # Ray Trace
     # * Prism
-    curvature = 0.3
-    sdist = 10
     ray_init_dir = np.cos(config["theta0"]), np.sin(config["theta0"])
     ray_path, ray_dir, transmittance = ray_trace(n.T, angles, ray_init_dir, config["height"], config["start"], curvature)
     transmittance = np.prod(transmittance, axis=1)
     # Spectrometer
+    diameter = config["height"] * np.cos(np.abs(angles[-1]))
+    focal_len = np.mean(diameter / (2 * n[-1] * curvature))
     norm = ray_dir[nwaves // 2, -1]
-    vertex = ray_path[nwaves//2, -1] + sdist * norm
+    vertex = ray_path[nwaves//2, -1] + focal_len * norm
     ci = -np.dot(ray_dir[:, -1], norm)
     d = np.dot(ray_path[:, -1] - vertex, norm) / ci
     end = np.stack((d * ray_dir[:, -1, 0] + ray_path[:, -1, 0], d * ray_dir[:, -1, 1] + ray_path[:, -1, 1]), 1)
@@ -137,7 +137,7 @@ def describe(n, angles, config):
     c = midpt[0] + norm[0] * rs, midpt[1] + norm[1] * rs
 
     norm = ray_dir[nwaves // 2, -1]
-    sc = ray_path[nwaves//2, -1] + sdist * norm
+    sc = ray_path[nwaves//2, -1] + focal_len * norm
     v = np.array((-norm[1], norm[0]))
     top = sc + v * config["height"] / 2
     bottom = sc - v * config["height"] / 2
