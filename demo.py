@@ -28,7 +28,7 @@ config = {
 
 ret = describe(glasses, angles, 0.3, config)
 if ret:
-    err, NL, dispersion, deviation, size, delta, transm = ret
-    print(f"error: {err}\nNL: {NL}\nsize: {size}\ndelta: {np.rad2deg(delta)}\nT: {transm *100}")
+    err, NL, dispersion, deviation, size, spec_pos, transm = ret
+    print(f"error: {err}\nNL: {NL}\nsize: {size}\nspectrometer position: {spec_pos)}\nT: {transm *100}")
 else:
     print('Failed')
