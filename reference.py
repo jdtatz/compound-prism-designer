@@ -106,8 +106,12 @@ def describe(n, angles, curvature, config):
     ci = -np.dot(ray_dir[:, -1], norm)
     d = np.dot(ray_path[:, -1] - vertex, norm) / ci
     end = np.stack((d * ray_dir[:, -1, 0] + ray_path[:, -1, 0], d * ray_dir[:, -1, 1] + ray_path[:, -1, 1]), 1)
+    vdiff = end - vertex
+    spec_pos = np.copysign(np.sqrt(vdiff[:, 0] * vdiff[:, 0] + vdiff[:, 1] * vdiff[:, 1]), vdiff[:, 1])
+    plt.plot(spec_pos)
+    plt.show()
     # Calc Error
-    delta_spectrum = np.arccos(ray_dir[:, -1, 0])
+    delta_spectrum = np.arctan2(ray_dir[:, -1, 1], ray_dir[:, -1, 0])
     deviation = delta_spectrum[nwaves // 2]
     dispersion = np.abs(delta_spectrum[-1] - delta_spectrum[0])
     mean_transmittance = np.sum(transmittance) / nwaves
