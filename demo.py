@@ -26,7 +26,7 @@ config = {
     "weight_thinness": 1
 }
 
-ret = describe(glasses, angles, config)
+ret = describe(glasses, angles, 0.3, config)
 if ret:
     err, NL, dispersion, deviation, size, delta, transm = ret
     print(f"error: {err}\nNL: {NL}\nsize: {size}\ndelta: {np.rad2deg(delta)}\nT: {transm *100}")
