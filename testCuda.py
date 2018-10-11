@@ -270,10 +270,6 @@ gcat = read_glasscat('Glasscat/schott_positive_glass_trimmed_oct2015.agf')
 nglass, names = len(gcat), list(gcat.keys())
 glasses = np.stack(calc_n(gcat[name], w) for name in names).astype(np.float32)
 
-config = OrderedDict(zip(config.dtype.names, config))
-lens_glass = 'N-BK7'
-config['lens_n'] = calc_n(gcat[lens_glass], w)
-
 blockCount = 512
 gpus = nb.cuda.gpus
 #gpus = [nb.cuda.gpus[0]]
