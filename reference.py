@@ -111,18 +111,17 @@ def describe(n, angles, curvature, config):
     plt.plot(spec_pos)
     plt.show()
     # Calc Error
-    delta_spectrum = np.arctan2(ray_dir[:, -1, 1], ray_dir[:, -1, 0])
-    deviation = delta_spectrum[nwaves // 2]
-    dispersion = np.abs(delta_spectrum[-1] - delta_spectrum[0])
     mean_transmittance = np.sum(transmittance) / nwaves
-    transmittance_err = np.max(1 - mean_transmittance, 0)
-    nonlin = np.sqrt(np.sum(np.gradient(np.gradient(delta_spectrum)) ** 2))
+    deviation = abs(ray_dir[nwaves//2, -1, 1])
+    dispersion = abs(spec_pos[-1] - spec_pos[0]) / config.height
+    print(dispersion)
+    nonlin = np.sqrt(np.sum(np.gradient(np.gradient(spec_pos)) ** 2))
     size = np.sum(config["height"] * np.tan(np.abs(angles)))
-    merit_err = config["weight_deviation"] * (deviation - config["deviation_target"]) ** 2 \
-                + config["weight_dispersion"] * (dispersion - config["dispersion_target"]) ** 2 \
-                + config["weight_linearity"] * nonlin \
-                + config["weight_transmittance"] * transmittance_err \
-                + config["weight_thinness"] * max(size - config["max_size"], 0)
+    merit_err = config.weight_deviation * deviation \
+                + config.weight_dispersion * (1 - dispersion) \
+                + config.weight_linearity * nonlin \
+                + config.weight_transmittance * (np.float32(1) - mean_transmittance) \
+                + config.weight_thinness * max(size - config.max_size, np.float32(0))
     # Create SVG
     prism_vertices = np.empty((count + 2, 2))
     prism_vertices[::2, 1] = 0
@@ -165,4 +164,4 @@ def describe(n, angles, curvature, config):
     plt.axis('scaled')
     plt.axis('off')
     plt.show()
-    return merit_err, nonlin, dispersion, deviation, size, delta_spectrum, transmittance
+    return merit_err, nonlin, dispersion, deviation, size, spec_pos, transmittance

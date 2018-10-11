@@ -75,14 +75,12 @@ base_config_dict = OrderedDict(
     radius=0.5,
     height=10,
     max_size=40,
-    deviation_target=0,
-    dispersion_target=np.deg2rad(24),
     lower_bound=np.deg2rad(2),
     upper_bound=np.deg2rad(80),
-    weight_deviation=25,
-    weight_dispersion=250,
-    weight_linearity=1000,
-    weight_transmittance=30,
+    weight_deviation=5,
+    weight_dispersion=20,
+    weight_linearity=100,
+    weight_transmittance=2,
     weight_thinness=1
 )
 
@@ -129,8 +127,7 @@ def create_optimizer(prism_count=3,
     def merit_error(n, params, index, nglass):
         tid = nb.cuda.threadIdx.x
         # nwaves = nb.cuda.blockDim.x
-        shared_delta = nb.cuda.shared.array(3, nb.f4)
-        shared_data = nb.cuda.shared.array(2, nb.f4)
+        shared_data = nb.cuda.shared.array(6, nb.f4)
         # Initial Surface
         n2 = n[index % nglass, tid]
         r = np.float32(1) / n2
@@ -220,6 +217,8 @@ def create_optimizer(prism_count=3,
         if tid == nwaves // 2:
             shared_data[0] = ray_path[0]
             shared_data[1] = ray_path[1]
+            shared_data[2] = ray_dir[0]
+            shared_data[3] = ray_dir[1]
         w_focal_len = (lens_radius / (n1 - np.float32(1)))
         focal_len = reduce(operator.add, w_focal_len, nwaves) / np.float32(nwaves)   # implicit sync
         vertex = shared_data[0] + focal_len * norm[0], shared_data[1] + focal_len * norm[1]
@@ -231,19 +230,16 @@ def create_optimizer(prism_count=3,
         if nb.cuda.syncthreads_or(abs(spec_pos) >= config.height / np.float32(2)):
             return
         # mean_pos = reduce(operator.add, spec_pos, nwaves) / np.float32(nwaves)  # centering err
-        delta = math.atan2(ray_dir[1], ray_dir[0])
         if tid == 0:
-            shared_delta[0] = spec_pos
-        elif tid == nwaves // 2:
-            shared_delta[1] = delta
+            shared_data[4] = spec_pos
         elif tid == nwaves - 1:
-            shared_delta[2] = spec_pos
+            shared_data[5] = spec_pos
         mean_transmittance = reduce(operator.add, transmittance, nwaves) / np.float32(nwaves)   # implicit sync
-        deviation = shared_delta[1]
-        dispersion = abs(shared_delta[2] - shared_delta[0])
+        deviation = abs(shared_data[3])
+        dispersion = abs(shared_data[5] - shared_data[4]) / config.height
         nonlin = nonlinearity(spec_pos)  # implicit sync
-        merit_err = config.weight_deviation * (deviation - config.deviation_target) ** 2\
-                    + config.weight_dispersion * (dispersion - config.dispersion_target) ** 2 \
+        merit_err = config.weight_deviation * deviation\
+                    + config.weight_dispersion * (np.float32(1) - dispersion) \
                     + config.weight_linearity * nonlin \
                     + config.weight_transmittance * (np.float32(1) - mean_transmittance) \
                     + config.weight_thinness * max(size - config.max_size, np.float32(0))
@@ -362,5 +358,5 @@ ret = describe(ns, angles, curvature, config)
 if isinstance(ret, int):
     print('Failed at interface', ret)
 else:
-    err, NL, dispersion, deviation, size, delta, transm = ret
-    print(f"error: {err}\nNL: {NL}\nsize: {size}\ndelta: {np.rad2deg(delta)}\nT: {transm * 100}")
+    err, NL, dispersion, deviation, size, spec_pos, transm = ret
+    print(f"error: {err}\nNL: {NL}\nsize: {size}\nspectrometer position: {spec_pos}\nT: {transm * 100}")
