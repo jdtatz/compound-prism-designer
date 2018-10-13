@@ -71,17 +71,16 @@ def reduce(func, val, width):
 
 base_config_dict = OrderedDict(
     theta0=0,
-    start=9,
-    radius=0.5,
-    height=10,
-    max_size=40,
+    start=0.9,
+    # radius=0.5,
+    sheight=3.2,
+    max_size=30,
     lower_bound=np.deg2rad(2),
     upper_bound=np.deg2rad(80),
     weight_deviation=5,
-    weight_dispersion=20,
-    weight_linearity=100,
+    weight_dispersion=10,
+    weight_linearity=0,
     weight_transmittance=2,
-    weight_thinness=1
 )
 
 
@@ -93,14 +92,14 @@ def create_optimizer(prism_count=3,
     dr = np.float32(dr)
     factor = np.float32(3 / steps)
     surface_count = prism_count + 1
-    param_count = surface_count + 1
+    param_count = prism_count + 3
 
     config_keys = list(base_config_dict.keys())
     config_values = tuple(config_dict.get(key, base_config_dict[key]) for key in config_keys)
     config_dtype = np.dtype(list(zip(config_keys, repeat('f4'))))
     config = np.rec.array([config_values], dtype=config_dtype)[0]
 
-    out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('curvature', 'f4'), ('angles', 'f4', surface_count)])
+    out_dtype = np.dtype([('value', 'f4'), ('index', 'i4'), ('curvature', 'f4'), ('distance', 'f4'), ('angles', 'f4', surface_count)])
     out_type = nb.from_dtype(out_dtype)
 
     @nb.cuda.jit(device=True)
@@ -125,6 +124,7 @@ def create_optimizer(prism_count=3,
 
     @nb.cuda.jit(device=True)
     def merit_error(n, params, index, nglass):
+        curvature, distance, angles = params[0], params[1], params[2:]
         tid = nb.cuda.threadIdx.x
         # nwaves = nb.cuda.blockDim.x
         shared_data = nb.cuda.shared.array(6, nb.f4)
@@ -132,10 +132,10 @@ def create_optimizer(prism_count=3,
         n2 = n[index % nglass, tid]
         r = np.float32(1) / n2
         # Rotation of (-1, 0) by angle[0] CW
-        norm = -math.cos(params[1]), -math.sin(params[1])
-        size = config.height * abs(norm[1] / norm[0])
+        norm = -math.cos(angles[0]), -math.sin(angles[0])
+        size = abs(norm[1] / norm[0])
         ray_dir = math.cos(config.theta0), math.sin(config.theta0)
-        ray_path = size - (config.height - config.start) * abs(norm[1] / norm[0]), config.start
+        ray_path = size - (np.float32(1) - config.start) * abs(norm[1] / norm[0]), config.start
         # Snell's Law
         ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
         cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
@@ -154,14 +154,14 @@ def create_optimizer(prism_count=3,
             n2 = n[(index // (nglass**i)) % nglass, tid]
             r = n1 / n2
             # Rotation of (-1, 0) by angle[i] CCW
-            norm = -math.cos(params[1+i]), -math.sin(params[1+i])
-            size += config.height * abs(norm[1] / norm[0])
-            prism_y = np.float32(0) if i % 2 == 1 else config.height
+            norm = -math.cos(angles[i]), -math.sin(angles[i])
+            size += abs(norm[1] / norm[0])
+            prism_y = np.float32((i + 1) % 2)
             ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
             # Line-Plane Intersection
             d = (norm[0]*(ray_path[0] - size) + norm[1]*(ray_path[1] - prism_y)) / ci
             ray_path = d * ray_dir[0] + ray_path[0], d * ray_dir[1] + ray_path[1]
-            if nb.cuda.syncthreads_or(ray_path[1] <= 0 or ray_path[1] >= config.height):
+            if nb.cuda.syncthreads_or(ray_path[1] <= 0 or ray_path[1] >= 1):
                 return
             # Snell's Law
             cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
@@ -177,13 +177,14 @@ def create_optimizer(prism_count=3,
         # Last / Convex Surface
         n1 = n2
         r = n1
-        norm = -math.cos(params[1+prism_count]), -math.sin(params[1+prism_count])
-        diff = config.height * abs(norm[1] / norm[0])
+        norm = -math.cos(angles[prism_count]), -math.sin(angles[prism_count])
+        diff = abs(norm[1] / norm[0])
         size += diff
-        diameter = config.height / abs(norm[0])
-        midpt = size - diff / np.float32(2), config.height / np.float32(2)
+        if size >= config.max_size:
+            return
+        diameter = np.float32(1) / abs(norm[0])
+        midpt = size - diff / np.float32(2), np.float32(0.5)
         # Line-Sphere Intersection
-        curvature = params[0]
         lens_radius = diameter / (np.float32(2) * curvature)
         rs = math.sqrt(lens_radius * lens_radius - diameter * diameter / np.float32(4))
         c = midpt[0] + norm[0] * rs, midpt[1] + norm[1] * rs
@@ -219,15 +220,15 @@ def create_optimizer(prism_count=3,
             shared_data[1] = ray_path[1]
             shared_data[2] = ray_dir[0]
             shared_data[3] = ray_dir[1]
-        w_focal_len = (lens_radius / (n1 - np.float32(1)))
-        focal_len = reduce(operator.add, w_focal_len, nwaves) / np.float32(nwaves)   # implicit sync
-        vertex = shared_data[0] + focal_len * norm[0], shared_data[1] + focal_len * norm[1]
+        nb.cuda.syncthreads()
+        dist = distance * (config.max_size - shared_data[0])
+        vertex = shared_data[0] + dist * norm[0], shared_data[1] + dist * norm[1]
         ci = -(ray_dir[0] * norm[0] + ray_dir[1] * norm[1])
         d = ((ray_path[0] - vertex[0])*norm[0] + (ray_path[1] - vertex[1])*norm[1]) / ci
         end = ray_path[0] + d * ray_dir[0], ray_path[1] + d * ray_dir[1]
         vdiff = end[0] - vertex[0], end[1] - vertex[1]
         spec_pos = math.copysign(math.sqrt(vdiff[0] * vdiff[0] + vdiff[1] * vdiff[1]), vdiff[1])
-        if nb.cuda.syncthreads_or(abs(spec_pos) >= config.height / np.float32(2)):
+        if nb.cuda.syncthreads_or(abs(spec_pos) >= config.sheight / np.float32(2)):
             return
         # mean_pos = reduce(operator.add, spec_pos, nwaves) / np.float32(nwaves)  # centering err
         if tid == 0:
@@ -236,20 +237,19 @@ def create_optimizer(prism_count=3,
             shared_data[5] = spec_pos
         mean_transmittance = reduce(operator.add, transmittance, nwaves) / np.float32(nwaves)   # implicit sync
         deviation = abs(shared_data[3])
-        dispersion = abs(shared_data[5] - shared_data[4]) / config.height
+        dispersion = abs(shared_data[5] - shared_data[4]) / config.sheight
         nonlin = nonlinearity(spec_pos)  # implicit sync
         merit_err = config.weight_deviation * deviation\
                     + config.weight_dispersion * (np.float32(1) - dispersion) \
                     + config.weight_linearity * nonlin \
-                    + config.weight_transmittance * (np.float32(1) - mean_transmittance) \
-                    + config.weight_thinness * max(size - config.max_size, np.float32(0))
+                    + config.weight_transmittance * (np.float32(1) - mean_transmittance)
         return merit_err
 
     @nb.cuda.jit(device=True)
     def random_search(n, index, nglass, rng):
         tid = nb.cuda.threadIdx.x
-        isodd = np.float32(1) if (tid % 2 == 0) else np.float32(-1)
-        lbound, ubound = (config.lower_bound, config.upper_bound) if tid > 0 else (np.float32(0), np.float32(1))
+        isodd = np.float32(1) if (tid % 2 == 1 or tid < 2) else np.float32(-1)
+        lbound, ubound = (config.lower_bound, config.upper_bound) if tid > 1 else (np.float32(0), np.float32(1))
         rid = nb.cuda.blockIdx.x * param_count + tid
         best = np.float32(0)
         bestVal = np.float32(0)
@@ -293,8 +293,10 @@ def create_optimizer(prism_count=3,
                     out[bid].value = fx
                     out[bid].index = index
                     out[bid].curvature = xmin
+                elif tid == 1:
+                    out[bid].distance = xmin
                 else:
-                    out[bid].angles[tid-1] = xmin
+                    out[bid].angles[tid-2] = xmin
             nb.cuda.syncthreads()
 
     return optimize, config, out_dtype
@@ -311,7 +313,7 @@ def subsect(end, n):
 
 
 prism_count = 3
-param_count = prism_count + 2
+param_count = prism_count + 3
 nwaves = 64
 optimize, config, out_dtype = create_optimizer(prism_count, nwaves)
 
@@ -348,13 +350,13 @@ for gpu, s in zip(gpus, streams):
         s.synchronize()
 dt = time.time() - t1
 
-value, ind, curvature, angles = output[np.argmin(output['value'])]
+value, ind, curvature, distance, angles = output[np.argmin(output['value'])]
 gs = [names[(ind // (nglass**i)) % nglass] for i in range(prism_count)]
-print(f"error: {value}, curvature: {curvature}, glasses: {gs}, angles {np.rad2deg(angles)}")
+print(f"error: {value}, curvature: {curvature}, distance: {distance}, glasses: {gs}, angles {np.rad2deg(angles)}")
 print(dt, 's')
 
 ns = np.stack(calc_n(gcat[name], w) for name in gs).astype(np.float32)
-ret = describe(ns, angles, curvature, config)
+ret = describe(ns, angles, curvature, distance, config)
 if isinstance(ret, int):
     print('Failed at interface', ret)
 else:

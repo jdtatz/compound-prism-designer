@@ -5,18 +5,19 @@ import matplotlib.pyplot as plt
 
 
 @nb.guvectorize([
-    "void(float32[:], float32[:], float32[:], float32, float32, float32, float32[:, :], float32[:, :], float32[:])",
-    "void(float64[:], float64[:], float64[:], float64, float64, float64, float64[:, :], float64[:, :], float64[:])"
+    "void(float32[:], float32[:], float32[:], float32, float32, float32[:, :], float32[:, :], float32[:])",
+    "void(float64[:], float64[:], float64[:], float64, float64, float64[:, :], float64[:, :], float64[:])"
 ],
-    "(p),(s),(d),(),(),()->(s, d),(s, d),(s)", nopython=True, cache=True, target='cpu')
-def ray_trace(n, angles, init_dir, height, start, curvature, ray_path, ray_dir, transmittance):
+    "(p),(s),(d),(),()->(s, d),(s, d),(s)", nopython=True, cache=True, target='cpu')
+def ray_trace(n, angles, init_dir, start, curvature, ray_path, ray_dir, transmittance):
     # First Surface
     n1 = 1
     n2 = n[0]
     r = n1 / n2
     norm = -np.cos(angles[0]), -np.sin(angles[0])
-    size = height * abs(norm[1] / norm[0])
-    ray_path[0, 0] = size - (height - start) * abs(norm[1] / norm[0])
+    size = abs(norm[1] / norm[0])
+    start = np.float32(0.9)
+    ray_path[0, 0] = size - (1 - start) * abs(norm[1] / norm[0])
     ray_path[0, 1] = start
     # Snell's Law
     ci = -(init_dir[0] * norm[0] + init_dir[1] * norm[1])
@@ -37,7 +38,7 @@ def ray_trace(n, angles, init_dir, height, start, curvature, ray_path, ray_dir, 
         n2 = n[i]
         r = n1 / n2
         norm = -np.cos(angles[i]), -np.sin(angles[i])
-        size += height * abs(norm[1] / norm[0])
+        size += abs(norm[1] / norm[0])
         # Snell's Law
         ci = -(ray_dir[i - 1, 0] * norm[0] + ray_dir[i - 1, 1] * norm[1])
         cr_sq = 1 - r * r * (1 - ci * ci)
@@ -47,11 +48,11 @@ def ray_trace(n, angles, init_dir, height, start, curvature, ray_path, ray_dir, 
         ray_dir[i, 0] = ray_dir[i - 1, 0] * r + norm[0] * inner
         ray_dir[i, 1] = ray_dir[i - 1, 1] * r + norm[1] * inner
         # Line-Plane Intersection
-        vertex = size, 0 if i % 2 else height
+        vertex = size, 0 if i % 2 else 1
         d = ((ray_path[i - 1, 0] - vertex[0]) * norm[0] + (ray_path[i - 1, 1] - vertex[1]) * norm[1]) / ci
         ray_path[i, 0] = d * ray_dir[i - 1, 0] + ray_path[i - 1, 0]
         ray_path[i, 1] = d * ray_dir[i - 1, 1] + ray_path[i - 1, 1]
-        assert 0 < ray_path[i, 1] < height, "Escaped inside"
+        assert 0 < ray_path[i, 1] < 1, "Escaped inside"
         # Surface Transmittance / Fresnel Equation
         fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)
         fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)
@@ -61,10 +62,10 @@ def ray_trace(n, angles, init_dir, height, start, curvature, ray_path, ray_dir, 
     n2 = 1
     r = n1
     norm = -np.cos(angles[-1]), -np.sin(angles[-1])
-    diff = height * abs(norm[1] / norm[0])
+    diff = abs(norm[1] / norm[0])
     size += diff
-    diameter = np.sqrt(diff * diff + height * height)
-    midpt = size - diff / 2, height / 2
+    diameter = 1 / abs(norm[0])
+    midpt = size - diff / 2, 1 / 2
     # Line-Sphere Intersection
     lens_radius = (diameter / 2) / curvature
     rs = diameter * np.sqrt(1 - curvature*curvature) / (2 * curvature)
@@ -90,19 +91,19 @@ def ray_trace(n, angles, init_dir, height, start, curvature, ray_path, ray_dir, 
     transmittance[-1] = 1 - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / 2
 
 
-def describe(n, angles, curvature, config):
+def describe(n, angles, curvature, distance, config):
     assert np.all(np.abs(angles) < np.pi), 'Need Radians not Degrees'
     count, nwaves = n.shape
     # Ray Trace
     # * Prism
     ray_init_dir = np.cos(config["theta0"]), np.sin(config["theta0"])
-    ray_path, ray_dir, transmittance = ray_trace(n.T, angles, ray_init_dir, config["height"], config["start"], curvature)
+    ray_path, ray_dir, transmittance = ray_trace(n.T, angles, ray_init_dir, config["start"], curvature)
     transmittance = np.prod(transmittance, axis=1)
     # Spectrometer
-    diameter = config["height"] * np.cos(np.abs(angles[-1]))
-    focal_len = np.mean(diameter / (2 * n[-1] * curvature))
+    dist = distance * (config["max_size"] - ray_path[nwaves//2, -1, 0])
+    diameter = 1 / np.cos(np.abs(angles[-1]))
     norm = ray_dir[nwaves // 2, -1]
-    vertex = ray_path[nwaves//2, -1] + focal_len * norm
+    vertex = ray_path[nwaves//2, -1] + dist * norm
     ci = -np.dot(ray_dir[:, -1], norm)
     d = np.dot(ray_path[:, -1] - vertex, norm) / ci
     end = np.stack((d * ray_dir[:, -1, 0] + ray_path[:, -1, 0], d * ray_dir[:, -1, 1] + ray_path[:, -1, 1]), 1)
@@ -113,21 +114,19 @@ def describe(n, angles, curvature, config):
     # Calc Error
     mean_transmittance = np.sum(transmittance) / nwaves
     deviation = abs(ray_dir[nwaves//2, -1, 1])
-    dispersion = abs(spec_pos[-1] - spec_pos[0]) / config.height
-    print(dispersion)
+    dispersion = abs(spec_pos[-1] - spec_pos[0]) / config["sheight"]
     nonlin = np.sqrt(np.sum(np.gradient(np.gradient(spec_pos)) ** 2))
-    size = np.sum(config["height"] * np.tan(np.abs(angles)))
-    merit_err = config.weight_deviation * deviation \
-                + config.weight_dispersion * (1 - dispersion) \
-                + config.weight_linearity * nonlin \
-                + config.weight_transmittance * (np.float32(1) - mean_transmittance) \
-                + config.weight_thinness * max(size - config.max_size, np.float32(0))
+    size = np.sum(np.tan(np.abs(angles)))
+    merit_err = config["weight_deviation"] * deviation \
+                + config["weight_dispersion"] * (1 - dispersion) \
+                + config["weight_linearity"] * nonlin \
+                + config["weight_transmittance"] * (np.float32(1) - mean_transmittance)
     # Create SVG
     prism_vertices = np.empty((count + 2, 2))
     prism_vertices[::2, 1] = 0
-    prism_vertices[1::2, 1] = config["height"]
+    prism_vertices[1::2, 1] = 1
     prism_vertices[0, 0] = 0
-    prism_vertices[1:, 0] = np.add.accumulate(config["height"] * np.tan(np.abs(angles)))
+    prism_vertices[1:, 0] = np.add.accumulate(np.tan(np.abs(angles)))
     triangles = np.stack((prism_vertices[1:-1], prism_vertices[:-2], prism_vertices[2:]), axis=1)
 
     ld = prism_vertices[-1] - prism_vertices[-2]
@@ -140,10 +139,10 @@ def describe(n, angles, curvature, config):
     c = midpt[0] + norm[0] * rs, midpt[1] + norm[1] * rs
 
     norm = ray_dir[nwaves // 2, -1]
-    sc = ray_path[nwaves//2, -1] + focal_len * norm
+    sc = ray_path[nwaves//2, -1] + dist * norm
     v = np.array((-norm[1], norm[0]))
-    top = sc + v * config["height"] / 2
-    bottom = sc - v * config["height"] / 2
+    top = sc + v * config["sheight"] / 2
+    bottom = sc - v * config["sheight"] / 2
 
     plt.axes()
     for i, tri in enumerate(triangles):
