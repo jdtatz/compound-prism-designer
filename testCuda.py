@@ -11,10 +11,133 @@ import time
 from compoundprism.glasscat import read_glasscat, calc_n
 from reference import describe
 
+import numba.cgutils
+import numba.cuda.cudaimpl
+import numba.cuda.cudadecl
+import numba.typing
+import llvmlite.ir as ir
+
 warp_size = np.int32(32)
 mask = np.uint32(0xffffffff)
 packing = np.int32(0x1f)
 rtype = nb.f4
+
+
+@numba.cuda.cudaimpl.lower('+', nb.types.BaseTuple, nb.types.BaseTuple)
+def lower_tuple_add(context, builder, sig, args):
+    t1 = nb.cgutils.unpack_tuple(builder, args[0])
+    t2 = nb.cgutils.unpack_tuple(builder, args[1])
+    to = [builder.fadd(a, b) for a, b in zip(t1, t2)]
+    ret = nb.cgutils.pack_array(builder, to)
+    return ret
+
+
+@nb.cuda.cudadecl.intrinsic
+class CudaTupleAdd(nb.typing.templates.AbstractTemplate):
+    key = '+'
+
+    def generic(self, args, kws):
+        if isinstance(args[0], nb.types.BaseTuple) and isinstance(args[1], nb.types.BaseTuple)\
+                and args[0].count == args[1].count and args[0].dtype == args[1].dtype:
+            return args[0](*args)
+
+
+@numba.cuda.cudaimpl.lower('-', nb.types.BaseTuple, nb.types.BaseTuple)
+def lower_tuple_sub(context, builder, sig, args):
+    t1 = nb.cgutils.unpack_tuple(builder, args[0])
+    t2 = nb.cgutils.unpack_tuple(builder, args[1])
+    to = [builder.fsub(a, b) for a, b in zip(t1, t2)]
+    ret = nb.cgutils.pack_array(builder, to)
+    return ret
+
+
+@numba.cuda.cudaimpl.lower('-', nb.types.BaseTuple)
+def lower_tuple_neg(context, builder, sig, args):
+    t = nb.cgutils.unpack_tuple(builder, args[0])
+    to = [builder.fmul(ir.values.Constant(sig.return_type.dtype.type, -1), a) for a in t]
+    ret = nb.cgutils.pack_array(builder, to)
+    return ret
+
+
+@nb.cuda.cudadecl.intrinsic
+class CudaTupleSub(nb.typing.templates.AbstractTemplate):
+    key = '-'
+
+    def generic(self, args, kws):
+        if len(args) == 1 and isinstance(args[0], nb.types.BaseTuple):
+            return args[0](args[0])
+        if len(args) == 2 and isinstance(args[0], nb.types.BaseTuple) and isinstance(args[1], nb.types.BaseTuple)\
+                and args[0].count == args[1].count and args[0].dtype == args[1].dtype:
+            return args[0](*args)
+
+
+@numba.cuda.cudaimpl.lower('*', nb.types.BaseTuple, nb.types.BaseTuple)
+def lower_tuple_mul(context, builder, sig, args):
+    t1 = nb.cgutils.unpack_tuple(builder, args[0])
+    t2 = nb.cgutils.unpack_tuple(builder, args[1])
+    to = [builder.fmul(a, b) for a, b in zip(t1, t2)]
+    ret = nb.cgutils.pack_array(builder, to)
+    return ret
+
+
+@numba.cuda.cudaimpl.lower('*', nb.types.BaseTuple, nb.types.Number)
+def lower_tuple_muls(context, builder, sig, args):
+    t = nb.cgutils.unpack_tuple(builder, args[0])
+    v = args[1]
+    to = [builder.fmul(a, v) for a in t]
+    ret = nb.cgutils.pack_array(builder, to)
+    return ret
+
+
+@nb.cuda.cudadecl.intrinsic
+class CudaTupleMul(nb.typing.templates.AbstractTemplate):
+    key = '*'
+
+    def generic(self, args, kws):
+        if isinstance(args[0], nb.types.BaseTuple) and isinstance(args[1], nb.types.BaseTuple)\
+                and args[0].count == args[1].count and args[0].dtype == args[1].dtype:
+            return args[0](*args)
+        elif isinstance(args[0], nb.types.BaseTuple) and args[1] == args[0].dtype:
+            return args[0](args[0], args[1])
+
+
+@numba.cuda.cudaimpl.lower('/', nb.types.BaseTuple, nb.types.Number)
+def lower_tuple_divs(context, builder, sig, args):
+    t = nb.cgutils.unpack_tuple(builder, args[0])
+    v = args[1]
+    to = [builder.fdiv(a, v) for a in t]
+    ret = nb.cgutils.pack_array(builder, to)
+    return ret
+
+
+@nb.cuda.cudadecl.intrinsic
+class CudaTupleDiv(nb.typing.templates.AbstractTemplate):
+    key = '/'
+
+    def generic(self, args, kws):
+        if isinstance(args[0], nb.types.BaseTuple) and args[1] == args[0].dtype:
+            return args[0](args[0], args[1])
+
+
+@numba.cuda.cudaimpl.lower('@', nb.types.BaseTuple, nb.types.BaseTuple)
+def lower_tuple_dot(context, builder, sig, args):
+    t1 = nb.cgutils.unpack_tuple(builder, args[0])
+    t2 = nb.cgutils.unpack_tuple(builder, args[1])
+    to = [builder.fmul(a, b) for a, b in zip(t1, t2)]
+    ret = to[0]
+    for i in range(1, len(to)):
+        ret = builder.fadd(ret, to[i])
+    return ret
+
+
+@nb.cuda.cudadecl.intrinsic
+class CudaTupleDot(nb.typing.templates.AbstractTemplate):
+    key = '@'
+
+    def generic(self, args, kws):
+        if isinstance(args[0], nb.types.BaseTuple) and isinstance(args[1], nb.types.BaseTuple)\
+                and args[0].count == args[1].count and args[0].dtype == args[1].dtype:
+            return args[0].dtype(*args)
 
 
 @nb.cuda.jit(device=True)
@@ -137,17 +260,16 @@ def create_optimizer(prism_count=3,
         ray_dir = math.cos(config.theta0), math.sin(config.theta0)
         ray_path = size - (np.float32(1) - config.start) * abs(norm[1] / norm[0]), config.start
         # Snell's Law
-        ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
-        cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
+        ci = -(ray_dir @ norm)
+        cr_sq = np.float32(1) - r ** 2 * (np.float32(1) - ci ** 2)
         if nb.cuda.syncthreads_or(cr_sq < 0):
             return
         cr = math.sqrt(cr_sq)
-        inner = r * ci - cr
-        ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
+        ray_dir = ray_dir * r + norm * (r * ci - cr)
         # Surface Transmittance / Fresnel Equation
         fresnel_rs = ((ci - n2 * cr) / (ci + n2 * cr))
         fresnel_rp = ((cr - n2 * ci) / (cr + n2 * ci))
-        transmittance = np.float32(1) - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / np.float32(2)
+        transmittance = np.float32(1) - (fresnel_rs ** 2 + fresnel_rp ** 2) / np.float32(2)
         # Inner Surfaces
         for i in range(1, prism_count):
             n1 = n2
@@ -156,24 +278,23 @@ def create_optimizer(prism_count=3,
             # Rotation of (-1, 0) by angle[i] CCW
             norm = -math.cos(angles[i]), -math.sin(angles[i])
             size += abs(norm[1] / norm[0])
-            prism_y = np.float32((i + 1) % 2)
-            ci = -ray_dir[0] * norm[0] - ray_dir[1] * norm[1]
+            ci = -(ray_dir @ norm)
             # Line-Plane Intersection
-            d = (norm[0]*(ray_path[0] - size) + norm[1]*(ray_path[1] - prism_y)) / ci
-            ray_path = d * ray_dir[0] + ray_path[0], d * ray_dir[1] + ray_path[1]
+            vertex = size, np.float32((i + 1) % 2)
+            d = ((ray_path - vertex) @ norm) / ci
+            ray_path = ray_path + ray_dir * d
             if nb.cuda.syncthreads_or(ray_path[1] <= 0 or ray_path[1] >= 1):
                 return
             # Snell's Law
-            cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
+            cr_sq = np.float32(1) - r ** 2 * (np.float32(1) - ci ** 2)
             if nb.cuda.syncthreads_or(cr_sq < 0):
                 return
             cr = math.sqrt(cr_sq)
-            inner = r * ci - cr
-            ray_dir = ray_dir[0] * r + norm[0] * inner, ray_dir[1] * r + norm[1] * inner
+            ray_dir = ray_dir * r + norm * (r * ci - cr)
             # Surface Transmittance / Fresnel Equation
             fresnel_rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))
             fresnel_rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))
-            transmittance *= np.float32(1) - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / np.float32(2)
+            transmittance *= np.float32(1) - (fresnel_rs ** 2 + fresnel_rp ** 2) / np.float32(2)
         # Last / Convex Surface
         n1 = n2
         r = n1
@@ -186,34 +307,28 @@ def create_optimizer(prism_count=3,
         midpt = size - diff / np.float32(2), np.float32(0.5)
         # Line-Sphere Intersection
         lens_radius = diameter / (np.float32(2) * curvature)
-        rs = math.sqrt(lens_radius * lens_radius - diameter * diameter / np.float32(4))
-        c = midpt[0] + norm[0] * rs, midpt[1] + norm[1] * rs
-        o = ray_path[0], ray_path[1]
-        l = ray_dir[0], ray_dir[1]
-        u = o[0] - c[0], o[1] - c[1]
-        u1 = (l[0] * u[0] + l[1] * u[1])
-        u2 = u[0] * u[0] + u[1] * u[1]
-        under = u1*u1 - u2 + lens_radius * lens_radius
+        rs = math.sqrt(lens_radius ** 2 - diameter ** 2 / np.float32(4))
+        c = midpt + norm * rs
+        under = (ray_dir @ (ray_path - c))**2 - (ray_path - c)@(ray_path - c) + lens_radius ** 2
         if nb.cuda.syncthreads_or(under <= 0):
             return
-        d = -u1 + math.sqrt(under)
-        ray_path = o[0] + d * l[0], o[1] + d * l[1]
-        rd = ray_path[0] - midpt[0], ray_path[1] - midpt[1]
-        if nb.cuda.syncthreads_or((rd[0] * rd[0] + rd[1] * rd[1]) > (diameter * diameter / np.float32(4))):
+        d = -(ray_dir @ (ray_path - c)) + math.sqrt(under)
+        ray_path = ray_path + ray_dir * d
+        rd = ray_path - midpt
+        if nb.cuda.syncthreads_or(rd @ rd > (diameter ** 2 / np.float32(4))):
             return
-        snorm = (c[0] - ray_path[0]) / lens_radius, (c[1] - ray_path[1]) / lens_radius
+        snorm = (c - ray_path) / lens_radius
         # Snell's Law
-        ci = -(ray_dir[0] * snorm[0] + ray_dir[1] * snorm[1])
-        cr_sq = np.float32(1) - r * r * (np.float32(1) - ci * ci)
+        ci = -(ray_dir @ snorm)
+        cr_sq = np.float32(1) - r ** 2 * (np.float32(1) - ci ** 2)
         if nb.cuda.syncthreads_or(cr_sq < 0):
             return
         cr = math.sqrt(cr_sq)
-        inner = r * ci - cr
-        ray_dir = ray_dir[0] * r + snorm[0] * inner, ray_dir[1] * r + snorm[1] * inner
+        ray_dir = ray_dir * r + snorm * (r * ci - cr)
         # Surface Transmittance / Fresnel Equation
         fresnel_rs = (n1 * ci - cr) / (n1 * ci + cr)
         fresnel_rp = (n1 * cr - ci) / (n1 * cr + ci)
-        transmittance *= np.float32(1) - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / 2
+        transmittance *= np.float32(1) - (fresnel_rs ** 2 + fresnel_rp ** 2) / 2
         # Spectrometer
         if tid == nwaves // 2:
             shared_data[0] = ray_path[0]
@@ -222,12 +337,12 @@ def create_optimizer(prism_count=3,
             shared_data[3] = ray_dir[1]
         nb.cuda.syncthreads()
         dist = distance * (config.max_size - shared_data[0])
-        vertex = shared_data[0] + dist * norm[0], shared_data[1] + dist * norm[1]
-        ci = -(ray_dir[0] * norm[0] + ray_dir[1] * norm[1])
-        d = ((ray_path[0] - vertex[0])*norm[0] + (ray_path[1] - vertex[1])*norm[1]) / ci
-        end = ray_path[0] + d * ray_dir[0], ray_path[1] + d * ray_dir[1]
-        vdiff = end[0] - vertex[0], end[1] - vertex[1]
-        spec_pos = math.copysign(math.sqrt(vdiff[0] * vdiff[0] + vdiff[1] * vdiff[1]), vdiff[1])
+        vertex = (shared_data[0], shared_data[1]) + norm * dist
+        ci = -(ray_dir @ norm)
+        d = ((ray_path - vertex) @ norm) / ci
+        end = ray_path + ray_dir * d
+        vdiff = end - vertex
+        spec_pos = math.copysign(math.sqrt(vdiff @ vdiff), vdiff[1])
         if nb.cuda.syncthreads_or(abs(spec_pos) >= config.sheight / np.float32(2)):
             return
         # mean_pos = reduce(operator.add, spec_pos, nwaves) / np.float32(nwaves)  # centering err
