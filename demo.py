@@ -13,8 +13,8 @@ glasses = np.stack(calc_n(gcat[name], w) for name in names)
 
 
 config = {
-    "height": 10,
-    "start": 9,
+    "sheight": 3.2,
+    "start": 0.9,
     "theta0": 0,
     "deviation_target": 0,
     "dispersion_target": np.deg2rad(16),
@@ -26,9 +26,9 @@ config = {
     "weight_thinness": 1
 }
 
-ret = describe(glasses, angles, 0.3, config)
+ret = describe(glasses, angles, 0.3, 0.9, config)
 if ret:
     err, NL, dispersion, deviation, size, spec_pos, transm = ret
-    print(f"error: {err}\nNL: {NL}\nsize: {size}\nspectrometer position: {spec_pos)}\nT: {transm *100}")
+    print(f"error: {err}\nNL: {NL}\nsize: {size}\nspectrometer position: {spec_pos}\nT: {transm *100}")
 else:
     print('Failed')
