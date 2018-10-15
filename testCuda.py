@@ -309,10 +309,11 @@ def create_optimizer(prism_count=3,
         lens_radius = diameter / (np.float32(2) * curvature)
         rs = math.sqrt(lens_radius ** 2 - diameter ** 2 / np.float32(4))
         c = midpt + norm * rs
-        under = (ray_dir @ (ray_path - c))**2 - (ray_path - c)@(ray_path - c) + lens_radius ** 2
+        delta = ray_path - c
+        under = (ray_dir @ delta)**2 - (delta[0] ** 2 + delta[1] ** 2) + lens_radius ** 2
         if nb.cuda.syncthreads_or(under <= 0):
             return
-        d = -(ray_dir @ (ray_path - c)) + math.sqrt(under)
+        d = -(ray_dir @ delta) + math.sqrt(under)
         ray_path = ray_path + ray_dir * d
         rd = ray_path - midpt
         if nb.cuda.syncthreads_or(rd @ rd > (diameter ** 2 / np.float32(4))):
@@ -337,7 +338,8 @@ def create_optimizer(prism_count=3,
             shared_data[3] = ray_dir[1]
         nb.cuda.syncthreads()
         dist = distance * (config.max_size - shared_data[0])
-        vertex = (shared_data[0], shared_data[1]) + norm * dist
+        norm = -shared_data[2], -shared_data[3]
+        vertex = (shared_data[0], shared_data[1]) - norm * dist
         ci = -(ray_dir @ norm)
         d = ((ray_path - vertex) @ norm) / ci
         end = ray_path + ray_dir * d
