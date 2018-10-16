@@ -4,11 +4,9 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
-@nb.guvectorize([
-    "void(float32[:], float32[:], float32[:], float32, float32, float32[:, :], float32[:, :], float32[:])",
-    "void(float64[:], float64[:], float64[:], float64, float64, float64[:, :], float64[:, :], float64[:])"
-],
-    "(p),(s),(d),(),()->(s, d),(s, d),(s)", nopython=True, cache=True, target='cpu')
+@nb.guvectorize(["void(f4[:], f4[:], f4[:], f4, f4, f4[:, :], f4[:, :], f4[:])",
+                 "void(f8[:], f8[:], f8[:], f8, f8, f8[:, :], f8[:, :], f8[:])"],
+                "(p),(s),(d),(),()->(s, d),(s, d),(s)", nopython=True, cache=True, target='cpu')
 def ray_trace(n, angles, init_dir, start, curvature, ray_path, ray_dir, transmittance):
     # First Surface
     n2 = n[0]

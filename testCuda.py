@@ -167,7 +167,7 @@ def reduce(func, val, width):
         last_warp_size = width % warp_size
         nb.cuda.syncthreads()
         buffer = nb.cuda.shared.array(0, rtype)
-        tid = nb.cuda.threadIdx.x
+        tid = nb.cuda.threadIdx.x + nb.cuda.threadIdx.y * nb.cuda.blockDim.x
         lid = nb.cuda.laneid
         nb.cuda.syncthreads()
         if (last_warp_size == 0) or (tid < width - last_warp_size):
@@ -195,15 +195,16 @@ def reduce(func, val, width):
 base_config_dict = OrderedDict(
     theta0=0,
     start=0.9,
-    # radius=0.5,
+    radius=0.01,
     sheight=3.2,
     max_size=30,
     lower_bound=np.deg2rad(2),
     upper_bound=np.deg2rad(80),
     weight_deviation=5,
     weight_dispersion=10,
-    weight_linearity=0,
-    weight_transmittance=2,
+    weight_linearity=1000,
+    weight_transmittance=5,
+    weight_spot=1
 )
 
 
@@ -226,39 +227,40 @@ def create_optimizer(prism_count=3,
     out_type = nb.from_dtype(out_dtype)
 
     @nb.cuda.jit(device=True)
-    def nonlinearity(delta):
+    def nonlinearity(vals):
         """Calculate the nonlinearity of the given delta spectrum"""
-        delta_spectrum = nb.cuda.shared.array(0, nb.f4)
         tid = nb.cuda.threadIdx.x
-        # nwaves = nb.cuda.blockDim.x
-        delta_spectrum[tid] = delta
-        nb.cuda.syncthreads()
+        val = vals[tid]
         if tid == 0:
-            err = (2 * delta_spectrum[2] + 2 * delta - 4 * delta_spectrum[1])
+            err = (2 * vals[2] + 2 * val - 4 * vals[1])
         elif tid == nwaves - 1:
-            err = (2 * delta - 4 * delta_spectrum[nwaves - 2] + 2 * delta_spectrum[nwaves - 3])
+            err = (2 * val - 4 * vals[nwaves - 2] + 2 * vals[nwaves - 3])
         elif tid == 1:
-            err = (delta_spectrum[3] - 3 * delta + 2 * delta_spectrum[0])
+            err = (vals[3] - 3 * val + 2 * vals[0])
         elif tid == nwaves - 2:
-            err = (2 * delta_spectrum[nwaves - 1] - 3 * delta + delta_spectrum[nwaves - 4])
+            err = (2 * vals[nwaves - 1] - 3 * val + vals[nwaves - 4])
         else:
-            err = (delta_spectrum[tid + 2] + delta_spectrum[tid - 2] - 2 * delta)
+            err = (vals[tid + 2] + vals[tid - 2] - 2 * val)
         return math.sqrt(reduce(operator.add, np.float32(err**2), nwaves)) / 4
 
     @nb.cuda.jit(device=True)
     def merit_error(n, params, index, nglass):
         curvature, distance, angles = params[0], params[1], params[2:]
-        tid = nb.cuda.threadIdx.x
+        tix = nb.cuda.threadIdx.x
+        tiy = nb.cuda.threadIdx.y
         # nwaves = nb.cuda.blockDim.x
-        shared_data = nb.cuda.shared.array(6, nb.f4)
+        shared_data = nb.cuda.shared.array(4, nb.f4)
+        shared_pos = nb.cuda.shared.array((3, nwaves), nb.f4)
         # Initial Surface
-        n2 = n[index % nglass, tid]
+        n2 = n[index % nglass, tix]
         r = np.float32(1) / n2
         # Rotation of (-1, 0) by angle[0] CW
         norm = -math.cos(angles[0]), -math.sin(angles[0])
         size = abs(norm[1] / norm[0])
         ray_dir = math.cos(config.theta0), math.sin(config.theta0)
-        ray_path = size - (np.float32(1) - config.start) * abs(norm[1] / norm[0]), config.start
+        start = config.start if tiy == 0 else \
+            ((config.start + config.radius) if tiy == 1 else (config.start - config.radius))
+        ray_path = size - (np.float32(1) - start) * abs(norm[1] / norm[0]), start
         # Snell's Law
         ci = -(ray_dir @ norm)
         cr_sq = np.float32(1) - r ** 2 * (np.float32(1) - ci ** 2)
@@ -273,7 +275,7 @@ def create_optimizer(prism_count=3,
         # Inner Surfaces
         for i in range(1, prism_count):
             n1 = n2
-            n2 = n[(index // (nglass**i)) % nglass, tid]
+            n2 = n[(index // (nglass**i)) % nglass, tix]
             r = n1 / n2
             # Rotation of (-1, 0) by angle[i] CCW
             norm = -math.cos(angles[i]), -math.sin(angles[i])
@@ -331,7 +333,7 @@ def create_optimizer(prism_count=3,
         fresnel_rp = (n1 * cr - ci) / (n1 * cr + ci)
         transmittance *= np.float32(1) - (fresnel_rs ** 2 + fresnel_rp ** 2) / 2
         # Spectrometer
-        if tid == nwaves // 2:
+        if tix == nwaves // 2 and tiy == 0:
             shared_data[0] = ray_path[0]
             shared_data[1] = ray_path[1]
             shared_data[2] = ray_dir[0]
@@ -345,26 +347,26 @@ def create_optimizer(prism_count=3,
         end = ray_path + ray_dir * d
         vdiff = end - vertex
         spec_pos = math.copysign(math.sqrt(vdiff @ vdiff), vdiff[1])
+        shared_pos[tiy, tix] = spec_pos
         if nb.cuda.syncthreads_or(abs(spec_pos) >= config.sheight / np.float32(2)):
             return
-        # mean_pos = reduce(operator.add, spec_pos, nwaves) / np.float32(nwaves)  # centering err
-        if tid == 0:
-            shared_data[4] = spec_pos
-        elif tid == nwaves - 1:
-            shared_data[5] = spec_pos
-        mean_transmittance = reduce(operator.add, transmittance, nwaves) / np.float32(nwaves)   # implicit sync
+        nonlin = nonlinearity(shared_pos[0])
+        mean_transmittance = reduce(operator.add, transmittance, nwaves) / np.float32(nwaves)  # implicit sync
         deviation = abs(shared_data[3])
-        dispersion = abs(shared_data[5] - shared_data[4]) / config.sheight
-        nonlin = nonlinearity(spec_pos)  # implicit sync
+        dispersion = abs(shared_pos[0, nwaves-1] - shared_pos[0, 0]) / config.sheight
+        spot_size = abs(shared_pos[1, tix] - shared_pos[2, tix])
+        mean_spot_size = reduce(operator.add, spot_size, nwaves) / np.float32(nwaves)  # implicit sync
+        nb.cuda.syncthreads()
         merit_err = config.weight_deviation * deviation\
                     + config.weight_dispersion * (np.float32(1) - dispersion) \
                     + config.weight_linearity * nonlin \
-                    + config.weight_transmittance * (np.float32(1) - mean_transmittance)
+                    + config.weight_transmittance * (np.float32(1) - mean_transmittance) \
+                    + config.weight_spot * mean_spot_size
         return merit_err
 
     @nb.cuda.jit(device=True)
     def random_search(n, index, nglass, rng):
-        tid = nb.cuda.threadIdx.x
+        tid = nb.cuda.threadIdx.x + nb.cuda.threadIdx.y * nb.cuda.blockDim.x
         isodd = np.float32(1) if (tid % 2 == 1 or tid < 2) else np.float32(-1)
         lbound, ubound = (config.lower_bound, config.upper_bound) if tid > 1 else (np.float32(0), np.float32(1))
         rid = nb.cuda.blockIdx.x * param_count + tid
@@ -397,7 +399,7 @@ def create_optimizer(prism_count=3,
 
     @nb.cuda.jit((nb.f4[:, :], out_type[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=False)
     def optimize(ns, out, start, stop, rng):
-        tid = nb.cuda.threadIdx.x
+        tid = nb.cuda.threadIdx.x + nb.cuda.threadIdx.y * nb.cuda.blockDim.x
         bid = nb.cuda.blockIdx.x
         bcount = nb.cuda.gridDim.x
         bestVal = np.float32(np.inf)
@@ -459,7 +461,7 @@ for gpu, bounds, sbounds in zip(gpus, subsect(nglass**prism_count, ngpu), subsec
         rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * param_count, seed=42, stream=s)
         d_ns = nb.cuda.to_device(glasses, stream=s)
         d_out = nb.cuda.device_array(blockCount, dtype=out_dtype, stream=s)
-        optimize[blockCount, nwaves, s, 4 * nwaves](d_ns, d_out, *bounds, rng_states)
+        optimize[blockCount, (nwaves, 3), s, 0](d_ns, d_out, *bounds, rng_states)
         d_out.copy_to_host(ary=output[slice(*sbounds)], stream=s)
         streams.append(s)
 for gpu, s in zip(gpus, streams):
