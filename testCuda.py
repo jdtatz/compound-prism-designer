@@ -163,8 +163,8 @@ def reduce(func, val, width):
             val = func(val, nb.cuda.shfl_xor_sync(mask, val, 1 << i))
         return nb.cuda.shfl_sync(mask, val, 0)
     else:
-        warp_count = int(math.ceil(width / warp_size))
         last_warp_size = width % warp_size
+        warp_count = width // warp_size + (1 if last_warp_size else 0)
         nb.cuda.syncthreads()
         buffer = nb.cuda.shared.array(0, rtype)
         tid = nb.cuda.threadIdx.x + nb.cuda.threadIdx.y * nb.cuda.blockDim.x
@@ -232,19 +232,19 @@ def create_optimizer(prism_count=3,
         tid = nb.cuda.threadIdx.x
         val = vals[tid]
         if tid == 0:
-            err = (2 * vals[2] + 2 * val - 4 * vals[1])
+            err = (np.float32(2) * vals[2] + np.float32(2) * val - np.float32(4) * vals[1])
         elif tid == nwaves - 1:
-            err = (2 * val - 4 * vals[nwaves - 2] + 2 * vals[nwaves - 3])
+            err = (np.float32(2) * val - np.float32(4) * vals[nwaves - 2] + np.float32(2) * vals[nwaves - 3])
         elif tid == 1:
-            err = (vals[3] - 3 * val + 2 * vals[0])
+            err = (vals[3] - np.float32(3) * val + np.float32(2) * vals[0])
         elif tid == nwaves - 2:
-            err = (2 * vals[nwaves - 1] - 3 * val + vals[nwaves - 4])
+            err = (np.float32(2) * vals[nwaves - 1] - np.float32(3) * val + vals[nwaves - 4])
         else:
-            err = (vals[tid + 2] + vals[tid - 2] - 2 * val)
-        return math.sqrt(reduce(operator.add, np.float32(err**2), nwaves)) / 4
+            err = (vals[tid + 2] + vals[tid - 2] - np.float32(2) * val)
+        return math.sqrt(reduce(operator.add, np.float32(err**2), nwaves)) / np.float32(4)
 
     @nb.cuda.jit(device=True)
-    def merit_error(n, params, index, nglass):
+    def merit_error(n, params):
         curvature, distance, angles = params[0], params[1], params[2:]
         tix = nb.cuda.threadIdx.x
         tiy = nb.cuda.threadIdx.y
@@ -252,7 +252,7 @@ def create_optimizer(prism_count=3,
         shared_data = nb.cuda.shared.array(4, nb.f4)
         shared_pos = nb.cuda.shared.array((3, nwaves), nb.f4)
         # Initial Surface
-        n2 = n[index % nglass, tix]
+        n2 = n[0]
         r = np.float32(1) / n2
         # Rotation of (-1, 0) by angle[0] CW
         norm = -math.cos(angles[0]), -math.sin(angles[0])
@@ -275,7 +275,7 @@ def create_optimizer(prism_count=3,
         # Inner Surfaces
         for i in range(1, prism_count):
             n1 = n2
-            n2 = n[(index // (nglass**i)) % nglass, tix]
+            n2 = n[i]
             r = n1 / n2
             # Rotation of (-1, 0) by angle[i] CCW
             norm = -math.cos(angles[i]), -math.sin(angles[i])
@@ -331,7 +331,7 @@ def create_optimizer(prism_count=3,
         # Surface Transmittance / Fresnel Equation
         fresnel_rs = (n1 * ci - cr) / (n1 * ci + cr)
         fresnel_rp = (n1 * cr - ci) / (n1 * cr + ci)
-        transmittance *= np.float32(1) - (fresnel_rs ** 2 + fresnel_rp ** 2) / 2
+        transmittance *= np.float32(1) - (fresnel_rs ** 2 + fresnel_rp ** 2) / np.float32(2)
         # Spectrometer
         if tix == nwaves // 2 and tiy == 0:
             shared_data[0] = ray_path[0]
@@ -365,7 +365,7 @@ def create_optimizer(prism_count=3,
         return merit_err
 
     @nb.cuda.jit(device=True)
-    def random_search(n, index, nglass, rng):
+    def random_search(n, rng):
         tid = nb.cuda.threadIdx.x + nb.cuda.threadIdx.y * nb.cuda.blockDim.x
         isodd = np.float32(1) if (tid % 2 == 1 or tid < 2) else np.float32(-1)
         lbound, ubound = (config.lower_bound, config.upper_bound) if tid > 1 else (np.float32(0), np.float32(1))
@@ -379,7 +379,7 @@ def create_optimizer(prism_count=3,
             angle = lbound + rand * (ubound - lbound)
             trial[tid] = best = math.copysign(angle, isodd)
         nb.cuda.syncthreads()
-        trialVal = merit_error(n, trial, index, nglass)
+        trialVal = merit_error(n, trial)
         if tid < param_count and trialVal is not None:
             bestVal = trialVal
             found = True
@@ -390,7 +390,7 @@ def create_optimizer(prism_count=3,
                 test = best + sphere * dr * math.exp(-np.float32(rs) * factor)
                 trial[tid] = math.copysign(max(min(abs(test), ubound), lbound), isodd)
             nb.cuda.syncthreads()
-            trialVal = merit_error(n, trial, index, nglass)
+            trialVal = merit_error(n, trial)
             if tid < param_count and trialVal is not None and (not found or trialVal < bestVal):
                 bestVal = trialVal
                 best = trial[tid]
@@ -400,12 +400,18 @@ def create_optimizer(prism_count=3,
     @nb.cuda.jit((nb.f4[:, :], out_type[:], nb.i8, nb.i8, nb.cuda.random.xoroshiro128p_type[:]), fastmath=False)
     def optimize(ns, out, start, stop, rng):
         tid = nb.cuda.threadIdx.x + nb.cuda.threadIdx.y * nb.cuda.blockDim.x
+        tix = nb.cuda.threadIdx.x
         bid = nb.cuda.blockIdx.x
         bcount = nb.cuda.gridDim.x
         bestVal = np.float32(np.inf)
-        nglass = ns.shape[0]
+        nglass = np.int64(ns.shape[0])
+        n = nb.cuda.local.array(prism_count, nb.f4)
         for index in range(start + bid, stop, bcount):
-            valid, xmin, fx = random_search(ns, index, nglass, rng)
+            tot = np.int64(1)
+            for i in range(prism_count):
+                n[i] = ns[(index // tot) % nglass, tix]
+                tot *= nglass
+            valid, xmin, fx = random_search(n, rng)
             if tid < param_count and valid and fx < bestVal:
                 bestVal = fx
                 if tid == 0:
