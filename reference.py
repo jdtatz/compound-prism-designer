@@ -86,7 +86,7 @@ def ray_trace(n, angles, init_dir, start, curvature, ray_path, ray_dir, transmit
     transmittance[-1] = 1 - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) / 2
 
 
-def describe(n, angles, curvature, distance, config):
+def describe(n, angles, curvature, sangle, config):
     assert np.all(np.abs(angles) < np.pi), 'Need Radians not Degrees'
     count, nwaves = n.shape
     # Ray Trace
@@ -95,9 +95,14 @@ def describe(n, angles, curvature, distance, config):
     ray_path, ray_dir, transmittance = ray_trace(n.T, angles, ray_init_dir, config["start"], curvature)
     transmittance = np.prod(transmittance, axis=1)
     # Spectrometer
-    dist = distance * (config["max_size"] - ray_path[nwaves//2, -1, 0])
+    ax, ay = ray_path[0, -1]
+    bx, by = ray_path[-1, -1]
+    vax, vay = ray_dir[0, -1]
+    vbx, vby = ray_dir[-1, -1]
+    t = np.arctan2(ray_dir[nwaves // 2, -1, 1], ray_dir[nwaves // 2, -1, 0])  # sangle
+    d2 = (vax * (-ay + by + config["sheight"] * np.cos(t)) + vay * (ax - bx + config["sheight"] * np.sin(t))) / (vay * vbx - vax * vby)
+    vertex = bottom = ray_path[-1, -1] + d2 * ray_dir[-1, -1]
     norm = -ray_dir[nwaves // 2, -1]
-    vertex = ray_path[nwaves//2, -1] - dist * norm
     ci = -np.dot(ray_dir[:, -1], norm)
     d = np.dot(ray_path[:, -1] - vertex, norm) / ci
     end = np.stack((d * ray_dir[:, -1, 0] + ray_path[:, -1, 0], d * ray_dir[:, -1, 1] + ray_path[:, -1, 1]), 1)
@@ -108,11 +113,9 @@ def describe(n, angles, curvature, distance, config):
     # Calc Error
     mean_transmittance = np.sum(transmittance) / nwaves
     deviation = abs(ray_dir[nwaves//2, -1, 1])
-    dispersion = abs(spec_pos[-1] - spec_pos[0]) / config["sheight"]
     nonlin = np.sqrt(np.sum(np.gradient(np.gradient(spec_pos)) ** 2))
     size = np.sum(np.tan(np.abs(angles)))
     merit_err = config["weight_deviation"] * deviation \
-                + config["weight_dispersion"] * (1 - dispersion) \
                 + config["weight_linearity"] * nonlin \
                 + config["weight_transmittance"] * (np.float32(1) - mean_transmittance)
     # Create SVG
@@ -133,10 +136,8 @@ def describe(n, angles, curvature, distance, config):
     c = midpt[0] + norm[0] * rs, midpt[1] + norm[1] * rs
 
     norm = ray_dir[nwaves // 2, -1]
-    sc = ray_path[nwaves//2, -1] + dist * norm
     v = np.array((-norm[1], norm[0]))
-    top = sc + v * config["sheight"] / 2
-    bottom = sc - v * config["sheight"] / 2
+    top = bottom + v * config["sheight"]
 
     plt.axes()
     for i, tri in enumerate(triangles):
@@ -157,4 +158,4 @@ def describe(n, angles, curvature, distance, config):
     plt.axis('scaled')
     plt.axis('off')
     plt.show()
-    return merit_err, nonlin, dispersion, deviation, size, spec_pos, transmittance
+    return merit_err, nonlin, 1, deviation, size, spec_pos, transmittance
