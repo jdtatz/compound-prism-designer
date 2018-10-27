@@ -99,10 +99,9 @@ def describe(n, angles, curvature, sangle, config):
     bx, by = ray_path[-1, -1]
     vax, vay = ray_dir[0, -1]
     vbx, vby = ray_dir[-1, -1]
-    t = np.arctan2(ray_dir[nwaves // 2, -1, 1], ray_dir[nwaves // 2, -1, 0])  # sangle
-    d2 = (vax * (-ay + by + config["sheight"] * np.cos(t)) + vay * (ax - bx + config["sheight"] * np.sin(t))) / (vay * vbx - vax * vby)
+    d2 = (vax * (-ay + by + config["sheight"] * np.cos(sangle)) + vay * (ax - bx + config["sheight"] * np.sin(sangle))) / (vay * vbx - vax * vby)
     vertex = bottom = ray_path[-1, -1] + d2 * ray_dir[-1, -1]
-    norm = -ray_dir[nwaves // 2, -1]
+    norm = -np.cos(sangle), -np.sin(sangle)
     ci = -np.dot(ray_dir[:, -1], norm)
     d = np.dot(ray_path[:, -1] - vertex, norm) / ci
     end = np.stack((d * ray_dir[:, -1, 0] + ray_path[:, -1, 0], d * ray_dir[:, -1, 1] + ray_path[:, -1, 1]), 1)
