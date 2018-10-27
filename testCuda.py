@@ -108,18 +108,18 @@ def create_optimizer(prism_count=3,
     @nb.cuda.jit(device=True)
     def nonlinearity(vals):
         """Calculate the nonlinearity of the given delta spectrum"""
-        tid = nb.cuda.threadIdx.x
-        val = vals[tid]
-        if tid == 0:
+        tix = nb.cuda.threadIdx.x
+        val = vals[tix]
+        if tix == 0:
             err = (np.float32(2) * vals[2] + np.float32(2) * val - np.float32(4) * vals[1])
-        elif tid == nwaves - 1:
+        elif tix == nwaves - 1:
             err = (np.float32(2) * val - np.float32(4) * vals[nwaves - 2] + np.float32(2) * vals[nwaves - 3])
-        elif tid == 1:
+        elif tix == 1:
             err = (vals[3] - np.float32(3) * val + np.float32(2) * vals[0])
-        elif tid == nwaves - 2:
+        elif tix == nwaves - 2:
             err = (np.float32(2) * vals[nwaves - 1] - np.float32(3) * val + vals[nwaves - 4])
         else:
-            err = (vals[tid + 2] + vals[tid - 2] - np.float32(2) * val)
+            err = (vals[tix + 2] + vals[tix - 2] - np.float32(2) * val)
         return math.sqrt(reduce(operator.add, np.float32(err**2), nwaves)) / np.float32(4)
 
     @nb.cuda.jit(device=True)
@@ -183,7 +183,7 @@ def create_optimizer(prism_count=3,
         spec_length = config.sheight
         spec_angle = params[1]
         out = ray_intersect_spectrometer(ray, upper_ray, lower_ray, spec_angle, spec_length)
-        if out is None:
+        if nb.cuda.syncthreads_or(out is None):
             return
         n_spec_pos, ray = out
         shared_pos[tiy, tix] = n_spec_pos
@@ -305,7 +305,7 @@ for gpu, bounds, sbounds in zip(gpus, subsect(nglass**prism_count, ngpu), subsec
         rng_states = nb.cuda.random.create_xoroshiro128p_states(blockCount * param_count, seed=42, stream=s)
         d_ns = nb.cuda.to_device(glasses, stream=s)
         d_out = nb.cuda.device_array(blockCount, dtype=out_dtype, stream=s)
-        optimize[blockCount, (nwaves, 3), s, 0](d_ns, d_out, *bounds, rng_states)
+        optimize[blockCount, (nwaves, 3), s, 3 * nwaves * 4](d_ns, d_out, *bounds, rng_states)
         d_out.copy_to_host(ary=output[slice(*sbounds)], stream=s)
         streams.append(s)
 for gpu, s in zip(gpus, streams):
