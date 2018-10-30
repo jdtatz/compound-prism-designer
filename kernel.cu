@@ -1,4 +1,6 @@
-#include <cstdint>
+#define _USE_MATH_DEFINES
+#include <math.h>
+#include <stdint.h>
 
 constexpr int warp_size = 32;
 constexpr unsigned mask = 0xffffffff;
@@ -9,24 +11,24 @@ __device__ float operator_add(const float a, const float b) {
     return a + b;
 }
 
-__device__ uint ilog2(uint v){
+__device__ unsigned ilog2(unsigned v){
     return 31 - __clz(v);
 }
 
-__device__ bool is_pow_2(uint v){
+__device__ bool is_pow_2(unsigned v){
     return !(v & (v - 1));
 }
 
-__device__ float reduce(float (*func)(const float, const float), float val, const uint width){
-    const uint laneid = threadIdx.x & 0x1f;
+__device__ float reduce(float (*func)(const float, const float), float val, const unsigned width){
+    const unsigned laneid = threadIdx.x & 0x1f;
     if(width <= warp_size && is_pow_2(width)){
         for(int i=0; i < ilog2(width); i++){
             val = func(val, __shfl_xor_sync(mask, val, 1 << i));
         }
         return val;
     } else if (width <= warp_size){
-        uint closest_pow2 = 1 << ilog2(width);
-        uint diff = width - closest_pow2;
+        unsigned closest_pow2 = 1 << ilog2(width);
+        unsigned diff = width - closest_pow2;
         auto temp = __shfl_down_sync(mask, val, closest_pow2);
         if (laneid < diff){
             val = func(val, temp);
@@ -36,10 +38,10 @@ __device__ float reduce(float (*func)(const float, const float), float val, cons
         }
         return __shfl_sync(mask, val, 0);
     } else {
-        uint last_warp_size = width % warp_size;
-        uint warp_count = width / warp_size + (last_warp_size ? 1 : 0);
+        unsigned last_warp_size = width % warp_size;
+        unsigned warp_count = width / warp_size + (last_warp_size ? 1 : 0);
         __syncthreads();
-        uint tid = threadIdx.x + threadIdx.y * blockDim.x;
+        unsigned tid = threadIdx.x + threadIdx.y * blockDim.x;
         __syncthreads();
         if (last_warp_size == 0 || tid < width - last_warp_size) {
             for(int i=0; i < ilog2(warp_size); i++)
@@ -231,8 +233,8 @@ struct Config {
 };
 
 __device__ float nonlinearity(){
-    const uint nwaves = blockDim.x;
-    const uint tix = threadIdx.x;
+    const unsigned nwaves = blockDim.x;
+    const unsigned tix = threadIdx.x;
     float val = shared[tix];
     float err;
     if (tix == 0)
@@ -252,9 +254,9 @@ __device__ float nonlinearity(){
 template <int prism_count>
 __device__ float merit_error(const Config &config, const float *n, const float *params){
     __syncthreads();
-    const uint tix = threadIdx.x;
-    const uint tiy = threadIdx.y;
-    const uint nwaves = blockDim.x;
+    const unsigned tix = threadIdx.x;
+    const unsigned tiy = threadIdx.y;
+    const unsigned nwaves = blockDim.x;
     __shared__ Ray shared_rays[3];
     // Initial Surface
     float n1 = 1, n2 = n[0];
@@ -269,7 +271,8 @@ __device__ float merit_error(const Config &config, const float *n, const float *
     for(int i=1; i < prism_count; i++) {
         n1 = n2;
         n2 = n[i];
-        V2 normal(-cosf(params[2 + i]), -sinf(params[2 + i]));
+        normal.x = -cosf(params[2 + i]);
+        normal.y = -sinf(params[2 + i]);
         vertex.x += fabsf(normal.y / normal.x);
         vertex.y = (i + 1) % 2;
         ray = ray.intersect_surface(vertex, normal, n1, n2);
@@ -317,8 +320,8 @@ __device__ float merit_error(const Config &config, const float *n, const float *
 template <int prism_count>
 __device__ V2 random_search(const Config &config, const float *n, uint64_t *rng, const float lbound, const float ubound) {
     constexpr int param_count = prism_count + 2;
-    const uint tid = threadIdx.x + threadIdx.y * blockDim.x;
-    const uint rid = 2 * (blockIdx.x * param_count + tid);
+    const unsigned tid = threadIdx.x + threadIdx.y * blockDim.x;
+    const unsigned rid = 2 * (blockIdx.x * param_count + tid);
     float best = 0;
     __shared__ float trial[param_count];
     if(tid < param_count) {
@@ -346,13 +349,13 @@ __device__ V2 random_search(const Config &config, const float *n, uint64_t *rng,
 }
 
 template <int prism_count>
-__global__ void optimize(const float *configuration, const float *ns, const size_t nglass, float *out, size_t start, size_t stop, uint64_t rng_seed){
+__device__ void optimize(const float *configuration, const float *ns, const size_t nglass, float *out, size_t start, size_t stop, uint64_t rng_seed){
     constexpr int param_count = prism_count + 2;
-    const uint nwaves = blockDim.x;
-    const uint tid = threadIdx.x + threadIdx.y * blockDim.x;
-    const uint tix = threadIdx.x;
-    const uint bid = blockIdx.x;
-    const uint bcount = gridDim.x;
+    const unsigned nwaves = blockDim.x;
+    const unsigned tid = threadIdx.x + threadIdx.y * blockDim.x;
+    const unsigned tix = threadIdx.x;
+    const unsigned bid = blockIdx.x;
+    const unsigned bcount = gridDim.x;
     const Config config(configuration);
     const float lbound = (tid == 0 ? 0 : (tid == 1 ? -M_PI_2 : (tid % 2 == 1 ? config.lower_bound : -config.upper_bound)));
     const float ubound = (tid == 0 ? 1 : (tid == 1 ? M_PI_2 : (tid % 2 == 1 ? config.upper_bound : -config.lower_bound)));
@@ -361,7 +364,7 @@ __global__ void optimize(const float *configuration, const float *ns, const size
     uint64_t rng[2];
     if(tid < param_count){
         init_xoroshiro128p_state(rng, rng_seed);
-        for(uint i=0; i < tid; i++) {
+        for(unsigned i=0; i < tid; i++) {
             xoroshiro128p_jump(rng);
         }
     }
@@ -375,7 +378,7 @@ __global__ void optimize(const float *configuration, const float *ns, const size
         float xmin = opt.x, fx = opt.y;
         if (tid < param_count && fx < bestVal){
             bestVal = fx;
-            const uint oid = bid*(param_count + 2);
+            const unsigned oid = bid*(param_count + 2);
             if(tid == 0){
                 out[oid] = fx;
                 out[oid + 1] = index;
@@ -386,4 +389,17 @@ __global__ void optimize(const float *configuration, const float *ns, const size
         }
         __syncthreads();
     }
+}
+
+extern "C" __global__ void call_optimize(const int prism_count, const float *configuration, const float *ns, const size_t nglass, float *out, size_t start, size_t stop, uint64_t rng_seed) {
+    if(prism_count == 1)
+        optimize<1>(configuration, ns, nglass, out, start, stop, rng_seed);
+    else if(prism_count == 2)
+        optimize<2>(configuration, ns, nglass, out, start, stop, rng_seed);
+    else if(prism_count == 3)
+        optimize<3>(configuration, ns, nglass, out, start, stop, rng_seed);
+    else if(prism_count == 4)
+        optimize<4>(configuration, ns, nglass, out, start, stop, rng_seed);
+    else if(prism_count == 5)
+        optimize<5>(configuration, ns, nglass, out, start, stop, rng_seed);
 }
