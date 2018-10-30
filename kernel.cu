@@ -220,10 +220,14 @@ struct Ray {
 };
 
 struct Config {
-    float start, radius, theta0, sheight, dr, factor, lower_bound, upper_bound;
+    float start, radius, theta0, sheight, lower_bound, upper_bound;
     float weight_deviation, weight_linearity, weight_transmittance, weight_spot;
-    Config(const float*config) : start(config[0]), radius(config[1]), theta0(config[2]), sheight(config[3]), dr(config[4]), factor(config[5]),
-    lower_bound(config[6]), upper_bound(config[7]), weight_deviation(config[8]), weight_linearity(config[9]), weight_transmittance(config[10]), weight_spot(config[11]) {}
+    float dr, factor;
+    int steps;
+    Config(const float*config) : start(config[0]), radius(config[1]), theta0(config[2]), sheight(config[3]),
+    lower_bound(config[4]), upper_bound(config[5]), weight_deviation(config[6]), weight_linearity(config[7]),
+    weight_transmittance(config[8]), weight_spot(config[9]), dr(config[10]), factor(config[11]),
+    steps(static_cast<int>(config[12])) {}
 };
 
 __device__ float nonlinearity(){
@@ -313,7 +317,6 @@ __device__ float merit_error(const Config &config, const float *n, const float *
 template <int prism_count>
 __device__ V2 random_search(const Config &config, const float *n, uint64_t *rng, const float lbound, const float ubound) {
     constexpr int param_count = prism_count + 2;
-    constexpr int steps = 10;
     const uint tid = threadIdx.x + threadIdx.y * blockDim.x;
     const uint rid = 2 * (blockIdx.x * param_count + tid);
     float best = 0;
@@ -325,7 +328,7 @@ __device__ V2 random_search(const Config &config, const float *n, uint64_t *rng,
     }
     __syncthreads();
     float bestVal = merit_error<prism_count>(config, n, trial);
-    for(int rs=0; rs < steps; rs++) {
+    for(int rs=0; rs < config.steps; rs++) {
         if(tid < param_count){
             float xi = xoroshiro128p_normal_float32(rng + rid);
             float sphere = xi / sqrtf(reduce(operator_add, xi * xi, param_count));
@@ -384,4 +387,3 @@ __global__ void optimize(const float *configuration, const float *ns, const size
         __syncthreads();
     }
 }
-
