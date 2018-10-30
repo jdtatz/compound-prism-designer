@@ -1,22 +1,23 @@
+#include <cstdint>
+
 constexpr int warp_size = 32;
-constexpr int mask = 0xffffffff;
-constexpr int packing = 0x1f;
+constexpr unsigned mask = 0xffffffff;
 
 extern __shared__ float shared[];
 
-float operator_add(const float a, const float b) {
+__device__ float operator_add(const float a, const float b) {
     return a + b;
 }
 
-int ilog2(int v){
+__device__ uint ilog2(uint v){
     return 31 - __clz(v);
 }
 
-bool is_pow_2(int v){
+__device__ bool is_pow_2(uint v){
     return !(v & (v - 1));
 }
 
-float reduce(float (*func)(const float, const float), float val, const int width){
+__device__ float reduce(float (*func)(const float, const float), float val, const uint width){
     const uint laneid = threadIdx.x & 0x1f;
     if(width <= warp_size && is_pow_2(width)){
         for(int i=0; i < ilog2(width); i++){
@@ -24,8 +25,8 @@ float reduce(float (*func)(const float, const float), float val, const int width
         }
         return val;
     } else if (width <= warp_size){
-        int closest_pow2 = 1 << ilog2(width);
-        int diff = width - closest_pow2;
+        uint closest_pow2 = 1 << ilog2(width);
+        uint diff = width - closest_pow2;
         auto temp = __shfl_down_sync(mask, val, closest_pow2);
         if (laneid < diff){
             val = func(val, temp);
@@ -35,10 +36,10 @@ float reduce(float (*func)(const float, const float), float val, const int width
         }
         return __shfl_sync(mask, val, 0);
     } else {
-        int last_warp_size = width % warp_size;
-        int warp_count = width / warp_size + (last_warp_size ? 1 : 0);
+        uint last_warp_size = width % warp_size;
+        uint warp_count = width / warp_size + (last_warp_size ? 1 : 0);
         __syncthreads();
-        int tid = threadIdx.x + threadIdx.y * blockDim.x;
+        uint tid = threadIdx.x + threadIdx.y * blockDim.x;
         __syncthreads();
         if (last_warp_size == 0 || tid < width - last_warp_size) {
             for(int i=0; i < ilog2(warp_size); i++)
@@ -65,8 +66,67 @@ float reduce(float (*func)(const float, const float), float val, const int width
 }
 
 
+__device__ void init_xoroshiro128p_state(uint64_t *rng, uint64_t seed) {
+    uint64_t z = seed + static_cast<uint64_t>(0x9E3779B97F4A7C15);
+    z = (z ^ (z >> static_cast<uint32_t>(30))) * static_cast<uint64_t>(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> static_cast<uint32_t>(27))) * static_cast<uint64_t>(0x94D049BB133111EB);
+    z = z ^ (z >> static_cast<uint32_t>(31));
+
+    rng[0] = z;
+    rng[1] = z;
+}
+
+__device__ uint64_t rotl(uint64_t x, uint32_t k) {
+    return (x << k) | (x >> static_cast<uint32_t>(64 - k));
+}
+
+__device__ uint64_t xoroshiro128p_next(uint64_t *rng) {
+    uint64_t s0 = rng[0];
+    uint64_t s1 = rng[1];
+    uint64_t result = s0 + s1;
+
+    s1 ^= s0;
+    rng[0] = rotl(s0, static_cast<uint32_t>(55)) ^ s1 ^ (s1 << static_cast<uint32_t>(14));
+    rng[1] = rotl(s1, static_cast<uint32_t>(36));
+
+    return result;
+}
+
+__device__ void xoroshiro128p_jump(uint64_t *rng) {
+    constexpr uint64_t XOROSHIRO128P_JUMP[] = {0xbeac0467eba5facb, 0xd86b048b86aa9922};
+    uint64_t s0 = 0;
+    uint64_t s1 = 0;
+    for(int i=0; i < 2; i++){
+        for(int b=0; b < 64; b++){
+            if(XOROSHIRO128P_JUMP[i] & (static_cast<uint64_t>(1) << static_cast<uint32_t>(b))){
+                s0 ^= rng[0];
+                s1 ^= rng[1];
+            }
+            xoroshiro128p_next(rng);
+        }
+    }
+    rng[0] = s0;
+    rng[1] = s1;
+}
+
+__device__ float xoroshiro128p_uniform_float32(uint64_t *rng){
+    uint64_t x = xoroshiro128p_next(rng);
+    double y = (x >> static_cast<uint32_t>(11)) * (static_cast<double>(1) / (static_cast<uint64_t>(1) << static_cast<uint32_t>(53)));
+    return static_cast<float>(y);
+}
+
+__device__ float xoroshiro128p_normal_float32(uint64_t *rng){
+    float u1 = xoroshiro128p_uniform_float32(rng);
+    float u2 = xoroshiro128p_uniform_float32(rng);
+    float z0 = sqrtf(-2 * logf(u1)) * cosf(2 * M_PI * u2);
+    return z0;
+}
+
+
 struct V2 {
     float x, y;
+
+    V2(): x(0), y(0) {}
 
     V2(float x, float y): x(x), y(y) {}
 
@@ -107,12 +167,14 @@ struct Ray {
     V2 p, v;
     float T;
 
+    Ray(): p(), v(), T(0) {}
+
     Ray(V2 p, V2 v, float T): p(p), v(v), T(T) {}
 
     Ray intersect_surface(const V2 vertex, const V2 normal, float n1, float n2) const {
         float r = n1 / n2;
         float ci = -this->v.dot(normal);
-        float d = ((this->p - vertex).dot(normal)) / ci;
+        float d = (this->p - vertex).dot(normal) / ci;
         V2 p = this->p + this->v * d;
         float cr = sqrtf(1 - r * r * (1 - ci * ci));
         V2 v = this->v * r + normal * (r * ci - cr);
@@ -149,7 +211,7 @@ struct Ray {
                     upper_ray.v.y * (upper_ray.p.x - lower_ray.p.x - spec_length * normal.y)) / det;
         V2 l_vertex = lower_ray.p + lower_ray.v * d2;
         float ci = -this->v.dot(normal);
-        float d = ((this->p - l_vertex).dot(normal)) / ci;
+        float d = (this->p - l_vertex).dot(normal) / ci;
         V2 p = this->p + this->v * d;
         V2 vdiff = p - l_vertex;
         float spec_pos = sqrtf(vdiff.dot(vdiff)) / spec_length;
@@ -157,27 +219,34 @@ struct Ray {
     }
 };
 
-float nonlinearity(){
+struct Config {
+    float start, radius, theta0, sheight, dr, factor, lower_bound, upper_bound;
+    float weight_deviation, weight_linearity, weight_transmittance, weight_spot;
+    Config(const float*config) : start(config[0]), radius(config[1]), theta0(config[2]), sheight(config[3]), dr(config[4]), factor(config[5]),
+    lower_bound(config[6]), upper_bound(config[7]), weight_deviation(config[8]), weight_linearity(config[9]), weight_transmittance(config[10]), weight_spot(config[11]) {}
+};
+
+__device__ float nonlinearity(){
     const uint nwaves = blockDim.x;
     const uint tix = threadIdx.x;
     float val = shared[tix];
     float err;
     if (tix == 0)
-        err = (2 * vals[2] + 2 * val - 4 * vals[1]);
+        err = (2 * shared[2] + 2 * val - 4 * shared[1]);
     else if (tix == nwaves - 1)
-        err = (2 * val - 4 * vals[nwaves - 2] + 2 * vals[nwaves - 3])
+        err = (2 * val - 4 * shared[nwaves - 2] + 2 * shared[nwaves - 3]);
     else if (tix == 1)
-        err = (vals[3] - 3 * val + 2 * vals[0])
+        err = (shared[3] - 3 * val + 2 * shared[0]);
     else if (tix == nwaves - 2)
-        err = (2 * vals[nwaves - 1] - 3 * val + vals[nwaves - 4])
+        err = (2 * shared[nwaves - 1] - 3 * val + shared[nwaves - 4]);
     else
-        err = (vals[tix + 2] + vals[tix - 2] - 2 * val)
+        err = (shared[tix + 2] + shared[tix - 2] - 2 * val);
     return sqrtf(reduce(operator_add, err * err, nwaves)) / 4;
 }
 
 
 template <int prism_count>
-float merit_error(const struct Config &config, const float *n, const float *params){
+__device__ float merit_error(const Config &config, const float *n, const float *params){
     __syncthreads();
     const uint tix = threadIdx.x;
     const uint tiy = threadIdx.y;
@@ -186,9 +255,8 @@ float merit_error(const struct Config &config, const float *n, const float *para
     // Initial Surface
     float n1 = 1, n2 = n[0];
     V2 normal(-cosf(params[2]), -sinf(params[2]));
-    float size = fabsf(normal.y / normal.x);
-    float start = (tiy == 0 ? config.start : (tiy == 1 ? (config.start + config.radius) : (config.start - config.radius)));
-    V2 vertex(size, 1);
+    const float start = (tiy == 0 ? config.start : (tiy == 1 ? (config.start + config.radius) : (config.start - config.radius)));
+    V2 vertex(fabsf(normal.y / normal.x), 1);
     Ray inital({0, start}, {cosf(config.theta0), sinf(config.theta0)}, 1);
     Ray ray = inital.intersect_surface(vertex, normal, n1, n2);
     if (__syncthreads_or(ray.p.y <= 0 || 1 <= ray.p.y || isnan(ray.T)))
@@ -207,7 +275,8 @@ float merit_error(const struct Config &config, const float *n, const float *para
     // Last / Convex Surface
     n1 = n2;
     n2 = 1;
-    V2 normal(-cosf(params[2 + prism_count]), -sinf(params[2 + prism_count]));
+    normal.x = -cosf(params[2 + prism_count]);
+    normal.y = -sinf(params[2 + prism_count]);
     float diff = fabsf(normal.y / normal.x);
     vertex.x += diff;
     vertex.y = (prism_count + 1) % 2;
@@ -215,7 +284,7 @@ float merit_error(const struct Config &config, const float *n, const float *para
     float curvature = params[0];
     ray = ray.intersect_lens(midpt, normal, curvature, n1, n2);
     float diameter = 1 / fabsf(normal.x);
-    bool on_lens = (ray.p - midpt).square() <= (diameter ** 2 / np.float32(4));
+    bool on_lens = (ray.p - midpt).square() <= (diameter * diameter / 4);
     if (__syncthreads_or(!on_lens || isnan(ray.T)))
         return INFINITY;
     // Spectrometer
@@ -234,18 +303,19 @@ float merit_error(const struct Config &config, const float *n, const float *para
     __syncthreads();
     float spot_size = fabsf(shared[nwaves + tix] - shared[2 * nwaves + tix]);
     float nonlin = nonlinearity();
-    deviation = fabsf(shared_rays[0].v.y);
-    mean_transmittance = reduce(operator_add, ray.T, nwaves) / nwaves;
-    mean_spot_size = reduce(operator_add, spot_size, nwaves) / nwaves;
+    float deviation = fabsf(shared_rays[0].v.y);
+    float mean_transmittance = reduce(operator_add, ray.T, nwaves) / nwaves;
+    float mean_spot_size = reduce(operator_add, spot_size, nwaves) / nwaves;
     __syncthreads();
     return config.weight_deviation * deviation + config.weight_linearity * nonlin + config.weight_transmittance * (1 - mean_transmittance) + config.weight_spot * mean_spot_size;
 }
 
 template <int prism_count>
-V2 random_search(const struct Config &config, const float *n, uint64_t *rng, const float lbound, const float ubound) {
-    constexpr param_count = prism_count + 2;
+__device__ V2 random_search(const Config &config, const float *n, uint64_t *rng, const float lbound, const float ubound) {
+    constexpr int param_count = prism_count + 2;
+    constexpr int steps = 10;
     const uint tid = threadIdx.x + threadIdx.y * blockDim.x;
-    const uint rid = nb.cuda.blockIdx.x * param_count + tid;
+    const uint rid = 2 * (blockIdx.x * param_count + tid);
     float best = 0;
     __shared__ float trial[param_count];
     if(tid < param_count) {
@@ -269,29 +339,37 @@ V2 random_search(const struct Config &config, const float *n, uint64_t *rng, con
             best = trial[tid];
         }
     }
-    return {best, bestVal}
+    return {best, bestVal};
 }
 
 template <int prism_count>
-__global__ void optimize(const struct Config &config, const float *ns, const size_t nglass, float *out, size_t start, size_t stop, uint64_t * rng){
-    constexpr param_count = prism_count + 2;
+__global__ void optimize(const float *configuration, const float *ns, const size_t nglass, float *out, size_t start, size_t stop, uint64_t rng_seed){
+    constexpr int param_count = prism_count + 2;
     const uint nwaves = blockDim.x;
     const uint tid = threadIdx.x + threadIdx.y * blockDim.x;
     const uint tix = threadIdx.x;
     const uint bid = blockIdx.x;
     const uint bcount = gridDim.x;
+    const Config config(configuration);
     const float lbound = (tid == 0 ? 0 : (tid == 1 ? -M_PI_2 : (tid % 2 == 1 ? config.lower_bound : -config.upper_bound)));
     const float ubound = (tid == 0 ? 1 : (tid == 1 ? M_PI_2 : (tid % 2 == 1 ? config.upper_bound : -config.lower_bound)));
     float bestVal = INFINITY;
     float n[param_count];
+    uint64_t rng[2];
+    if(tid < param_count){
+        init_xoroshiro128p_state(rng, rng_seed);
+        for(uint i=0; i < tid; i++) {
+            xoroshiro128p_jump(rng);
+        }
+    }
     for(int index=start+bid; index < stop; index += bcount) {
         size_t tot = 1;
         for (int i = 0; i < prism_count; i++) {
             n[i] = ns[((index / tot) % nglass) * nwaves + tix];
             tot *= nglass;
         }
-        V2 out = random_search<prism_count>(config, n, rng, lbound, ubound);
-        float xmin = out.x, fx = out.y;
+        V2 opt = random_search<prism_count>(config, n, rng, lbound, ubound);
+        float xmin = opt.x, fx = opt.y;
         if (tid < param_count && fx < bestVal){
             bestVal = fx;
             const uint oid = bid*(param_count + 2);
@@ -307,59 +385,3 @@ __global__ void optimize(const struct Config &config, const float *ns, const siz
     }
 }
 
-
-void init_xoroshiro128p_state(uint64_t *rng, uint64_t seed) {
-    uint64_t z = seed + static_cast<uint64_t>(0x9E3779B97F4A7C15);
-    z = (z ^ (z >> static_cast<uint32_t>(30))) * static_cast<uint64_t>(0xBF58476D1CE4E5B9);
-    z = (z ^ (z >> static_cast<uint32_t>(27))) * static_cast<uint64_t>(0x94D049BB133111EB);
-    z = z ^ (z >> static_cast<uint32_t>(31));
-
-    rng[0] = z;
-    rng[1] = z;
-}
-
-uint64_t rotl(uint64_t x, uint32_t k) {
-    return (x << k) | (x >> static_cast<uint32_t>(64 - k));
-}
-
-uint64_t xoroshiro128p_next(uint64_t *rng) {
-    uint64_t s0 = rng[0];
-    uint64_t s1 = rng[1];
-    uint64_t result = s0 + s1;
-
-    s1 ^= s0;
-    rng[0] = rotl(s0, static_cast<uint32_t>(55))) ^ s1 ^ (s1 << static_cast<uint32_t>(14);
-    rng[1] = rotl(s1, static_cast<uint32_t>(36));
-
-    return result;
-}
-
-void xoroshiro128p_jump(uint64_t *rng) {
-    constexpr uint64_t XOROSHIRO128P_JUMP[] = {0xbeac0467eba5facb, 0xd86b048b86aa9922};
-    uint64_t s0 = 0;
-    uint64_t s1 = 0;
-    for(int i=0; i < 2; i++){
-        for(int b=0; b < 64; b++){
-            if(XOROSHIRO128P_JUMP[i] & (static_cast<uint64_t>(1) << static_cast<uint32_t>(b))){
-                s0 ^= rng[0];
-                s1 ^= rng[1];
-            }
-            xoroshiro128p_next(rng);
-        }
-    }
-    rng[0] = s0;
-    rng[1] = s1;
-}
-
-float xoroshiro128p_uniform_float32(uint64_t *rng){
-    uint64_t x = xoroshiro128p_next(rng);
-    double y = (x >> static_cast<uint32_t>(11)) * (static_cast<double>(1) / (static_cast<uint64_t>(1) << static_cast<uint32_t>(53)));
-    return static_cast<float>(y);
-}
-
-float xoroshiro128p_normal_float32(uint64_t *rng){
-    float u1 = xoroshiro128p_uniform_float32(rng);
-    float u2 = xoroshiro128p_uniform_float32(rng);
-    float z0 = sqrtf(-2 * logf(u1)) * cosf(2 * M_PI * u2);
-    return z0
-}
