@@ -1,0 +1,18 @@
+[package]
+name = "prism"
+version = "0.1.0"
+authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+derive_more = "0.15.0"
+libm = "0.1.4"
+alga = "0.9.1"
+cpython = { version = "0.2.1", features = ["extension-module"]}
+
+[profile.release]
+opt-level=3
+lto=true
