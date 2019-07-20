@@ -153,8 +153,8 @@ py_module_initializer!(prism, initprism, PyInit_prism, |py, m| {
                 to_pyresult(py, new_catalog::<f64>(file))
         }),
     )?;
-    m.add(py, "fitness", py_fn!(py, fitness(wavelengths: Vec<f64>, prism: OwnedPrism<f64>, pmts: OwnedPmtArray<f64>, beam: GaussianBeam<f64>) -> PyResult<impl ToPyObject> {
-        to_pyresult(py, py.allow_threads(|| merit(&wavelengths, (&prism).into(), (&pmts).into(), beam).map(|arr| Vec::from(arr.as_ref()))))
+    m.add(py, "fitness", py_fn!(py, fitness(wmin: f64, wmax: f64, prism: OwnedPrism<f64>, pmts: OwnedPmtArray<f64>, beam: GaussianBeam<f64>) -> PyResult<impl ToPyObject> {
+        to_pyresult(py, py.allow_threads(|| merit(wmin, wmax, (&prism).into(), (&pmts).into(), beam).map(|arr| Vec::from(arr.as_ref()))))
     }))?;
     m.add(py, "trace", py_fn!(py, ray_trace(wavelength: f64, wmin: f64, wmax: f64, init_y: f64, prism: OwnedPrism<f64>, pmts: OwnedPmtArray<f64>, beam: GaussianBeam<f64>) -> PyResult<impl ToPyObject> {
         to_pyresult(py, py.allow_threads(|| trace(wavelength, wmin, wmax, init_y, (&prism).into(), (&pmts).into(), beam)))
