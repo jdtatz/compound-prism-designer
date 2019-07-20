@@ -348,23 +348,25 @@ fn p_det_l_wavelength_y(
     // g(y) = Exp[-2 y^2 / beam_width^2] Erf[Sqrt[2] w / beam_width] Sqrt[2 / pi] / beam_width
     const FRAC_SQRT_2_SQRT_PI: f64 =
         core::f64::consts::FRAC_1_SQRT_2 * core::f64::consts::FRAC_2_SQRT_PI;
-    let p_g = f64::exp(-2. * y * y / (beam_width * beam_width))
+    let g_y = f64::exp(-2. * y * y / (beam_width * beam_width))
         * libm::erf(core::f64::consts::SQRT_2 * w / beam_width)
         * FRAC_SQRT_2_SQRT_PI
         / beam_width;
-    assert!(p_g.is_finite());
+    debug_assert!(g_y.is_finite());
     let (pos, t) = ray
         .propagate(wavelength, prism, spec, spec_min_ci)
         .unwrap_or((-1., 0.));
-    assert!(pos.is_finite());
-    assert!(t.is_finite());
-    let prob = t * p_g;
-    move |l, u| if l <= pos && pos < u { prob } else { 0. }
+    debug_assert!(pos.is_finite());
+    debug_assert!(t.is_finite());
+    // p((D=d|Λ=λ)|Y=y) = T(λ, y) * g(y) * step(d_l <= S(λ, y) < d_u)
+    let pdf = t * g_y;
+    move |l, u| if l <= pos && pos < u { pdf } else { 0. }
 }
 
 /// I(Λ; D)
 fn mutual_information(
-    wavelengths: &[f64],
+    wmin: f64,
+    wmax: f64,
     bounds: &[(f64, f64)],
     prism: Prism<f64>,
     spec: DetectorPositioning<f64>,
@@ -372,40 +374,36 @@ fn mutual_information(
     beam_width: f64,
     y_mean: f64,
 ) -> f64 {
-    let p_w = 1. / (wavelengths.len() as f64);
+    let p_w = 1. / (wmax - wmin);
     let mut info = 0_f64;
     let mut p_dets = vec![0_f64; bounds.len()];
-    for w in wavelengths.iter().cloned() {
+    // p(D=d) = Integrate[p(D=d|Λ=λ), {λ, wmin, wmax}]
+    KR21::inplace_integrate(|w, w_factor| {
         let mut p_det_l_ws = vec![0_f64; bounds.len()];
-        KR21::inplace_integrate(
-            |y, factor| {
-                let f = p_det_l_wavelength_y(y, w, prism, spec, spec_min_ci, beam_width, y_mean);
-                for (bin, p_det_l_w) in bounds.iter().zip(p_det_l_ws.iter_mut()) {
-                    let p = f(bin.0, bin.1);
-                    *p_det_l_w += p * factor;
-                }
-            },
-            0.,
-            1.,
-            10,
-        );
-        for (p_det_l_w, p_det) in p_det_l_ws.iter().cloned().zip(p_dets.iter_mut()) {
-            assert!(p_det_l_w.is_finite());
-            assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
+        // p(D=d|Λ=λ) = Integrate[p((D=d|Λ=λ)|Y=y), {y, 0, 1}]
+        KR21::inplace_integrate(|y, y_factor| {
+            let f = p_det_l_wavelength_y(y, w, prism, spec, spec_min_ci, beam_width, y_mean);
+            for (bin_bounds,  p_det_l_w) in bounds.iter().zip(p_det_l_ws.iter_mut()) {
+                *p_det_l_w += f(bin_bounds.0, bin_bounds.1) * y_factor;
+            }
+        }, 0., 1., 10);
+        for (p_det, p_det_l_w) in p_dets.iter_mut().zip(p_det_l_ws) {
+            debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
             if p_det_l_w > 0. {
-                *p_det += p_w * p_det_l_w;
-                info += p_w * p_det_l_w * p_det_l_w.log2();
+                *p_det += p_w * p_det_l_w * w_factor;
+                info += p_w * p_det_l_w * p_det_l_w.log2() * w_factor;
             }
         }
-    }
-    for p_det in p_dets.iter().cloned() {
-        assert!(0. <= p_det && p_det <= 1.);
+    }, wmin, wmax, 5);
+    for p_det in p_dets {
+        debug_assert!(0. <= p_det && p_det <= 1.);
         if p_det > 0. {
             info -= p_det * p_det.log2();
         }
     }
     info
 }
+
 
 pub fn get_spectrometer_position(
     wmin: f64,
@@ -469,21 +467,21 @@ pub fn transmission(
 }
 
 pub fn merit(
-    wavelengths: &[f64],
+    wmin: f64,
+    wmax: f64,
     prism: Prism<f64>,
     pmts: PmtArray<f64>,
     beam: GaussianBeam<f64>,
 ) -> Result<[f64; 3], RayTraceError> {
     let spec_length = pmts.length / prism.height;
     let beam_width = beam.width / prism.height;
-    assert!(wavelengths.len() >= 2);
-    let (wmin, wmax) = (wavelengths[0], wavelengths[wavelengths.len() - 1]);
     let spec = Ray::spectrometer_position(beam.y_mean, wmin, wmax, prism, pmts.angle, spec_length)?;
     let deviation_vector = spec.pos + spec.dir / 2. - Pair{ x: 0., y: beam.y_mean };
     let size = deviation_vector.norm() * prism.height;
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
     let info = mutual_information(
-        wavelengths,
+        wmin,
+        wmax,
         pmts.bins,
         prism,
         spec,
@@ -498,7 +496,7 @@ pub fn merit(
 mod tests {
     use super::*;
 
-    fn approx_eq(lhs: f64, rhs: f64) -> bool {
+    fn approx_eq(lhs: f64, rhs: f64, epsilon: f64) -> bool {
         let diff = f64::abs(lhs - rhs);
 
         if lhs.is_nan() || rhs.is_nan() {
@@ -506,13 +504,13 @@ mod tests {
         } else if lhs == rhs {
             true
         } else if lhs == 0. || rhs == 0. || (lhs.abs() + rhs.abs() < std::f64::MIN_POSITIVE) {
-            diff < std::f64::EPSILON
+            diff < epsilon
         } else {
             let sum = lhs.abs() + rhs.abs();
             if sum < std::f64::MAX {
-                diff / sum < std::f64::EPSILON
+                diff / sum < epsilon
             } else {
-                diff / std::f64::MAX < std::f64::EPSILON
+                diff / std::f64::MAX < epsilon
             }
         }
     }
@@ -571,19 +569,15 @@ mod tests {
             y_mean: 0.38,
         };
 
-        let nwaves = 100;
         let wmin = 0.5;
         let wmax = 0.82;
-        let wavelengths: Box<[f64]> = (0..nwaves)
-            .map(|i| wmin + f64::from(i) * (wmax - wmin) / f64::from(nwaves - 1))
-            .collect();
 
-        let v = merit(&wavelengths, prism, pmts, beam).expect("Merit function failed");
-        assert!(approx_eq(v[0], 41.324065257329245), "Size is incorrect");
+        let v = merit(wmin, wmax, prism, pmts, beam).expect("Merit function failed");
+        assert!(approx_eq(v[0], 41.324065257329245, 1e-3), "Size is incorrect. {} ≉ -41.324", v[0]);
         assert!(
-            approx_eq(v[1], -1.444212905142612),
-            "Mutual information is incorrect"
+            approx_eq(v[1], -1.444212905142612, 1e-3),
+            "Mutual information is incorrect. {} ≉ -1.444", v[1]
         );
-        assert!(approx_eq(v[2], 0.37715870072898755), "Deviation is incorrect");
+        assert!(approx_eq(v[2], 0.37715870072898755, 1e-3), "Deviation is incorrect. {} ≉ -0.377", v[2]);
     }
 }

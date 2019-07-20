@@ -96,7 +96,8 @@ def trace(wavelength: float, initial_y: float, config: Config, params: Params):
 def fitness(config: Config, params: Params):
     try:
         return prism.fitness(
-            config.waves,
+            config.wmin,
+            config.wmax,
             Prism(
                 glasses=params.glasses,
                 angles=params.thetas,
