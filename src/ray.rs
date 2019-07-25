@@ -51,12 +51,18 @@ fn rotate<N: RealField>(angle: N, vector: Pair<N>) -> Pair<N> {
     }
 }
 
+/// Collimated Polychromatic Gaussian Beam from Collimator
 #[derive(Constructor, Debug, Clone, Copy)]
 pub struct GaussianBeam<N: RealField> {
+    /// 1/e^2 beam width
     pub width: N,
+    /// mean normalized y coordinate
     pub y_mean: N,
+    /// Range of wavelengths
+    pub w_range: (N, N),
 }
 
+/// Compound Prism Specification
 #[derive(Constructor, Debug, Clone, Copy)]
 pub struct Prism<'a, N: RealField> {
     pub glasses: &'a [Glass<N>],
@@ -69,7 +75,7 @@ pub struct Prism<'a, N: RealField> {
 #[derive(Constructor, Debug, Clone, Copy)]
 pub struct PmtArray<'a, N: RealField> {
     /// Normalized Boundaries of pmt bins
-    pub bins: &'a [(N, N)],
+    pub bins: &'a [[N; 2]],
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     pub min_ci: N,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
@@ -238,7 +244,8 @@ impl<N: RealField> Ray<N> {
             return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
         }
         let spec = rotate(spec_angle, (N::zero(), N::one()).into()) * spec_length;
-        let det = upper_ray.direction.y * lower_ray.direction.x - upper_ray.direction.x * lower_ray.direction.y;
+        let det = upper_ray.direction.y * lower_ray.direction.x
+            - upper_ray.direction.x * lower_ray.direction.y;
         if det.is_zero() {
             return Err(RayTraceError::NoSurfaceIntersection);
         }
@@ -325,8 +332,8 @@ impl<N: RealField> Ray<N> {
     }
 }
 
-/// p((D=d|Λ=λ)|Y=y)
-fn p_det_l_wavelength_y(
+/// pdf((D=d|Λ=λ)|Y=y)
+fn pdf_det_l_wavelength_y(
     y: f64,
     wavelength: f64,
     prism: Prism<f64>,
@@ -341,14 +348,14 @@ fn p_det_l_wavelength_y(
         direction: (1., 0.).into(),
         transmittance: 1.,
     };
-    let y = y - y_mean;
+    let y_bar = y - y_mean;
     // circular gaussian beam pdf parameterized by 1/e2 beam width
     // f(x, y) = Exp[-2 (x^2 + y^2) / beam_width^2] * 2 / (pi beam_width^2)
     // g(y) = Integrate[f(x, y), {x, -w, w}]
     // g(y) = Exp[-2 y^2 / beam_width^2] Erf[Sqrt[2] w / beam_width] Sqrt[2 / pi] / beam_width
     const FRAC_SQRT_2_SQRT_PI: f64 =
         core::f64::consts::FRAC_1_SQRT_2 * core::f64::consts::FRAC_2_SQRT_PI;
-    let g_y = f64::exp(-2. * y * y / (beam_width * beam_width))
+    let g_y = f64::exp(-2. * y_bar * y_bar / (beam_width * beam_width))
         * libm::erf(core::f64::consts::SQRT_2 * w / beam_width)
         * FRAC_SQRT_2_SQRT_PI
         / beam_width;
@@ -358,7 +365,7 @@ fn p_det_l_wavelength_y(
         .unwrap_or((-1., 0.));
     debug_assert!(pos.is_finite());
     debug_assert!(t.is_finite());
-    // p((D=d|Λ=λ)|Y=y) = T(λ, y) * g(y) * step(d_l <= S(λ, y) < d_u)
+    // pdf((D=d|Λ=λ)|Y=y) = T(λ, y) * g(y) * step(d_l <= S(λ, y) < d_u)
     let pdf = t * g_y;
     move |l, u| if l <= pos && pos < u { pdf } else { 0. }
 }
@@ -367,34 +374,46 @@ fn p_det_l_wavelength_y(
 fn mutual_information(
     wmin: f64,
     wmax: f64,
-    bounds: &[(f64, f64)],
+    normalized_bounds: &[[f64; 2]],
     prism: Prism<f64>,
     spec: DetectorPositioning<f64>,
     spec_min_ci: f64,
     beam_width: f64,
     y_mean: f64,
 ) -> f64 {
+    let nbins = normalized_bounds.len();
     let p_w = 1. / (wmax - wmin);
     let mut info = 0_f64;
-    let mut p_dets = vec![0_f64; bounds.len()];
+    let mut p_dets = vec![0_f64; nbins];
     // p(D=d) = Integrate[p(D=d|Λ=λ), {λ, wmin, wmax}]
-    KR21::inplace_integrate(|w, w_factor| {
-        let mut p_det_l_ws = vec![0_f64; bounds.len()];
-        // p(D=d|Λ=λ) = Integrate[p((D=d|Λ=λ)|Y=y), {y, 0, 1}]
-        KR21::inplace_integrate(|y, y_factor| {
-            let f = p_det_l_wavelength_y(y, w, prism, spec, spec_min_ci, beam_width, y_mean);
-            for (bin_bounds,  p_det_l_w) in bounds.iter().zip(p_det_l_ws.iter_mut()) {
-                *p_det_l_w += f(bin_bounds.0, bin_bounds.1) * y_factor;
+    KR21::inplace_integrate(
+        |w, w_factor| {
+            let mut p_det_l_ws = vec![0_f64; nbins];
+            // p(D=d|Λ=λ) = Integrate[p((D=d|Λ=λ)|Y=y), {y, 0, 1}]
+            KR21::inplace_integrate(
+                |y, y_factor| {
+                    let f =
+                        pdf_det_l_wavelength_y(y, w, prism, spec, spec_min_ci, beam_width, y_mean);
+                    for (p_det_l_w, &[l, u]) in p_det_l_ws.iter_mut().zip(normalized_bounds) {
+                        *p_det_l_w += f(l, u) * y_factor;
+                    }
+                },
+                0.,
+                1.,
+                10,
+            );
+            for (p_det, p_det_l_w) in p_dets.iter_mut().zip(p_det_l_ws) {
+                debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
+                if p_det_l_w > 0. {
+                    *p_det += p_w * p_det_l_w * w_factor;
+                    info += p_w * p_det_l_w * p_det_l_w.log2() * w_factor;
+                }
             }
-        }, 0., 1., 10);
-        for (p_det, p_det_l_w) in p_dets.iter_mut().zip(p_det_l_ws) {
-            debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
-            if p_det_l_w > 0. {
-                *p_det += p_w * p_det_l_w * w_factor;
-                info += p_w * p_det_l_w * p_det_l_w.log2() * w_factor;
-            }
-        }
-    }, wmin, wmax, 5);
+        },
+        wmin,
+        wmax,
+        5,
+    );
     for p_det in p_dets {
         debug_assert!(0. <= p_det && p_det <= 1.);
         if p_det > 0. {
@@ -404,27 +423,24 @@ fn mutual_information(
     info
 }
 
-
 pub fn get_spectrometer_position(
-    wmin: f64,
-    wmax: f64,
     prism: Prism<f64>,
     pmts: PmtArray<f64>,
     beam: GaussianBeam<f64>,
 ) -> Result<DetectorPositioning<f64>, RayTraceError> {
+    let (wmin, wmax) = beam.w_range;
     let spec_length = pmts.length / prism.height;
     Ray::spectrometer_position(beam.y_mean, wmin, wmax, prism, pmts.angle, spec_length)
 }
 
 pub fn trace(
     wavelength: f64,
-    wmin: f64,
-    wmax: f64,
     init_y: f64,
     prism: Prism<f64>,
     pmts: PmtArray<f64>,
     beam: GaussianBeam<f64>,
 ) -> Result<Vec<(f64, f64)>, RayTraceError> {
+    let (wmin, wmax) = beam.w_range;
     let spec_length = pmts.length / prism.height;
     let ray = Ray {
         origin: (0., init_y).into(),
@@ -444,17 +460,16 @@ pub fn transmission(
 ) -> Result<Vec<Vec<f64>>, RayTraceError> {
     let spec_length = pmts.length / prism.height;
     let beam_width = beam.width / prism.height;
-    assert!(wavelengths.len() >= 2);
-    let (wmin, wmax) = (wavelengths[0], wavelengths[wavelengths.len() - 1]);
+    let (wmin, wmax) = beam.w_range;
     let spec = Ray::spectrometer_position(beam.y_mean, wmin, wmax, prism, pmts.angle, spec_length)?;
     let mut ts = vec![vec![0_f64; wavelengths.len()]; pmts.bins.len()];
     for (w_idx, w) in wavelengths.iter().cloned().enumerate() {
         KR21::inplace_integrate(
             |y, factor| {
                 let f =
-                    p_det_l_wavelength_y(y, w, prism, spec, pmts.min_ci, beam_width, beam.y_mean);
-                for (b_idx, bin) in pmts.bins.iter().enumerate() {
-                    let p = f(bin.0, bin.1);
+                    pdf_det_l_wavelength_y(y, w, prism, spec, pmts.min_ci, beam_width, beam.y_mean);
+                for (b_idx, &[l, u]) in pmts.bins.iter().enumerate() {
+                    let p = f(l, u);
                     ts[b_idx][w_idx] += p * factor;
                 }
             },
@@ -467,16 +482,19 @@ pub fn transmission(
 }
 
 pub fn merit(
-    wmin: f64,
-    wmax: f64,
     prism: Prism<f64>,
     pmts: PmtArray<f64>,
     beam: GaussianBeam<f64>,
 ) -> Result<[f64; 3], RayTraceError> {
+    let (wmin, wmax) = beam.w_range;
     let spec_length = pmts.length / prism.height;
     let beam_width = beam.width / prism.height;
     let spec = Ray::spectrometer_position(beam.y_mean, wmin, wmax, prism, pmts.angle, spec_length)?;
-    let deviation_vector = spec.pos + spec.dir / 2. - Pair{ x: 0., y: beam.y_mean };
+    let deviation_vector = spec.pos + spec.dir / 2.
+        - Pair {
+            x: 0.,
+            y: beam.y_mean,
+        };
     let size = deviation_vector.norm() * prism.height;
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
     let info = mutual_information(
@@ -555,7 +573,7 @@ mod tests {
 
         let nbin = 32;
         let bounds: Box<[_]> = (0..=nbin).map(|i| f64::from(i) / f64::from(nbin)).collect();
-        let bins: Box<[_]> = bounds.windows(2).map(|t| (t[0], t[1])).collect();
+        let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (60_f64).to_radians();
         let pmts = PmtArray {
             bins: &bins,
@@ -567,17 +585,24 @@ mod tests {
         let beam = GaussianBeam {
             width: 0.2,
             y_mean: 0.38,
+            w_range: (0.5, 0.82),
         };
 
-        let wmin = 0.5;
-        let wmax = 0.82;
-
-        let v = merit(wmin, wmax, prism, pmts, beam).expect("Merit function failed");
-        assert!(approx_eq(v[0], 41.324065257329245, 1e-3), "Size is incorrect. {} ≉ -41.324", v[0]);
+        let v = merit(prism, pmts, beam).expect("Merit function failed");
+        assert!(
+            approx_eq(v[0], 41.324065257329245, 1e-3),
+            "Size is incorrect. {} ≉ -41.324",
+            v[0]
+        );
         assert!(
             approx_eq(v[1], -1.444212905142612, 1e-3),
-            "Mutual information is incorrect. {} ≉ -1.444", v[1]
+            "Mutual information is incorrect. {} ≉ -1.444",
+            v[1]
         );
-        assert!(approx_eq(v[2], 0.37715870072898755, 1e-3), "Deviation is incorrect. {} ≉ -0.377", v[2]);
+        assert!(
+            approx_eq(v[2], 0.37715870072898755, 1e-3),
+            "Deviation is incorrect. {} ≉ -0.377",
+            v[2]
+        );
     }
 }
