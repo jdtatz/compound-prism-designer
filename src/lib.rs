@@ -9,7 +9,7 @@ mod ray;
 
 use crate::glasscat::{new_catalog, CatalogError as _CatalogError, Glass};
 use crate::ray::{
-    get_spectrometer_position, merit, trace, transmission, GaussianBeam, PmtArray, Prism,
+    merit, trace, transmission, GaussianBeam, PmtArray, Prism, spectrometer_position as get_spectrometer_position,
     RayTraceError as _RayTraceError,
 };
 use alga::general::RealField;

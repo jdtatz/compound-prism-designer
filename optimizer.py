@@ -271,7 +271,7 @@ class PrismProblem:
         l, u = np.deg2rad(0), np.deg2rad(90)
         angle_bounds = [(l, u) if i % 2 else (-u, -l) for i in range(nprism + 1)]
         curvature_bounds = 0.01, 1.0
-        y_mean_bounds = 0, 1
+        y_mean_bounds = 0, self.config.prism_height
         sec = np.deg2rad(90)
         spec_angle_bounds = -sec, sec
         return tuple(zip(*[
@@ -299,15 +299,15 @@ if __name__ == "__main__":
     gnames, gvalues = zip(*catalog.items())
 
     nbin = 32
-    l = np.arange(nbin) + 0.2
-    u = np.arange(nbin) + 0.8
-    bounds = np.array(list(zip(l, u))) / 32
+    l = np.arange(nbin) + 0.1
+    u = np.arange(nbin) + 0.9
+    bounds = np.stack((l, u), axis=1)
     config = Config(
         prism_count=3,
         wmin=0.5,
         wmax=0.82,
         prism_height=1.5,
-        prism_width=1.5,
+        prism_width=0.7,
         spec_length=3.2,
         spec_min_ci=np.cos(np.deg2rad(60)),
         beam_width=0.4,
