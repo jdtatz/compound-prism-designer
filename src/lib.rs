@@ -2,15 +2,17 @@
 extern crate derive_more;
 #[macro_use]
 extern crate cpython;
-use cpython::{FromPyObject, ObjectProtocol, PyObject, PyResult, Python, ToPyObject, PyErr, exc::TypeError};
+use cpython::{
+    exc::TypeError, FromPyObject, ObjectProtocol, PyErr, PyObject, PyResult, Python, ToPyObject,
+};
 mod glasscat;
 mod quad;
 mod ray;
 
 use crate::glasscat::{new_catalog, CatalogError as _CatalogError, Glass};
 use crate::ray::{
-    merit, trace, transmission, GaussianBeam, PmtArray, Prism, spectrometer_position as get_spectrometer_position,
-    RayTraceError as _RayTraceError,
+    merit, spectrometer_position as get_spectrometer_position, trace, transmission, GaussianBeam,
+    PmtArray, Prism, RayTraceError as _RayTraceError,
 };
 use alga::general::RealField;
 
@@ -57,20 +59,25 @@ where
 }
 
 fn get_buffer_attr<'p, I, T>(py: Python, obj: &'p PyObject, k: &'static str) -> PyResult<&'p [T]>
-    where
-        I: cpython::buffer::Element + for<'a> cpython::FromPyObject<'a>,
-//      T: zerocopy::FromBytes,
+where
+    I: cpython::buffer::Element + for<'a> cpython::FromPyObject<'a>,
+    //      T: zerocopy::FromBytes,
 {
     let obj = obj.getattr(py, k)?;
     let buffer = cpython::buffer::PyBuffer::get(py, &obj)?;
     let ptr = buffer.buf_ptr() as *const T;
     if !buffer.is_c_contiguous() {
-        Err(PyErr::new::<TypeError, _>(py, "buffer must be C contiguous"))
+        Err(PyErr::new::<TypeError, _>(
+            py,
+            "buffer must be C contiguous",
+        ))
     } else if (ptr as usize) % core::mem::align_of::<T>() != 0 {
         Err(PyErr::new::<TypeError, _>(py, "Invalid buffer alignment"))
     } else if !I::is_compatible_format(buffer.format()) {
         Err(PyErr::new::<TypeError, _>(py, "Invalid buffer format"))
-    } else if core::mem::size_of::<I>() != buffer.item_size() || buffer.len_bytes() % core::mem::size_of::<T>() != 0 {
+    } else if core::mem::size_of::<I>() != buffer.item_size()
+        || buffer.len_bytes() % core::mem::size_of::<T>() != 0
+    {
         Err(PyErr::new::<TypeError, _>(py, "Invalid buffer size"))
     } else {
         let len = buffer.len_bytes() / std::mem::size_of::<T>();
@@ -122,8 +129,8 @@ impl<N: RealField + for<'a> cpython::FromPyObject<'a>> FromPyObject<'_> for Owne
     }
 }
 
-impl<'p, N: RealField + cpython::buffer::Element + for<'a> cpython::FromPyObject<'a>> FromPyObject<'p>
-    for PmtArray<'p, N>
+impl<'p, N: RealField + cpython::buffer::Element + for<'a> cpython::FromPyObject<'a>>
+    FromPyObject<'p> for PmtArray<'p, N>
 {
     fn extract(py: Python, obj: &'p PyObject) -> PyResult<Self> {
         Ok(PmtArray {

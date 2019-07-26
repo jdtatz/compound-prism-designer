@@ -339,10 +339,7 @@ pub fn spectrometer_position<N: RealField>(
         let u_vertex = lower_ray.origin + lower_ray.direction * d2;
         (u_vertex, -spec_dir)
     };
-    Ok(DetectorPositioning {
-        pos,
-        dir,
-    })
+    Ok(DetectorPositioning { pos, dir })
 }
 
 /// pdf((D=d|Λ=λ)|Y=y)
@@ -372,8 +369,7 @@ fn pdf_det_l_wavelength_y(
         * FRAC_SQRT_2_SQRT_PI
         / beam.width;
     debug_assert!(g_y.is_finite());
-    let (pos, t) = ray
-        .propagate(wavelength, prism, pmts, spec)?;
+    let (pos, t) = ray.propagate(wavelength, prism, pmts, spec)?;
     debug_assert!(pos.is_finite());
     debug_assert!(t.is_finite());
     debug_assert!(0. <= t && t <= 1.);
@@ -444,7 +440,7 @@ pub fn trace(
         direction: (1., 0.).into(),
         transmittance: 1.,
     };
-    let spec =  spectrometer_position(prism,  pmts, beam)?;
+    let spec = spectrometer_position(prism, pmts, beam)?;
     let traced = ray.trace(wavelength, prism, pmts, spec)?;
     Ok(traced.into_iter().map(|v| (v.x, v.y)).collect())
 }
@@ -455,7 +451,7 @@ pub fn transmission(
     pmts: PmtArray<f64>,
     beam: GaussianBeam<f64>,
 ) -> Result<Vec<Vec<f64>>, RayTraceError> {
-    let spec = spectrometer_position(prism,  pmts, beam)?;
+    let spec = spectrometer_position(prism, pmts, beam)?;
     let mut ts = vec![vec![0_f64; wavelengths.len()]; pmts.bins.len()];
     for (w_idx, w) in wavelengths.iter().cloned().enumerate() {
         KR21::inplace_integrate(
@@ -480,7 +476,7 @@ pub fn merit(
     pmts: PmtArray<f64>,
     beam: GaussianBeam<f64>,
 ) -> Result<[f64; 3], RayTraceError> {
-    let spec = spectrometer_position(prism,  pmts, beam)?;
+    let spec = spectrometer_position(prism, pmts, beam)?;
     let deviation_vector = spec.pos + spec.dir * pmts.length * 0.5
         - Pair {
             x: 0.,
@@ -555,7 +551,9 @@ mod tests {
 
         let nbin = 32;
         let pmt_length = 3.2;
-        let bounds: Box<[_]> = (0..=nbin).map(|i| f64::from(i) / f64::from(nbin) * pmt_length).collect();
+        let bounds: Box<[_]> = (0..=nbin)
+            .map(|i| f64::from(i) / f64::from(nbin) * pmt_length)
+            .collect();
         let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (60_f64).to_radians();
         let pmts = PmtArray {

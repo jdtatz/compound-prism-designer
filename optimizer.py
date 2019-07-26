@@ -120,6 +120,8 @@ def fitness(config: Config, params: Params):
 
 def show_interactive(config: Config, solns: [Soln]):
     import matplotlib as mpl
+    import matplotlib.path
+    import matplotlib.patches
     import matplotlib.pyplot as plt
     fig = plt.figure()
     nrows, ncols = 2, 4
@@ -169,33 +171,34 @@ def show_interactive(config: Config, solns: [Soln]):
         text_ax.axis('off')
 
         spec_pos, spec_dir = spectrometer_position(config, params)
-        spec_end = spec_pos + spec_dir
+        spec_end = spec_pos + spec_dir * config.spec_length
 
         prism_vertices = np.empty((config.prism_count + 2, 2))
         prism_vertices[::2, 1] = 0
-        prism_vertices[1::2, 1] = 1
+        prism_vertices[1::2, 1] = config.prism_height
         prism_vertices[0, 0] = 0
-        prism_vertices[1:, 0] = np.add.accumulate(np.tan(np.abs(params.thetas)))
+        prism_vertices[1:, 0] = np.add.accumulate(np.tan(np.abs(params.thetas)) * config.prism_height)
         triangles = np.stack((prism_vertices[1:-1], prism_vertices[:-2], prism_vertices[2:]), axis=1)
 
-        curvature = params.curvature
-        ld = prism_vertices[-1] - prism_vertices[-2]
-        norm = np.array((ld[1], -ld[0]))
-        norm /= np.linalg.norm(norm)
-        midpt = prism_vertices[-2] + (ld) / 2
-        diameter = np.linalg.norm(ld)
-        lradius = (diameter / 2) / curvature
-        rs = diameter * np.sqrt(1 - curvature * curvature) / (2 * curvature)
-        c = midpt[0] + norm[0] * rs, midpt[1] + norm[1] * rs
+        midpt = prism_vertices[-2] + (prism_vertices[-1] - prism_vertices[-2]) / 2
+        c, s = np.cos(params.thetas[-1]), np.sin(params.thetas[-1])
+        R = np.array(((c, -s), (s, c)))
+        normal = R @ (-1, 0)
+        chord = config.prism_height / c
+        lens_radius = chord / (2 * params.curvature)
+        center = midpt + normal * np.sqrt(lens_radius ** 2 - chord ** 2 / 4)
+        t1 = np.rad2deg(np.arctan2(prism_vertices[-1, 1] - center[1], prism_vertices[-1, 0] - center[0]))
+        t2 = np.rad2deg(np.arctan2(prism_vertices[-2, 1] - center[1], prism_vertices[-2, 0] - center[0]))
+        print(t1, t2)
+        if config.prism_count % 2 == 0:
+            t1, t2 = t2, t1
 
         prism_plt.cla()
         for i, tri in enumerate(triangles):
             poly = plt.Polygon(tri, edgecolor='k', facecolor=('gray' if i % 2 else 'white'), closed=False)
             prism_plt.add_patch(poly)
-        t1 = np.rad2deg(np.arctan2(prism_vertices[-1, 1] - c[1], prism_vertices[-1, 0] - c[0]))
-        t2 = np.rad2deg(np.arctan2(prism_vertices[-2, 1] - c[1], prism_vertices[-2, 0] - c[0]))
         arc = mpl.path.Path.arc(t1, t2)
-        arc = mpl.path.Path(arc.vertices * lradius + c, arc.codes)
+        arc = mpl.path.Path(arc.vertices * lens_radius + center, arc.codes)
         arc = mpl.patches.PathPatch(arc, fill=None)
         prism_plt.add_patch(arc)
 
@@ -203,10 +206,8 @@ def show_interactive(config: Config, solns: [Soln]):
         prism_plt.add_patch(spectro)
 
         for w, color in zip((config.wmin, (config.wmin + config.wmax) / 2, config.wmax), ('r', 'g', 'b')):
-            y = params.y_mean
-            # for y in (params.y_mean, params.y_mean + config.beam_width / config.prism_height, params.y_mean - config.beam_width / config.prism_height):
             try:
-                ray = np.stack(tuple(trace(w, y, config, params)), axis=0)
+                ray = np.stack(tuple(trace(w, params.y_mean, config, params)), axis=0)
                 poly = plt.Polygon(ray, closed=None, fill=None, edgecolor=color)
                 prism_plt.add_patch(poly)
             except RayTraceError:
@@ -301,7 +302,7 @@ if __name__ == "__main__":
     nbin = 32
     l = np.arange(nbin) + 0.1
     u = np.arange(nbin) + 0.9
-    bounds = np.stack((l, u), axis=1)
+    bounds = np.stack((l, u), axis=1) / 10
     config = Config(
         prism_count=3,
         wmin=0.5,

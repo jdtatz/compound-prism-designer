@@ -51,11 +51,7 @@ impl<N: RealField> Glass<N> {
             Glass::Sellmeier1(cd) => {
                 let &[b1, c1, b2, c2, b3, c3] = cd;
                 let w2 = w * w;
-                (N::one()
-                    + b1 * w2 / (w2 - c1)
-                    + b2 * w2 / (w2 - c2)
-                    + b3 * w2 / (w2 - c3))
-                    .sqrt()
+                (N::one() + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3)).sqrt()
             }
         }
         /*
@@ -114,8 +110,9 @@ pub fn new_catalog<N: RealField + FromStr>(
     for line in file.lines() {
         if line.starts_with("NM") {
             let nm: Vec<_> = line.split(' ').collect();
-            if let Some(_) =
-                name.replace(nm.get(1).ok_or(CatalogError::NameNotFound)?.to_uppercase())
+            if name
+                .replace(nm.get(1).ok_or(CatalogError::NameNotFound)?.to_uppercase())
+                .is_some()
             {
                 return Err(CatalogError::GlassDescriptionNotFound);
             }
@@ -132,10 +129,13 @@ pub fn new_catalog<N: RealField + FromStr>(
                         .collect::<Vec<_>>()
                 })
                 .ok_or(CatalogError::GlassDescriptionNotFound)?;
-            if let Some(_) = catalog.insert(
-                name.take().ok_or(CatalogError::NameNotFound)?,
-                Glass::new(dispform, &cd)?,
-            ) {
+            if catalog
+                .insert(
+                    name.take().ok_or(CatalogError::NameNotFound)?,
+                    Glass::new(dispform, &cd)?,
+                )
+                .is_some()
+            {
                 return Err(CatalogError::DuplicateGlass);
             }
         }
