@@ -75,6 +75,7 @@ impl Glass {
     ///
     /// # Arguments
     ///  * `w` - wavelength in micrometers
+    #[allow(clippy::many_single_char_names)]
     pub fn calc_n(&self, w: f64) -> f64 {
         match self {
             Glass::Schott(cd) => {
@@ -216,7 +217,7 @@ pub fn new_catalog(file: &str) -> Result<BTreeMap<String, Glass>, CatalogError> 
     for line in file.lines() {
         if line.starts_with("NM") {
             let mut nm = line.split(' ');
-            drop(nm.next()); // == "NM"
+            nm.next(); // == "NM"
             if name
                 .replace(nm.next().ok_or(CatalogError::NameNotFound)?)
                 .is_some()
