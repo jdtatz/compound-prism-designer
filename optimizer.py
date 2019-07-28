@@ -1,5 +1,7 @@
 from collections import namedtuple
+from os import cpu_count
 import numpy as np
+import pygmo as pg
 import prism
 from prism import RayTraceError, create_catalog, Prism, PmtArray, GaussianBeam
 
@@ -16,7 +18,7 @@ def to_params(config: Config, catalog, p: np.ndarray):
     return Params(glass_names, glasses, np.asarray(p[config.prism_count:config.prism_count * 2 + 1]), *p[-3:])
 
 
-def transmission_data(wavelengths: [float], config: Config, params: Params):
+def transmission_data(wavelengths: [float], config: Config, params: Params, det):
     return np.array(
         prism.transmission(
             wavelengths,
@@ -38,6 +40,7 @@ def transmission_data(wavelengths: [float], config: Config, params: Params):
                 y_mean=params.y_mean,
                 w_range=(config.wmin, config.wmax),
             ),
+            det
         )
     )
 
@@ -67,7 +70,7 @@ def spectrometer_position(config: Config, params: Params):
     )
 
 
-def trace(wavelength: float, initial_y: float, config: Config, params: Params):
+def trace(wavelength: float, initial_y: float, config: Config, params: Params, det):
     return prism.trace(
         wavelength,
         initial_y,
@@ -84,11 +87,7 @@ def trace(wavelength: float, initial_y: float, config: Config, params: Params):
             angle=params.spec_angle,
             length=config.spec_length
         ),
-        GaussianBeam(
-            width=config.beam_width,
-            y_mean=params.y_mean,
-            w_range=(config.wmin, config.wmax),
-        ),
+        det
     )
 
 
@@ -170,7 +169,7 @@ def show_interactive(config: Config, solns: [Soln]):
         text_ax.axis('scaled')
         text_ax.axis('off')
 
-        spec_pos, spec_dir = spectrometer_position(config, params)
+        spec_pos, spec_dir = det = spectrometer_position(config, params)
         spec_end = spec_pos + spec_dir * config.spec_length
 
         prism_vertices = np.empty((config.prism_count + 2, 2))
@@ -189,7 +188,6 @@ def show_interactive(config: Config, solns: [Soln]):
         center = midpt + normal * np.sqrt(lens_radius ** 2 - chord ** 2 / 4)
         t1 = np.rad2deg(np.arctan2(prism_vertices[-1, 1] - center[1], prism_vertices[-1, 0] - center[0]))
         t2 = np.rad2deg(np.arctan2(prism_vertices[-2, 1] - center[1], prism_vertices[-2, 0] - center[0]))
-        print(t1, t2)
         if config.prism_count % 2 == 0:
             t1, t2 = t2, t1
 
@@ -207,7 +205,7 @@ def show_interactive(config: Config, solns: [Soln]):
 
         for w, color in zip((config.wmin, (config.wmin + config.wmax) / 2, config.wmax), ('r', 'g', 'b')):
             try:
-                ray = np.stack(tuple(trace(w, params.y_mean, config, params)), axis=0)
+                ray = np.stack(tuple(trace(w, params.y_mean, config, params, det)), axis=0)
                 poly = plt.Polygon(ray, closed=None, fill=None, edgecolor=color)
                 prism_plt.add_patch(poly)
             except RayTraceError:
@@ -228,7 +226,7 @@ def show_interactive(config: Config, solns: [Soln]):
         trans_plt.set_ylim(0, 100)
 
         waves = np.linspace(config.wmin, config.wmax, 100)
-        ts = transmission_data(waves, config, params)
+        ts = transmission_data(waves, config, params, det)
         p_det = ts.sum(axis=1) * (1 / len(waves))
         p_w_l_D = ts.sum(axis=0)
         vpstats = [
@@ -294,61 +292,26 @@ class PrismProblem:
 
 if __name__ == "__main__":
     with open("catalog.agf") as f:
-        contents = f.read()
-    catalog = create_catalog(contents)
+        catalog = create_catalog(f.read())
 
-    gnames, gvalues = zip(*catalog.items())
-
-    nbin = 32
-    l = np.arange(nbin) + 0.1
-    u = np.arange(nbin) + 0.9
-    bounds = np.stack((l, u), axis=1) / 10
+    nbins = 32
+    bounds = np.stack((np.arange(nbins) + 0.1, np.arange(nbins) + 0.9), axis=1) / 10
     config = Config(
         prism_count=3,
         wmin=0.5,
         wmax=0.82,
-        prism_height=1.5,
+        prism_height=2.5,
         prism_width=0.7,
         spec_length=3.2,
         spec_min_ci=np.cos(np.deg2rad(60)),
-        beam_width=0.4,
+        beam_width=0.2,
         bounds=bounds
     )
 
-    """
-    from platypus import Problem, Real
-    import platypus
-
-    def fitness(p):
-        try:
-            size, info = fitness(config, to_params(p))
-            return (size, info), [0 if size < 40 else 1]
-        except prism.RayTraceError:
-            return [1e6] * 2, [1]
-
-    n_params = nprism * 2 + 4
-    n_objectives = 2
-    n_constraints = 1
-    problem = Problem(n_params, n_objectives, n_constraints)
-    problem.types[:nprism] = Real(0, len(catalog))
-    l, u = np.deg2rad(0), np.deg2rad(90)
-    problem.types[nprism:2*nprism+1] = [Real(l, u) if i % 2 else Real(-u, -l) for i in range(nprism + 1)]
-    sac = np.deg2rad(60)
-    problem.types[2*nprism+1:] = Real(0.2, 1.0), Real(0, 1), Real(-sac, sac)
-    problem.constraints[:] = "==0"
-    problem.function = fitness
-
-    algorithm = platypus.NSGAII(problem, 100000)
-    algorithm.run(1000)
-
-    solutions = [s.objectives for s in algorithm.result if s.feasible]
-
-    """
-    import pygmo as pg
-
     prob = pg.problem(PrismProblem(config, catalog))
     algo = pg.algorithm(pg.nsga2(gen=1000))
-    archi = pg.archipelago(16, algo=algo, prob=prob, pop_size=48)
+    count = cpu_count()
+    archi = pg.archipelago(count, algo=algo, prob=prob, pop_size=6 * count)
     archi.evolve()
     archi.wait_check()
     solutions = [Soln(params=to_params(config, catalog, p), objectives=o) for isl in archi for (p, o) in zip(isl.get_population().get_x(), isl.get_population().get_f())]
@@ -356,14 +319,3 @@ if __name__ == "__main__":
     print(len(solutions))
 
     show_interactive(config, solutions)
-
-
-'''
-Prism (N-LAF34, N-SF11, P-SK57)
-	angles: -10.9, 76.48, -46.55, 8.042
-	y_mean: 0.507
-	curvature: 0.1015
-	spectrometer angle: 33.76
-	objectives: (size=34.67, info: 4.114, deviation: 1.553)
-
-'''

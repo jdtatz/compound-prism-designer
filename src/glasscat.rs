@@ -1,8 +1,7 @@
-use alga::general::RealField;
-use core::convert::TryInto;
-use core::str::FromStr;
+use arrayvec::ArrayVec;
 use std::collections::BTreeMap;
 
+#[repr(u8)]
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
     NameNotFound,
@@ -15,124 +14,230 @@ pub enum CatalogError {
 
 impl std::error::Error for CatalogError {}
 
+/// Glass parametrization structure based off empirical glass dispersion formulae
+/// The variant name is which glass dispersion formula it's parameterized by
+/// The field of each variant is the array of coefficients that parameterize the glass
+///
+/// Glass Dispersion Formulae Source:
+/// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
 #[derive(Debug, Clone, Copy)]
-pub enum Glass<N> {
-    Schott([N; 6]),
-    Sellmeier1([N; 6]),
+pub enum Glass {
+    Schott([f64; 6]),
+    Sellmeier1([f64; 6]),
+    Sellmeier2([f64; 5]),
+    Sellmeier3([f64; 8]),
+    Sellmeier4([f64; 5]),
+    Sellmeier5([f64; 10]),
+    Herzberger([f64; 6]),
+    Conrady([f64; 3]),
+    HandbookOfOptics1([f64; 4]),
+    HandbookOfOptics2([f64; 4]),
+    Extended([f64; 8]),
+    Extended2([f64; 8]),
+    Extended3([f64; 9]),
 }
 
-impl<N: RealField> Glass<N> {
-    pub fn new(form: i32, cd: &[N]) -> Result<Self, CatalogError> {
-        macro_rules! slice_to_arr {
-            ($n:literal) => {
-                cd.get(..$n)
-                    .and_then(|s| s.try_into().ok())
-                    .ok_or(CatalogError::InvalidGlassDescription)?
+impl Glass {
+    /// Create Glass parametrization structure
+    ///
+    /// # Arguments
+    ///  * `num` - dispersion formula number
+    ///  * `cd` - dispersion formula coefficients
+    pub fn new(num: i32, cd: impl IntoIterator<Item = f64>) -> Result<Self, CatalogError> {
+        macro_rules! iter_to_arr {
+            () => {
+                cd.into_iter()
+                    .collect::<ArrayVec<_>>()
+                    .into_inner()
+                    .map_err(|_| CatalogError::InvalidGlassDescription)?
             };
         }
-        Ok(match form {
-            1 => Glass::Schott(slice_to_arr!(6)),
-            2 => Glass::Sellmeier1(slice_to_arr!(6)),
+        Ok(match num {
+            1 => Glass::Schott(iter_to_arr!()),
+            2 => Glass::Sellmeier1(iter_to_arr!()),
+            3 => Glass::Herzberger(iter_to_arr!()),
+            4 => Glass::Sellmeier2(iter_to_arr!()),
+            5 => Glass::Conrady(iter_to_arr!()),
+            6 => Glass::Sellmeier3(iter_to_arr!()),
+            7 => Glass::HandbookOfOptics1(iter_to_arr!()),
+            8 => Glass::HandbookOfOptics2(iter_to_arr!()),
+            9 => Glass::Sellmeier4(iter_to_arr!()),
+            10 => Glass::Extended(iter_to_arr!()),
+            11 => Glass::Sellmeier5(iter_to_arr!()),
+            12 => Glass::Extended2(iter_to_arr!()),
+            // Unsure if Extended3 's # is 13
+            13 => Glass::Extended3(iter_to_arr!()),
             _ => return Err(CatalogError::UnknownGlassType),
         })
     }
 
-    pub fn calc_n(&self, w: N) -> N {
-        // wavelength must be in micrometers
+    /// Return the index of refraction of the glass for the given wavelength
+    ///
+    /// # Arguments
+    ///  * `w` - wavelength in micrometers
+    pub fn calc_n(&self, w: f64) -> f64 {
         match self {
             Glass::Schott(cd) => {
-                let &[c1, c2, c3, c4, c5, c6] = cd;
+                let &[a0, a1, a2, a3, a4, a5] = cd;
                 let w2 = w * w;
                 let w4 = w2 * w2;
                 let w6 = w2 * w4;
                 let w8 = w2 * w6;
-                (c1 + c2 * w2 + c3 / w2 + c4 / w4 + c5 / w6 + c6 / w8).sqrt()
+                (a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8).sqrt()
             }
             Glass::Sellmeier1(cd) => {
                 let &[b1, c1, b2, c2, b3, c3] = cd;
                 let w2 = w * w;
-                (N::one() + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3)).sqrt()
+                (1_f64 + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3)).sqrt()
+            }
+            Glass::Sellmeier2(cd) => {
+                let &[a, b1, l1, b2, l2] = cd;
+                let w2 = w * w;
+                let l1 = l1 * l1;
+                let l2 = l2 * l2;
+                (1_f64 + a + b1 * w2 / (w2 - l1) + b2 / (w2 - l2)).sqrt()
+            }
+            Glass::Sellmeier3(cd) => {
+                let &[k1, l1, k2, l2, k3, l3, k4, l4] = cd;
+                let w2 = w * w;
+                (1_f64
+                    + k1 * w2 / (w2 - l1)
+                    + k2 * w2 / (w2 - l2)
+                    + k3 * w2 / (w2 - l3)
+                    + k4 * w2 / (w2 - l4))
+                    .sqrt()
+            }
+            Glass::Sellmeier4(cd) => {
+                let &[a, b, c, d, e] = cd;
+                let w2 = w * w;
+                (a + b * w2 / (w2 - c) + d * w2 / (w2 - e)).sqrt()
+            }
+            Glass::Sellmeier5(cd) => {
+                let &[k1, l1, k2, l2, k3, l3, k4, l4, k5, l5] = cd;
+                let w2 = w * w;
+                (1_f64
+                    + k1 * w2 / (w2 - l1)
+                    + k2 * w2 / (w2 - l2)
+                    + k3 * w2 / (w2 - l3)
+                    + k4 * w2 / (w2 - l4)
+                    + k5 * w2 / (w2 - l5))
+                    .sqrt()
+            }
+            Glass::Herzberger(cd) => {
+                let &[a, b, c, d, e, f] = cd;
+                let w2 = w * w;
+                let w4 = w2 * w2;
+                let w6 = w2 * w4;
+                let l = 1_f64 / (w2 - 0.028_f64);
+                let l2 = l * l;
+                a + b * l + c * l2 + d * w2 + e * w4 + f * w6
+            }
+            Glass::Conrady(cd) => {
+                let &[n0, a, b] = cd;
+                n0 + a / w + b / w.powf(3.5)
+            }
+            Glass::HandbookOfOptics1(cd) => {
+                let &[a, b, c, d] = cd;
+                let w2 = w * w;
+                (a + b / (w2 - c) - d * w2).sqrt()
+            }
+            Glass::HandbookOfOptics2(cd) => {
+                let &[a, b, c, d] = cd;
+                let w2 = w * w;
+                (a + b * w2 / (w2 - c) - d * w2).sqrt()
+            }
+            Glass::Extended(cd) => {
+                let &[a0, a1, a2, a3, a4, a5, a6, a7] = cd;
+                let w2 = w * w;
+                let w4 = w2 * w2;
+                let w6 = w2 * w4;
+                let w8 = w2 * w6;
+                let w10 = w2 * w8;
+                let w12 = w2 * w10;
+                (a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 / w10 + a7 / w12).sqrt()
+            }
+            Glass::Extended2(cd) => {
+                let &[a0, a1, a2, a3, a4, a5, a6, a7] = cd;
+                let w2 = w * w;
+                let w4 = w2 * w2;
+                let w6 = w2 * w4;
+                let w8 = w2 * w6;
+                (a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 * w4 + a7 * w6).sqrt()
+            }
+            Glass::Extended3(cd) => {
+                let &[a0, a1, a2, a3, a4, a5, a6, a7, a8] = cd;
+                let w2 = w * w;
+                let w4 = w2 * w2;
+                let w6 = w2 * w4;
+                let w8 = w2 * w6;
+                let w10 = w2 * w8;
+                let w12 = w2 * w10;
+                (a0 + a1 * w2
+                    + a2 * w4
+                    + a3 / w2
+                    + a4 / w4
+                    + a5 / w6
+                    + a6 / w8
+                    + a7 / w10
+                    + a8 / w12)
+                    .sqrt()
             }
         }
-        /*
-        formula_rhs = 0
-        if dispform == 1:
-            formula_rhs = cd[0] + cd[1] * w ** 2 + cd[2] * w ** -2 + cd[3] * w ** -4 + cd[4] * w ** -6 + cd[5] * w ** -8
-        elif dispform == 2:  # Sellmeier1
-            formula_rhs = 1.0 + cd[0] * w ** 2 / (w ** 2 - cd[1]) + cd[2] * w ** 2 / (w ** 2 - cd[3]) + \
-                          cd[4] * w ** 2 / (w ** 2 - cd[5])
-        elif dispform == 3:  # Herzberger
-            L = 1.0 / (w ** 2 - 0.028)
-            return cd[0] + cd[1] * L + cd[2] * L ** 2 + cd[3] * w ** 2 + cd[4] * w ** 4 + cd[5] * w ** 6
-        elif dispform == 4:  # Sellmeier2
-            formula_rhs = 1.0 + cd[0] + cd[1] * w ** 2 / (w ** 2 - cd[2] ** 2) + cd[3] * w ** 2 / (w ** 2 - cd[4] ** 2)
-        elif dispform == 5:  # Conrady
-            return cd[0] + cd[1] / w + cd[2] / w ** 3.5
-        elif dispform == 6:  # Sellmeier3
-            formula_rhs = 1.0 + cd[0] * w ** 2 / (w ** 2 - cd[1]) + cd[2] * w ** 2 / (w ** 2 - cd[3]) + \
-                          cd[4] * w ** 2 / (w ** 2 - cd[5]) + cd[6] * w ** 2 / (w ** 2 - cd[7])
-        elif dispform == 7:  # HandbookOfOptics1
-            formula_rhs = cd[0] + cd[1] / (w ** 2 - cd[2]) - cd[3] * w ** 2
-        elif dispform == 8:  # HandbookOfOptics2
-            formula_rhs = cd[0] + cd[1] * w ** 2 / (w ** 2 - cd[2]) - cd[3] * w ** 2
-        elif dispform == 9:  # Sellmeier4
-            formula_rhs = cd[0] + cd[1] * w ** 2 / (w ** 2 - cd[2]) + cd[3] * w ** 2 / (w ** 2 - cd[4])
-        elif dispform == 10:  # Extended1
-            formula_rhs = cd[0] + cd[1] * w ** 2 + cd[2] * w ** -2 + cd[3] * w ** -4 + cd[4] * w ** -6 + \
-                          cd[5] * w ** -8 + cd[6] * w ** -10 + cd[7] * w ** -12
-        elif dispform == 11:  # Sellmeier5
-            formula_rhs = 1.0 + cd[0] * w ** 2 / (w ** 2 - cd[1]) + cd[2] * w ** 2 / (w ** 2 - cd[3]) + \
-                          cd[4] * w ** 2 / (w ** 2 - cd[5]) + cd[6] * w ** 2 / (w ** 2 - cd[7]) + \
-                          cd[8] * w ** 2 / (w ** 2 - cd[9])
-        elif dispform == 12:  # Extended2
-            formula_rhs = cd[0] + cd[1] * w ** 2 + cd[2] * w ** -2 + cd[3] * w ** -4 + \
-                          cd[4] * w ** -6 + cd[5] * w ** -8 + cd[6] * w ** 4 + cd[7] * w ** 6
-        return np.sqrt(formula_rhs)
-            */
     }
 }
 
-impl<'a, N: RealField> Into<(i32, &'a [N])> for &'a Glass<N> {
-    fn into(self) -> (i32, &'a [N]) {
+/// Break down a Glass parametrization structure
+/// into its dispersion formula number and coefficients
+impl<'g> Into<(i32, &'g [f64])> for &'g Glass {
+    fn into(self) -> (i32, &'g [f64]) {
         match self {
             Glass::Schott(cd) => (1, cd.as_ref()),
             Glass::Sellmeier1(cd) => (2, cd.as_ref()),
+            Glass::Herzberger(cd) => (3, cd.as_ref()),
+            Glass::Sellmeier2(cd) => (4, cd.as_ref()),
+            Glass::Conrady(cd) => (5, cd.as_ref()),
+            Glass::Sellmeier3(cd) => (6, cd.as_ref()),
+            Glass::HandbookOfOptics1(cd) => (7, cd.as_ref()),
+            Glass::HandbookOfOptics2(cd) => (8, cd.as_ref()),
+            Glass::Sellmeier4(cd) => (9, cd.as_ref()),
+            Glass::Extended(cd) => (10, cd.as_ref()),
+            Glass::Sellmeier5(cd) => (11, cd.as_ref()),
+            Glass::Extended2(cd) => (12, cd.as_ref()),
+            Glass::Extended3(cd) => (13, cd.as_ref()),
         }
     }
 }
 
-pub fn new_catalog<N: RealField + FromStr>(
-    file: &str,
-) -> Result<BTreeMap<String, Glass<N>>, CatalogError> {
+/// Create glass catalog from .agf file
+pub fn new_catalog(file: &str) -> Result<BTreeMap<String, Glass>, CatalogError> {
     let mut catalog = BTreeMap::new();
     let mut name = None;
     let mut dispform: i32 = -1;
     for line in file.lines() {
         if line.starts_with("NM") {
-            let nm: Vec<_> = line.split(' ').collect();
+            let mut nm = line.split(' ');
+            drop(nm.next()); // == "NM"
             if name
-                .replace(nm.get(1).ok_or(CatalogError::NameNotFound)?.to_uppercase())
+                .replace(nm.next().ok_or(CatalogError::NameNotFound)?)
                 .is_some()
             {
                 return Err(CatalogError::GlassDescriptionNotFound);
             }
             dispform = nm
-                .get(2)
+                .next()
                 .and_then(|d| d.parse().ok())
                 .ok_or(CatalogError::GlassTypeNotFound)?;
         } else if line.starts_with("CD") {
             let cd = line
                 .get(2..)
-                .map(|l| {
-                    l.split(' ')
-                        .filter_map(|s| s.parse().ok())
-                        .collect::<Vec<_>>()
-                })
+                .map(|l| l.split(' ').filter_map(|s| s.parse().ok()))
                 .ok_or(CatalogError::GlassDescriptionNotFound)?;
             if catalog
                 .insert(
-                    name.take().ok_or(CatalogError::NameNotFound)?,
-                    Glass::new(dispform, &cd)?,
+                    name.take()
+                        .ok_or(CatalogError::NameNotFound)?
+                        .to_uppercase(),
+                    Glass::new(dispform, cd)?,
                 )
                 .is_some()
             {
