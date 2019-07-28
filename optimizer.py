@@ -1,7 +1,9 @@
 from collections import namedtuple
 from os import cpu_count
+from sys import argv
 import numpy as np
 import pygmo as pg
+import toml
 import prism
 from prism import RayTraceError, create_catalog, Prism, PmtArray, GaussianBeam
 
@@ -117,7 +119,7 @@ def fitness(config: Config, params: Params):
         return [1e6 * config.prism_height] * nobjective
 
 
-def show_interactive(config: Config, solns: [Soln]):
+def show_interactive(config: Config, solns: [Soln], units: str):
     import matplotlib as mpl
     import matplotlib.path
     import matplotlib.patches
@@ -133,7 +135,7 @@ def show_interactive(config: Config, solns: [Soln]):
     sc = objectives_plt.scatter(x, y, c=c, cmap="viridis", picker=True)
     clb = fig.colorbar(sc)
     clb.ax.set_ylabel("deviation (deg)")
-    objectives_plt.set_xlabel("size")
+    objectives_plt.set_xlabel(f"size ({units})")
     objectives_plt.set_ylabel("mutual information (bits)")
     # ax.set_zlabel("deviation (deg)")
     """
@@ -157,11 +159,11 @@ def show_interactive(config: Config, solns: [Soln]):
         params = soln.params
         size, ninfo, dev = soln.objectives
         display = f"""Prism ({', '.join(params.glass_names)})
-        angles: {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.thetas)}
-        y_mean: {params.y_mean:.4}
+        angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.thetas)}
+        y_mean ({units}): {params.y_mean:.4}
         curvature: {params.curvature:.4}
-        spectrometer angle: {np.rad2deg(params.spec_angle):.4}
-        objectives: (size={size:.4}, info: {-ninfo:.4}, deviation: {np.rad2deg(np.arcsin(dev)):.4})"""
+        spectrometer angle (deg): {np.rad2deg(params.spec_angle):.4}
+        objectives: (size={size:.4} ({units}), info: {-ninfo:.4} (bits), deviation: {np.rad2deg(np.arcsin(dev)):.4} (deg))"""
         print(display)
         text_ax.cla()
         text_ax.text(0, 0.5, display, horizontalalignment='left', verticalalignment='center',
@@ -217,7 +219,7 @@ def show_interactive(config: Config, solns: [Soln]):
         det_plt.cla()
         trans_plt.cla()
         violin_plt.cla()
-        det_plt.set_xlabel("normalized bin bounds")
+        det_plt.set_xlabel("bins")
         trans_plt.set_xlabel("wavelength (μm)")
         det_plt.set_ylabel("p (%)")
         trans_plt.set_ylabel("p (%)")
@@ -291,31 +293,40 @@ class PrismProblem:
 
 
 if __name__ == "__main__":
-    with open("catalog.agf") as f:
+    toml_file = argv[1] if len(argv) > 1 else "design_config.toml"
+    toml_spec = toml.load(toml_file)
+    catalog_path = toml_spec["catalog-path"]
+    with open(catalog_path) as f:
         catalog = create_catalog(f.read())
+    units = toml_spec.get("length-unit", "a.u.")
 
-    nbins = 32
-    bounds = np.stack((np.arange(nbins) + 0.1, np.arange(nbins) + 0.9), axis=1) / 10
     config = Config(
-        prism_count=3,
-        wmin=0.5,
-        wmax=0.82,
-        prism_height=2.5,
-        prism_width=0.7,
-        spec_length=3.2,
-        spec_min_ci=np.cos(np.deg2rad(60)),
-        beam_width=0.2,
-        bounds=bounds
+        prism_count=toml_spec["compound-prism"]["count"],
+        prism_height=toml_spec["compound-prism"]["height"],
+        prism_width=toml_spec["compound-prism"]["width"],
+        beam_width=toml_spec["gaussian-beam"]["width"],
+        wmin=toml_spec["gaussian-beam"]["wmin"],
+        wmax=toml_spec["gaussian-beam"]["wmax"],
+        spec_length=toml_spec["detector-array"]["length"],
+        spec_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"]["max-incident-angle"])),
+        bounds=np.array(toml_spec["detector-array"]["bounds"])
     )
 
+    opt_dict = {"iteration-count": 1000, "thread-count": 0, "pop-size": 20, **toml_spec.get("optimizer", {})}
+    iter_count = max(opt_dict["iteration-count"], 1)
+    thread_count = opt_dict["thread-count"]
+    if thread_count < 1:
+        thread_count = cpu_count()
+    pop_size = opt_dict["pop-size"]
+    if pop_size < 5 or pop_size % 4 != 0:
+        pop_size = max(8, pop_size + 4 - pop_size % 4)
     prob = pg.problem(PrismProblem(config, catalog))
-    algo = pg.algorithm(pg.nsga2(gen=1000))
-    count = cpu_count()
-    archi = pg.archipelago(count, algo=algo, prob=prob, pop_size=6 * count)
+    algo = pg.algorithm(pg.nsga2(gen=iter_count))
+    archi = pg.archipelago(thread_count, algo=algo, prob=prob, pop_size=pop_size)
     archi.evolve()
     archi.wait_check()
     solutions = [Soln(params=to_params(config, catalog, p), objectives=o) for isl in archi for (p, o) in zip(isl.get_population().get_x(), isl.get_population().get_f())]
 
     print(len(solutions))
 
-    show_interactive(config, solutions)
+    show_interactive(config, solutions, units)

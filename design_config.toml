@@ -1,0 +1,72 @@
+# Path to glass catalog file
+catalog-path = "catalog.agf"
+# The unit of legth, such as cm or in, (Optional, default="a.u.")
+length-unit = "mm"
+
+# Genetic algorithm(NSAGII) optimizer properties (Optional)
+[optimizer]
+# Number of times to evolve the optimization population (Optional, default=1000)
+iteration-count = 1000
+# Number of threads to use (Optional), if not givent or < 1, then will use maximum
+thread-count = 0
+# For each thread, the number of candiatie solutions to be used / evolved
+# Must be > 5 and a multiple of 4, (Optional, default=20), will round up if conditions not met
+pop-size = 40
+
+# Compound prism design specification
+[compound-prism]
+# Number of prisms to use in design
+count = 3
+# Height of the prisms in mm
+height = 25
+# Width of the prisms in mm
+width = 7
+
+# Incoming gaussian beam properties
+[gaussian-beam]
+# 1/e^2 beam width
+width = 4
+# Minimum wavelength
+wmin = 0.5
+# Maximum wavelength
+wmax = 0.82
+
+# Detector array properties
+[detector-array]
+# Total length of array
+length = 32
+# Maximum accepted incident angle
+max-incident-angle = 60
+# Boundries of the detector bins in the array, an Nx2 list
+bounds = [[ 0.1,  0.9],
+        [ 1.1,  1.9],
+        [ 2.1,  2.9],
+        [ 3.1,  3.9],
+        [ 4.1,  4.9],
+        [ 5.1,  5.9],
+        [ 6.1,  6.9],
+        [ 7.1,  7.9],
+        [ 8.1,  8.9],
+        [ 9.1,  9.9],
+        [10.1, 10.9],
+        [11.1, 11.9],
+        [12.1, 12.9],
+        [13.1, 13.9],
+        [14.1, 14.9],
+        [15.1, 15.9],
+        [16.1, 16.9],
+        [17.1, 17.9],
+        [18.1, 18.9],
+        [19.1, 19.9],
+        [20.1, 20.9],
+        [21.1, 21.9],
+        [22.1, 22.9],
+        [23.1, 23.9],
+        [24.1, 24.9],
+        [25.1, 25.9],
+        [26.1, 26.9],
+        [27.1, 27.9],
+        [28.1, 28.9],
+        [29.1, 29.9],
+        [30.1, 30.9],
+        [31.1, 31.9]]
