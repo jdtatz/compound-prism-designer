@@ -1,0 +1,18 @@
+[package]
+name = "prism"
+version = "0.1.0"
+authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+derive_more = { version = "0.15.0", features = ["no_std"]}
+libm = "0.1.4"
+arrayvec = { version = "0.4.11", default-features = false, features = ["array-sizes-33-128"] }
+cpython = { version = "0.2.1", features = ["extension-module"]}
+
+[profile.release]
+opt-level=3
+lto=true
