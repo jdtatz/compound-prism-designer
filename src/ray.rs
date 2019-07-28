@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::glasscat::Glass;
 use crate::quad::{Quadrature, KR21};
 
@@ -55,7 +56,7 @@ fn rotate(angle: f64, vector: Pair) -> Pair {
 }
 
 /// Collimated Polychromatic Gaussian Beam
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GaussianBeam {
     /// 1/e^2 beam width
     pub width: f64,
@@ -66,12 +67,12 @@ pub struct GaussianBeam {
 }
 
 /// Compound Prism Specification
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CompoundPrism<'a> {
     /// List of glasses the compound prism is composed of, in order
-    pub glasses: &'a [Glass],
+    pub glasses: Cow<'a, [Glass]>,
     /// Angles that parameterize the shape of the compound prism
-    pub angles: &'a [f64],
+    pub angles: Cow<'a, [f64]>,
     /// Lens Curvature of last surface of compound prism
     pub curvature: f64,
     /// Height of compound prism
@@ -81,10 +82,10 @@ pub struct CompoundPrism<'a> {
 }
 
 /// Array of detectors
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct DetectorArray<'a> {
     /// Boundaries of detection bins
-    pub bins: &'a [[f64; 2]],
+    pub bins: Cow<'a, [[f64; 2]]>,
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     pub min_ci: f64,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
@@ -232,7 +233,7 @@ impl Ray {
     ///  * `detpos` - the position and orientation of the detector array
     fn intersect_detector_array(
         self,
-        detarr: DetectorArray,
+        detarr: &DetectorArray,
         detpos: DetectorArrayPositioning,
     ) -> Result<(f64, f64), RayTraceError> {
         let normal = rotate(detarr.angle, (-1_f64, 0_f64).into());
@@ -259,10 +260,10 @@ impl Ray {
     ///  * `wavelength` - the wavelength of the light ray
     fn propagate_internal(
         self,
-        prism: CompoundPrism,
+        prism: &CompoundPrism,
         wavelength: f64,
     ) -> Result<Ray, RayTraceError> {
-        let (ray, n1, vertex) = prism.glasses.iter().zip(prism.angles).try_fold(
+        let (ray, n1, vertex) = prism.glasses.iter().zip(prism.angles.iter()).try_fold(
             (self, 1_f64, Pair::ZERO),
             |(ray, n1, vertex), (glass, angle)| {
                 let n2 = glass.calc_n(wavelength);
@@ -303,8 +304,8 @@ impl Ray {
     fn propagate(
         self,
         wavelength: f64,
-        prism: CompoundPrism,
-        detarr: DetectorArray,
+        prism: &CompoundPrism,
+        detarr: &DetectorArray,
         detpos: DetectorArrayPositioning,
     ) -> Result<(f64, f64), RayTraceError> {
         self.propagate_internal(prism, wavelength)?
@@ -323,12 +324,12 @@ impl Ray {
     fn trace(
         self,
         wavelength: f64,
-        prism: CompoundPrism,
-        detarr: DetectorArray,
+        prism: &CompoundPrism,
+        detarr: &DetectorArray,
         detpos: DetectorArrayPositioning,
     ) -> Result<Vec<Pair>, RayTraceError> {
         let mut traced = Vec::new();
-        let (ray, n1, vertex) = prism.glasses.iter().zip(prism.angles).try_fold(
+        let (ray, n1, vertex) = prism.glasses.iter().zip(prism.angles.iter()).try_fold(
             (self, 1_f64, Pair::ZERO),
             |(ray, n1, vertex), (glass, angle)| {
                 traced.push(ray.origin);
@@ -380,9 +381,9 @@ impl Ray {
 ///  * `detarr` - detector array specification
 ///  * `detarr` - input gaussian beam specification
 pub fn detector_array_positioning(
-    prism: CompoundPrism,
-    detarr: DetectorArray,
-    beam: GaussianBeam,
+    prism: &CompoundPrism,
+    detarr: &DetectorArray,
+    beam: &GaussianBeam,
 ) -> Result<DetectorArrayPositioning, RayTraceError> {
     let ray = Ray {
         origin: (0_f64, beam.y_mean).into(),
@@ -431,9 +432,9 @@ pub fn detector_array_positioning(
 ///  * `detpos` - the position and orientation of the detector array
 fn p_dets_l_wavelength(
     wavelength: f64,
-    prism: CompoundPrism,
-    detarr: DetectorArray,
-    beam: GaussianBeam,
+    prism: &CompoundPrism,
+    detarr: &DetectorArray,
+    beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
 ) -> Vec<f64> {
     let mut p_det_l_ws = vec![0_f64; detarr.bins.len()];
@@ -463,7 +464,7 @@ fn p_dets_l_wavelength(
                 debug_assert!(t.is_finite());
                 debug_assert!(0. <= t && t <= 1.);
                 let pdf = t * g_y * integration_factor;
-                for (p_det_l_w, &[l, u]) in p_det_l_ws.iter_mut().zip(detarr.bins) {
+                for (p_det_l_w, &[l, u]) in p_det_l_ws.iter_mut().zip(detarr.bins.iter()) {
                     if l <= pos && pos < u {
                         *p_det_l_w += pdf;
                     }
@@ -484,9 +485,9 @@ fn p_dets_l_wavelength(
 ///      - Sum(p(D=d) log2(p(D=d)), d in D)
 /// p(D=d) = Expectation_Λ(p(D=d|Λ=λ))
 fn mutual_information(
-    prism: CompoundPrism,
-    detarr: DetectorArray,
-    beam: GaussianBeam,
+    prism: &CompoundPrism,
+    detarr: &DetectorArray,
+    beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
 ) -> f64 {
     let nbins = detarr.bins.len();
@@ -532,8 +533,8 @@ fn mutual_information(
 pub fn trace(
     wavelength: f64,
     init_y: f64,
-    prism: CompoundPrism,
-    detarr: DetectorArray,
+    prism: &CompoundPrism,
+    detarr: &DetectorArray,
     detpos: DetectorArrayPositioning,
 ) -> Result<Vec<Pair>, RayTraceError> {
     let ray = Ray {
@@ -548,16 +549,16 @@ pub fn trace(
 /// { { p(D=d|Λ=λ) : λ in `wavelengths` } : d in D }
 ///
 /// # Arguments
-///  * `wavelengths` - the compound prism specification
+///  * `wavelengths` - the wavelengths to find the transmission probabilities of
 ///  * `prism` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 ///  * `detpos` - the position and orientation of the detector array
 pub fn transmission(
     wavelengths: &[f64],
-    prism: CompoundPrism,
-    detarr: DetectorArray,
-    beam: GaussianBeam,
+    prism: &CompoundPrism,
+    detarr: &DetectorArray,
+    beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
 ) -> Vec<Vec<f64>> {
     let mut ts = vec![vec![0_f64; wavelengths.len()]; detarr.bins.len()];
@@ -581,9 +582,9 @@ pub fn transmission(
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 pub fn fitness(
-    prism: CompoundPrism,
-    detarr: DetectorArray,
-    beam: GaussianBeam,
+    prism: &CompoundPrism,
+    detarr: &DetectorArray,
+    beam: &GaussianBeam,
 ) -> Result<[f64; 3], RayTraceError> {
     let detpos = detector_array_positioning(prism, detarr, beam)?;
     let deviation_vector = detpos.pos + detpos.dir * detarr.length * 0.5 - (0., beam.y_mean).into();
@@ -647,8 +648,8 @@ mod tests {
         let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
         let prism = CompoundPrism {
-            glasses: &glasses,
-            angles: &angles,
+            glasses: std::borrow::Cow::Borrowed(&glasses),
+            angles: std::borrow::Cow::Borrowed(&angles),
             curvature: 0.21,
             height: 2.5,
             width: 2.,
@@ -662,7 +663,7 @@ mod tests {
         let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (60_f64).to_radians();
         let detarr = DetectorArray {
-            bins: &bins,
+            bins: std::borrow::Cow::Borrowed(&bins),
             min_ci: spec_max_accepted_angle.cos(),
             angle: 0.,
             length: pmt_length,
@@ -674,7 +675,7 @@ mod tests {
             w_range: (0.5, 0.82),
         };
 
-        let v = fitness(prism, detarr, beam).expect("Merit function failed");
+        let v = fitness(&prism, &detarr, &beam).expect("Merit function failed");
         assert!(
             approx_eq(v[0], 41.324065257329245, 1e-3),
             "Size is incorrect. {} ≉ 41.324",
