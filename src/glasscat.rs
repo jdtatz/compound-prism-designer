@@ -1,8 +1,8 @@
 use arrayvec::ArrayVec;
 use std::collections::BTreeMap;
+use derive_enum::Name;
 
-#[repr(u8)]
-#[derive(Debug, Display, Clone, Copy)]
+#[derive(Name, Debug, Display, Clone, Copy)]
 pub enum CatalogError {
     NameNotFound,
     GlassTypeNotFound,

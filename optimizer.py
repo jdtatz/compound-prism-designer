@@ -5,10 +5,10 @@ import numpy as np
 import pygmo as pg
 import toml
 import prism
-from prism import RayTraceError, create_catalog, Prism, PmtArray, GaussianBeam
+from prism import RayTraceError, create_catalog, Prism, DetectorArray, GaussianBeam
 
-Config = namedtuple("Config", "prism_count, wmin, wmax, prism_height, prism_width, spec_length, beam_width, spec_min_ci, bounds")
-Params = namedtuple("Params", "glass_names, glasses, thetas, curvature, y_mean, spec_angle")
+Config = namedtuple("Config", "prism_count, wmin, wmax, prism_height, prism_width, det_arr_length, beam_width, det_arr_min_ci, bounds")
+Params = namedtuple("Params", "glass_names, glasses, thetas, curvature, y_mean, det_arr_angle")
 Soln = namedtuple("Soln", "params, objectives")
 nobjective = 3
 
@@ -20,54 +20,51 @@ def to_params(config: Config, catalog, p: np.ndarray):
     return Params(glass_names, glasses, np.asarray(p[config.prism_count:config.prism_count * 2 + 1]), *p[-3:])
 
 
+def to_prism(config: Config, params: Params):
+    return Prism(
+        glasses=params.glasses,
+        angles=params.thetas,
+        curvature=params.curvature,
+        height=config.prism_height,
+        width=config.prism_width,
+    )
+
+
+def to_det_array(config: Config, params: Params):
+    return DetectorArray(
+        bins=config.bounds,
+        min_ci=config.det_arr_min_ci,
+        angle=params.det_arr_angle,
+        length=config.det_arr_length,
+    )
+
+
+def to_beam(config: Config, params: Params):
+    return GaussianBeam(
+        width=config.beam_width,
+        y_mean=params.y_mean,
+        w_range=(config.wmin, config.wmax),
+    )
+
+
 def transmission_data(wavelengths: [float], config: Config, params: Params, det):
     return np.array(
         prism.transmission(
             wavelengths,
-            Prism(
-                glasses=params.glasses,
-                angles=params.thetas,
-                curvature=params.curvature,
-                height=config.prism_height,
-                width=config.prism_width,
-            ),
-            PmtArray(
-                bins=config.bounds,
-                min_ci=config.spec_min_ci,
-                angle=params.spec_angle,
-                length=config.spec_length,
-            ),
-            GaussianBeam(
-                width=config.beam_width,
-                y_mean=params.y_mean,
-                w_range=(config.wmin, config.wmax),
-            ),
+            to_prism(config, params),
+            to_det_array(config, params),
+            to_beam(config, params),
             det
         )
     )
 
 
-def spectrometer_position(config: Config, params: Params):
+def detector_array_position(config: Config, params: Params):
     return np.array(
-        prism.spectrometer_position(
-            Prism(
-                glasses=params.glasses,
-                angles=params.thetas,
-                curvature=params.curvature,
-                height=config.prism_height,
-                width=config.prism_width,
-            ),
-            PmtArray(
-                bins=config.bounds,
-                min_ci=config.spec_min_ci,
-                angle=params.spec_angle,
-                length=config.spec_length,
-            ),
-            GaussianBeam(
-                width=config.beam_width,
-                y_mean=params.y_mean,
-                w_range=(config.wmin, config.wmax),
-            ),
+        prism.detector_array_position(
+            to_prism(config, params),
+            to_det_array(config, params),
+            to_beam(config, params),
         )
     )
 
@@ -76,19 +73,8 @@ def trace(wavelength: float, initial_y: float, config: Config, params: Params, d
     return prism.trace(
         wavelength,
         initial_y,
-        Prism(
-            glasses=params.glasses,
-            angles=params.thetas,
-            curvature=params.curvature,
-            height=config.prism_height,
-            width=config.prism_width,
-        ),
-        PmtArray(
-            bins=config.bounds,
-            min_ci=config.spec_min_ci,
-            angle=params.spec_angle,
-            length=config.spec_length
-        ),
+        to_prism(config, params),
+        to_det_array(config, params),
         det
     )
 
@@ -96,24 +82,9 @@ def trace(wavelength: float, initial_y: float, config: Config, params: Params, d
 def fitness(config: Config, params: Params):
     try:
         return prism.fitness(
-            Prism(
-                glasses=params.glasses,
-                angles=params.thetas,
-                curvature=params.curvature,
-                height=config.prism_height,
-                width=config.prism_width,
-            ),
-            PmtArray(
-                bins=config.bounds,
-                min_ci=config.spec_min_ci,
-                angle=params.spec_angle,
-                length=config.spec_length
-            ),
-            GaussianBeam(
-                width=config.beam_width,
-                y_mean=params.y_mean,
-                w_range=(config.wmin, config.wmax),
-            ),
+            to_prism(config, params),
+            to_det_array(config, params),
+            to_beam(config, params),
         )
     except RayTraceError:
         return [1e6 * config.prism_height] * nobjective
@@ -162,7 +133,7 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.thetas)}
         y_mean ({units}): {params.y_mean:.4}
         curvature: {params.curvature:.4}
-        spectrometer angle (deg): {np.rad2deg(params.spec_angle):.4}
+        spectrometer angle (deg): {np.rad2deg(params.det_arr_angle):.4}
         objectives: (size={size:.4} ({units}), info: {-ninfo:.4} (bits), deviation: {np.rad2deg(np.arcsin(dev)):.4} (deg))"""
         print(display)
         text_ax.cla()
@@ -171,8 +142,8 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         text_ax.axis('scaled')
         text_ax.axis('off')
 
-        spec_pos, spec_dir = det = spectrometer_position(config, params)
-        spec_end = spec_pos + spec_dir * config.spec_length
+        det_arr_pos, det_arr_dir = det = detector_array_position(config, params)
+        det_arr_end = det_arr_pos + det_arr_dir * config.det_arr_length
 
         prism_vertices = np.empty((config.prism_count + 2, 2))
         prism_vertices[::2, 1] = 0
@@ -202,7 +173,7 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         arc = mpl.patches.PathPatch(arc, fill=None)
         prism_plt.add_patch(arc)
 
-        spectro = plt.Polygon((spec_pos, spec_end), closed=None, fill=None, edgecolor='k')
+        spectro = plt.Polygon((det_arr_pos, det_arr_end), closed=None, fill=None, edgecolor='k')
         prism_plt.add_patch(spectro)
 
         for w, color in zip((config.wmin, (config.wmin + config.wmax) / 2, config.wmax), ('r', 'g', 'b')):
@@ -274,13 +245,13 @@ class PrismProblem:
         curvature_bounds = 0.01, 1.0
         y_mean_bounds = 0, self.config.prism_height
         sec = np.deg2rad(90)
-        spec_angle_bounds = -sec, sec
+        det_arr_angle_bounds = -sec, sec
         return tuple(zip(*[
             *glass_bounds,
             *angle_bounds,
             curvature_bounds,
             y_mean_bounds,
-            spec_angle_bounds,
+            det_arr_angle_bounds,
         ]))
 
     @staticmethod
@@ -307,8 +278,8 @@ if __name__ == "__main__":
         beam_width=toml_spec["gaussian-beam"]["width"],
         wmin=toml_spec["gaussian-beam"]["wmin"],
         wmax=toml_spec["gaussian-beam"]["wmax"],
-        spec_length=toml_spec["detector-array"]["length"],
-        spec_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"]["max-incident-angle"])),
+        det_arr_length=toml_spec["detector-array"]["length"],
+        det_arr_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"]["max-incident-angle"])),
         bounds=np.array(toml_spec["detector-array"]["bounds"])
     )
 
