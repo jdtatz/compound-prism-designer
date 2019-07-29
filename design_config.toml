@@ -17,27 +17,27 @@ pop-size = 40
 [compound-prism]
 # Number of prisms to use in design
 count = 3
-# Height of the prisms in mm
+# Height of the prisms in [length-unit]
 height = 25
-# Width of the prisms in mm
+# Width of the prisms in [length-unit]
 width = 7
 
 # Incoming gaussian beam properties
 [gaussian-beam]
-# 1/e^2 beam width
+# 1/e^2 beam width in [length-unit]
 width = 4
-# Minimum wavelength
+# Minimum wavelength in [micrometers]
 wmin = 0.5
-# Maximum wavelength
+# Maximum wavelength in [micrometers]
 wmax = 0.82
 
 # Detector array properties
 [detector-array]
-# Total length of array
+# Total length of array in [length-unit]
 length = 32
-# Maximum accepted incident angle
+# Maximum accepted incident angle in [degrees] (Optional, default=90)
 max-incident-angle = 60
-# Boundries of the detector bins in the array, an Nx2 list
+# Boundries of the detector bins in the array, an Nx2 list, in [length-unit]
 bounds = [[ 0.1,  0.9],
         [ 1.1,  1.9],
         [ 2.1,  2.9],

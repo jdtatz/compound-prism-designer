@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from collections import namedtuple
 from os import cpu_count
 from sys import argv
@@ -279,7 +280,7 @@ if __name__ == "__main__":
         wmin=toml_spec["gaussian-beam"]["wmin"],
         wmax=toml_spec["gaussian-beam"]["wmax"],
         det_arr_length=toml_spec["detector-array"]["length"],
-        det_arr_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"]["max-incident-angle"])),
+        det_arr_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"].get("max-incident-angle", 90))),
         bounds=np.array(toml_spec["detector-array"]["bounds"])
     )
 
