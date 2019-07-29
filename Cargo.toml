@@ -13,6 +13,7 @@ libm = "0.1.4"
 arrayvec = { version = "0.4.11", default-features = false, features = ["array-sizes-33-128"] }
 cpython = { version = "0.2.1", features = ["extension-module"]}
 zerocopy = "0.2.7"
+derive_enum = "0.2.2"
 
 [profile.release]
 opt-level=3

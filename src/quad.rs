@@ -19,7 +19,7 @@ pub trait Quadrature {
         let c_1 = skip / 2.;
         let mut c_2 = c_1 + a;
         for _ in 0..divisions {
-            for (x, w) in Self::X.iter().copied().zip(Self::W.iter().copied()) {
+            for (x, w) in Self::X.iter().zip(Self::W.iter()) {
                 f(c_1 * x + c_2, w * c_1);
             }
             c_2 += skip;

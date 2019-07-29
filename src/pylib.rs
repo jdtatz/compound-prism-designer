@@ -1,7 +1,8 @@
 use cpython::{
     exc, FromPyObject, ObjectProtocol, PyErr, PyObject, PyResult, Python, ToPyObject,
 };
-
+use zerocopy::{FromBytes, LayoutVerified};
+use derive_enum::Name;
 use crate::glasscat::{new_catalog, CatalogError as _CatalogError, Glass};
 use crate::ray::{
     detector_array_positioning, fitness, trace, transmission, CompoundPrism, DetectorArray,
@@ -17,13 +18,13 @@ py_exception!(prism, CatalogError);
 
 impl<T> IntoPyResult<T> for Result<T, _RayTraceError> {
     fn into_py_result(self, py: Python) -> PyResult<T> {
-        self.map_err(|e| RayTraceError::new(py, format!("{}", e)))
+        self.map_err(|e| RayTraceError::new(py, e.name()))
     }
 }
 
 impl<T> IntoPyResult<T> for Result<T, _CatalogError> {
     fn into_py_result(self, py: Python) -> PyResult<T> {
-        self.map_err(|e| CatalogError::new(py, format!("{}", e)))
+        self.map_err(|e| CatalogError::new(py, e.name()))
     }
 }
 
@@ -82,21 +83,16 @@ where
     obj.getattr(py, k)?.extract(py)
 }
 
-fn get_buffer_attr<'p, T>(py: Python, obj: &'p PyObject, k: &'static str) -> PyResult<&'p [T]>
-where
-    T: zerocopy::FromBytes,
-{
+fn get_buffer_attr<'p, T: FromBytes>(py: Python, obj: &'p PyObject, k: &'static str) -> PyResult<&'p [T]> {
     let obj = obj.getattr(py, k)?;
     let buffer = cpython::buffer::PyBuffer::get(py, &obj)?;
     if !buffer.is_c_contiguous() {
         Err(PyErr::new::<exc::BufferError, _>(py, "buffer must be C contiguous"))
     } else {
         let bytes = unsafe { core::slice::from_raw_parts(buffer.buf_ptr() as *const u8, buffer.len_bytes()) };
-        if let Some(layout) = zerocopy::LayoutVerified::new_slice(bytes) {
-            Ok(layout.into_slice())
-        } else {
-            Err(PyErr::new::<exc::BufferError, _>(py, "Invalid buffer"))
-        }
+        LayoutVerified::new_slice(bytes)
+            .map(LayoutVerified::into_slice)
+            .ok_or_else(|| PyErr::new::<exc::BufferError, _>(py, "Invalid buffer"))
     }
 }
 
@@ -144,10 +140,10 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
         ("Prism", "glasses, angles, curvature, height, width"),
         None,
     )?;
-    let pmt_tuple = namedtuple.call(py, ("PmtArray", "bins, min_ci, angle, length"), None)?;
+    let det_tuple = namedtuple.call(py, ("DetectorArray", "bins, min_ci, angle, length"), None)?;
     let beam_tuple = namedtuple.call(py, ("GaussianBeam", "width, y_mean, w_range"), None)?;
     m.add(py, "Prism", prism_tuple)?;
-    m.add(py, "PmtArray", pmt_tuple)?;
+    m.add(py, "DetectorArray", det_tuple)?;
     m.add(py, "GaussianBeam", beam_tuple)?;
     m.add(
         py,
@@ -165,7 +161,7 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
     m.add(py, "transmission", py_fn!(py, __transmission(wavelengths: Vec<f64>, prism: CompoundPrism, pmts: DetectorArray, beam: GaussianBeam, det: DetectorArrayPositioning) -> PyResult<impl ToPyObject> {
         py.allow_threads(|| Ok(transmission(&wavelengths, &prism, &pmts, &beam, det)))
     }))?;
-    m.add(py, "spectrometer_position", py_fn!(py, __spectrometer_position(prism: CompoundPrism, pmts: DetectorArray, beam: GaussianBeam) -> PyResult<impl ToPyObject> {
+    m.add(py, "detector_array_position", py_fn!(py, __detector_array_position(prism: CompoundPrism, pmts: DetectorArray, beam: GaussianBeam) -> PyResult<impl ToPyObject> {
         py.allow_threads(|| detector_array_positioning(&prism, &pmts, &beam)).into_py_result(py)
     }))?;
     Ok(())

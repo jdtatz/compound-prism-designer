@@ -1,9 +1,9 @@
 use std::borrow::Cow;
+use derive_enum::Name;
 use crate::glasscat::Glass;
 use crate::quad::{Quadrature, KR21};
 
-#[repr(u8)]
-#[derive(Debug, Display, Clone, Copy)]
+#[derive(Name, Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
     NoSurfaceIntersection,
     OutOfBounds,
@@ -103,10 +103,14 @@ pub struct DetectorArrayPositioning {
     pub dir: Pair,
 }
 
+/// Light Ray
 #[derive(Constructor, Debug, PartialEq, Clone, Copy)]
 struct Ray {
+    /// Origin position vector
     pub origin: Pair,
+    /// Unit normal direction vector
     pub direction: Pair,
+    /// Transmittance probability
     pub transmittance: f64,
 }
 
@@ -149,7 +153,7 @@ impl Ray {
     }
 
     /// Find the intersection point of the ray with the interface
-    /// of current media and the next media. Using the line-plane intersection formula.
+    /// of the current media and the next media. Using the line-plane intersection formula.
     /// Then refract the ray through the interface
     ///
     /// # Arguments
@@ -158,7 +162,7 @@ impl Ray {
     ///  * `n1` - index of refraction of the current media
     ///  * `n2` - index of refraction of the new media
     ///  * `prism_height` - the height of the prism
-    fn intersect_surface(
+    fn intersect_plane_interface(
         self,
         vertex: Pair,
         normal: Pair,
@@ -190,7 +194,7 @@ impl Ray {
     ///  * `n1` - index of refraction of the current media
     ///  * `n2` - index of refraction of the new media
     ///  * `prism_height` - the height of the prism
-    fn intersect_lens(
+    fn intersect_curved_interface(
         self,
         midpt: Pair,
         normal: Pair,
@@ -277,7 +281,7 @@ impl Ray {
                         0_f64
                     },
                 };
-                let ray = ray.intersect_surface(vertex, normal, n1, n2, prism.height)?;
+                let ray = ray.intersect_plane_interface(vertex, normal, n1, n2, prism.height)?;
                 Ok((ray, n2, vertex))
             },
         )?;
@@ -289,7 +293,7 @@ impl Ray {
             x: vertex.x + angle.abs().tan() * prism.height * (0.5),
             y: prism.height * (0.5),
         };
-        ray.intersect_lens(midpt, normal, prism.curvature, n1, n2, prism.height)
+        ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)
     }
 
     /// Propagate a ray of `wavelength` through the compound prism and
@@ -343,7 +347,7 @@ impl Ray {
                         0_f64
                     },
                 };
-                let ray = ray.intersect_surface(vertex, normal, n1, n2, prism.height)?;
+                let ray = ray.intersect_plane_interface(vertex, normal, n1, n2, prism.height)?;
                 Ok((ray, n2, vertex))
             },
         )?;
@@ -355,7 +359,7 @@ impl Ray {
             x: vertex.x + angle.abs().tan() * prism.height * (0.5),
             y: prism.height * (0.5),
         };
-        let ray = ray.intersect_lens(midpt, normal, prism.curvature, n1, n2, prism.height)?;
+        let ray = ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)?;
         traced.push(ray.origin);
         let normal = rotate(detarr.angle, (-1_f64, 0_f64).into());
         let ci = -ray.direction.dot(normal);
@@ -437,7 +441,7 @@ fn p_dets_l_wavelength(
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
 ) -> Vec<f64> {
-    let mut p_det_l_ws = vec![0_f64; detarr.bins.len()];
+    let mut p_dets_l_w = vec![0_f64; detarr.bins.len()];
     // p(D=d|Λ=λ) = Integrate(T(λ, y) * g(y) * step(d_l <= S(λ, y) < d_u), {y, 0, prism.height})
     KR21::inplace_integrate(
         |y, integration_factor| {
@@ -464,7 +468,7 @@ fn p_dets_l_wavelength(
                 debug_assert!(t.is_finite());
                 debug_assert!(0. <= t && t <= 1.);
                 let pdf = t * g_y * integration_factor;
-                for (p_det_l_w, &[l, u]) in p_det_l_ws.iter_mut().zip(detarr.bins.iter()) {
+                for (p_det_l_w, &[l, u]) in p_dets_l_w.iter_mut().zip(detarr.bins.iter()) {
                     if l <= pos && pos < u {
                         *p_det_l_w += pdf;
                     }
@@ -475,15 +479,16 @@ fn p_dets_l_wavelength(
         prism.height,
         10,
     );
-    debug_assert!(p_det_l_ws.iter().copied().all(|p| 0. <= p && p <= 1.));
-    p_det_l_ws
+    debug_assert!(p_dets_l_w.iter().all(|&p| 0. <= p && p <= 1.));
+    p_dets_l_w
 }
 
 /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
 /// I(Λ; D) = H(D) - H(Λ|D)
 ///   = Sum(Integrate(p(Λ=λ) p(D=d|Λ=λ) log2(p(D=d|Λ=λ)), {λ, wmin, wmax}), d in D)
 ///      - Sum(p(D=d) log2(p(D=d)), d in D)
-/// p(D=d) = Expectation_Λ(p(D=d|Λ=λ))
+/// p(D=d) = Expectation_Λ(p(D=d|Λ=λ)) = Integrate(p(Λ=λ) p(D=d|Λ=λ), {λ, wmin, wmax})
+/// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
 fn mutual_information(
     prism: &CompoundPrism,
     detarr: &DetectorArray,
