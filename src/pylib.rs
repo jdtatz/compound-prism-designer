@@ -12,8 +12,8 @@ trait IntoPyResult<T> {
     fn into_py_result(self, py: Python) -> PyResult<T>;
 }
 
-py_exception!(prism, RayTraceError);
-py_exception!(prism, CatalogError);
+py_exception!(_prism, RayTraceError);
+py_exception!(_prism, CatalogError);
 
 impl<T> IntoPyResult<T> for Result<T, _RayTraceError> {
     fn into_py_result(self, py: Python) -> PyResult<T> {
@@ -166,4 +166,4 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
     Ok(())
 }
 
-py_module_initializer!(prism, initprism, PyInit_prism, |py, m| { init_mod(py, m) });
+py_module_initializer!(_prism, init_prism, PyInit__prism, |py, m| { init_mod(py, m) });
