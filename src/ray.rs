@@ -1,9 +1,9 @@
 use std::borrow::Cow;
-use derive_enum::Name;
 use crate::glasscat::Glass;
 use crate::quad::{Quadrature, KR21};
 
-#[derive(Name, Debug, Display, Clone, Copy)]
+
+#[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
     NoSurfaceIntersection,
     OutOfBounds,
@@ -11,6 +11,19 @@ pub enum RayTraceError {
     SpectrometerAngularResponseTooWeak,
     Unknown,
 }
+
+impl RayTraceError {
+    pub fn name(self) -> &'static str {
+        match self {
+            RayTraceError::NoSurfaceIntersection => "NoSurfaceIntersection",
+            RayTraceError::OutOfBounds => "OutOfBounds",
+            RayTraceError::TotalInternalReflection => "TotalInternalReflection",
+            RayTraceError::SpectrometerAngularResponseTooWeak => "SpectrometerAngularResponseTooWeak",
+            RayTraceError::Unknown => "Unknown",
+        }
+    }
+}
+
 
 impl std::error::Error for RayTraceError {}
 
@@ -285,7 +298,7 @@ impl Ray {
                 Ok((ray, n2, vertex))
             },
         )?;
-        let angle = prism.angles[prism.glasses.len()];
+        let angle = prism.angles[prism.angles.len() - 1];
         let n2 = 1_f64;
         let normal = rotate(angle, (-1_f64, 0_f64).into());
         debug_assert!(normal.is_unit());
@@ -455,8 +468,8 @@ fn p_dets_l_wavelength(
             const FRAC_SQRT_2_SQRT_PI: f64 =
                 core::f64::consts::FRAC_1_SQRT_2 * core::f64::consts::FRAC_2_SQRT_PI;
             // circular gaussian beam pdf parameterized by 1/e2 beam width
-            // f(x, y) = Exp[-2 (x^2 + y^2) / beam.width^2] * 2 / (π beam.width^2)
-            // g(y) = Integrate[f(x, y), {x, -prism.width / 2, prism.width / 2}]
+            // f(z, y) = Exp[-2 (z^2 + y^2) / beam.width^2] * 2 / (π beam.width^2)
+            // g(y) = Integrate[f(z, y), {z, -prism.width / 2, prism.width / 2}]
             // g(y) = Exp[-2 y^2 / beam.width^2] Erf[w / (Sqrt[2] beam.width)] Sqrt[2 / π] / beam_width
             let g_y = f64::exp(-2. * y_bar * y_bar / (beam.width * beam.width))
                 * libm::erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width)
@@ -653,22 +666,22 @@ mod tests {
         let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
         let prism = CompoundPrism {
-            glasses: std::borrow::Cow::Borrowed(&glasses),
-            angles: std::borrow::Cow::Borrowed(&angles),
+            glasses: glasses.as_ref().into(),
+            angles: angles.as_ref().into(),
             curvature: 0.21,
             height: 2.5,
             width: 2.,
         };
 
-        let nbin = 32;
+        const nbin: usize = 32;
         let pmt_length = 3.2;
         let bounds: Box<[_]> = (0..=nbin)
-            .map(|i| f64::from(i) / f64::from(nbin) * pmt_length)
+            .map(|i| (i as f64) / (nbin as f64) * pmt_length)
             .collect();
         let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (60_f64).to_radians();
         let detarr = DetectorArray {
-            bins: std::borrow::Cow::Borrowed(&bins),
+            bins: bins.as_ref().into(),
             min_ci: spec_max_accepted_angle.cos(),
             angle: 0.,
             length: pmt_length,

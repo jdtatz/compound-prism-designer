@@ -2,7 +2,6 @@ use cpython::{
     exc, FromPyObject, ObjectProtocol, PyErr, PyObject, PyResult, Python, ToPyObject,
 };
 use zerocopy::{FromBytes, LayoutVerified};
-use derive_enum::Name;
 use crate::glasscat::{new_catalog, CatalogError as _CatalogError, Glass};
 use crate::ray::{
     detector_array_positioning, fitness, trace, transmission, CompoundPrism, DetectorArray,
