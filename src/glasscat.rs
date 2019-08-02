@@ -1,8 +1,7 @@
 use arrayvec::ArrayVec;
 use std::collections::BTreeMap;
-use derive_enum::Name;
 
-#[derive(Name, Debug, Display, Clone, Copy)]
+#[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
     NameNotFound,
     GlassTypeNotFound,
@@ -10,6 +9,19 @@ pub enum CatalogError {
     GlassDescriptionNotFound,
     UnknownGlassType,
     DuplicateGlass,
+}
+
+impl  CatalogError {
+    pub fn name(self) -> &'static str {
+        match self {
+            CatalogError::NameNotFound => "NameNotFound",
+            CatalogError::GlassTypeNotFound => "GlassTypeNotFound",
+            CatalogError::InvalidGlassDescription => "InvalidGlassDescription",
+            CatalogError::GlassDescriptionNotFound => "GlassDescriptionNotFound",
+            CatalogError::UnknownGlassType => "UnknownGlassType",
+            CatalogError::DuplicateGlass => "DuplicateGlass",
+        }
+    }
 }
 
 impl std::error::Error for CatalogError {}
@@ -37,6 +49,13 @@ pub enum Glass {
     Extended3([f64; 9]),
 }
 
+fn iter_to_array<A: arrayvec::Array<Item=f64>>(it: impl IntoIterator<Item = f64>) -> Result<A, CatalogError> {
+    it.into_iter()
+        .collect::<ArrayVec<_>>()
+        .into_inner()
+        .map_err(|_| CatalogError::InvalidGlassDescription)
+}
+
 impl Glass {
     /// Create Glass parametrization structure
     ///
@@ -44,29 +63,21 @@ impl Glass {
     ///  * `num` - dispersion formula number
     ///  * `cd` - dispersion formula coefficients
     pub fn new(num: i32, cd: impl IntoIterator<Item = f64>) -> Result<Self, CatalogError> {
-        macro_rules! iter_to_arr {
-            () => {
-                cd.into_iter()
-                    .collect::<ArrayVec<_>>()
-                    .into_inner()
-                    .map_err(|_| CatalogError::InvalidGlassDescription)?
-            };
-        }
         Ok(match num {
-            1 => Glass::Schott(iter_to_arr!()),
-            2 => Glass::Sellmeier1(iter_to_arr!()),
-            3 => Glass::Herzberger(iter_to_arr!()),
-            4 => Glass::Sellmeier2(iter_to_arr!()),
-            5 => Glass::Conrady(iter_to_arr!()),
-            6 => Glass::Sellmeier3(iter_to_arr!()),
-            7 => Glass::HandbookOfOptics1(iter_to_arr!()),
-            8 => Glass::HandbookOfOptics2(iter_to_arr!()),
-            9 => Glass::Sellmeier4(iter_to_arr!()),
-            10 => Glass::Extended(iter_to_arr!()),
-            11 => Glass::Sellmeier5(iter_to_arr!()),
-            12 => Glass::Extended2(iter_to_arr!()),
-            // Unsure if Extended3 's # is 13
-            13 => Glass::Extended3(iter_to_arr!()),
+            1 => Glass::Schott(iter_to_array(cd)?),
+            2 => Glass::Sellmeier1(iter_to_array(cd)?),
+            3 => Glass::Herzberger(iter_to_array(cd)?),
+            4 => Glass::Sellmeier2(iter_to_array(cd)?),
+            5 => Glass::Conrady(iter_to_array(cd)?),
+            6 => Glass::Sellmeier3(iter_to_array(cd)?),
+            7 => Glass::HandbookOfOptics1(iter_to_array(cd)?),
+            8 => Glass::HandbookOfOptics2(iter_to_array(cd)?),
+            9 => Glass::Sellmeier4(iter_to_array(cd)?),
+            10 => Glass::Extended(iter_to_array(cd)?),
+            11 => Glass::Sellmeier5(iter_to_array(cd)?),
+            12 => Glass::Extended2(iter_to_array(cd)?),
+            // Unsure if formula Extended3's dispersion formula number is 13
+            13 => Glass::Extended3(iter_to_array(cd)?),
             _ => return Err(CatalogError::UnknownGlassType),
         })
     }
