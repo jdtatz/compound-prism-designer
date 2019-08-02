@@ -1,94 +1,9 @@
 #!/usr/bin/env python3
-from collections import namedtuple
 from os import cpu_count
 from sys import argv
 import numpy as np
-import pygmo as pg
 import toml
-import prism
-from prism import RayTraceError, create_catalog, Prism, DetectorArray, GaussianBeam
-
-Config = namedtuple("Config", "prism_count, wmin, wmax, prism_height, prism_width, det_arr_length, beam_width, det_arr_min_ci, bounds")
-Params = namedtuple("Params", "glass_names, glasses, thetas, curvature, y_mean, det_arr_angle")
-Soln = namedtuple("Soln", "params, objectives")
-nobjective = 3
-
-
-def to_params(config: Config, catalog, p: np.ndarray):
-    gvalues = list(catalog.keys())
-    glass_names = [gvalues[min(int(i), len(catalog) - 1)] for i in p[:config.prism_count]]
-    glasses = [catalog[n] for n in glass_names]
-    return Params(glass_names, glasses, np.asarray(p[config.prism_count:config.prism_count * 2 + 1]), *p[-3:])
-
-
-def to_prism(config: Config, params: Params):
-    return Prism(
-        glasses=params.glasses,
-        angles=params.thetas,
-        curvature=params.curvature,
-        height=config.prism_height,
-        width=config.prism_width,
-    )
-
-
-def to_det_array(config: Config, params: Params):
-    return DetectorArray(
-        bins=config.bounds,
-        min_ci=config.det_arr_min_ci,
-        angle=params.det_arr_angle,
-        length=config.det_arr_length,
-    )
-
-
-def to_beam(config: Config, params: Params):
-    return GaussianBeam(
-        width=config.beam_width,
-        y_mean=params.y_mean,
-        w_range=(config.wmin, config.wmax),
-    )
-
-
-def transmission_data(wavelengths: [float], config: Config, params: Params, det):
-    return np.array(
-        prism.transmission(
-            wavelengths,
-            to_prism(config, params),
-            to_det_array(config, params),
-            to_beam(config, params),
-            det
-        )
-    )
-
-
-def detector_array_position(config: Config, params: Params):
-    return np.array(
-        prism.detector_array_position(
-            to_prism(config, params),
-            to_det_array(config, params),
-            to_beam(config, params),
-        )
-    )
-
-
-def trace(wavelength: float, initial_y: float, config: Config, params: Params, det):
-    return prism.trace(
-        wavelength,
-        initial_y,
-        to_prism(config, params),
-        to_det_array(config, params),
-        det
-    )
-
-
-def fitness(config: Config, params: Params):
-    try:
-        return prism.fitness(
-            to_prism(config, params),
-            to_det_array(config, params),
-            to_beam(config, params),
-        )
-    except RayTraceError:
-        return [1e6 * config.prism_height] * nobjective
+from prism import Config, Params, Soln, RayTraceError, create_catalog, detector_array_position, trace, transmission_data, use_pygmo
 
 
 def show_interactive(config: Config, solns: [Soln], units: str):
@@ -128,13 +43,14 @@ def show_interactive(config: Config, solns: [Soln], units: str):
 
     def pick(event):
         soln = sorted((solns[i] for i in event.ind), key=lambda s: s.objectives[-1])[0]
-        params = soln.params
+        params: Params = soln.params
         size, ninfo, dev = soln.objectives
         display = f"""Prism ({', '.join(params.glass_names)})
+    Parameters:
         angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.thetas)}
         y_mean ({units}): {params.y_mean:.4}
         curvature: {params.curvature:.4}
-        spectrometer angle (deg): {np.rad2deg(params.det_arr_angle):.4}
+        detector array angle (deg): {np.rad2deg(params.det_arr_angle):.4}
         objectives: (size={size:.4} ({units}), info: {-ninfo:.4} (bits), deviation: {np.rad2deg(np.arcsin(dev)):.4} (deg))"""
         print(display)
         text_ax.cla()
@@ -158,6 +74,9 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         R = np.array(((c, -s), (s, c)))
         normal = R @ (-1, 0)
         chord = config.prism_height / c
+        # curvature = R_max / R_lens
+        # R_max = chord / 2
+        # R_lens = chord / (2 curvature)
         lens_radius = chord / (2 * params.curvature)
         center = midpt + normal * np.sqrt(lens_radius ** 2 - chord ** 2 / 4)
         t1 = np.rad2deg(np.arctan2(prism_vertices[-1, 1] - center[1], prism_vertices[-1, 0] - center[0]))
@@ -188,16 +107,32 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         prism_plt.axis('scaled')
         prism_plt.axis('off')
 
-        det_plt.cla()
+        ytans = np.tan(params.thetas)
+        thickness = [abs(t0) * config.prism_height / 2 + abs(t1) * config.prism_height / 2 for t0, t1 in zip(ytans[:-1], ytans[1:])]
+        newline = "\n        "
+
+        detarr_offset = (det_arr_pos + det_arr_dir * config.det_arr_length / 2) - midpt
+        zemax_info = (f"""\
+    Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {config.wmin} to {config.wmax}: 
+        Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
+        {f"{newline}".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
+        Coord break: tilt about x = {-np.rad2deg(params.thetas[-1])}
+        Biconic: radius = {-lens_radius} semi-dimater = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
+        Coord break: tilt about x = {np.rad2deg(params.thetas[-1])}
+        Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
+        Coord break: tilt about x = {-np.rad2deg(params.det_arr_angle)}
+        Image (Standard): semi-dimater = {config.det_arr_length / 2}
+""")
+        print(zemax_info)
+        """c_x = 1 / R_x
+            c_y = 1 / R_y
+            z = (c_x x^2 + c_y y^2 ) / (1 + Sqrt[1 - (1 + k_x)c_x^2 x^2 - (1 + k_y) c_y^2 y^2])
+            """
+
+
+        det_plt.clear()
         trans_plt.cla()
         violin_plt.cla()
-        det_plt.set_xlabel("bins")
-        trans_plt.set_xlabel("wavelength (μm)")
-        det_plt.set_ylabel("p (%)")
-        trans_plt.set_ylabel("p (%)")
-        det_plt.set_title("p(D=d|Λ)")
-        trans_plt.set_title("p(D|Λ=λ)")
-        trans_plt.set_ylim(0, 100)
 
         waves = np.linspace(config.wmin, config.wmax, 100)
         ts = transmission_data(waves, config, params, det)
@@ -214,9 +149,25 @@ def show_interactive(config: Config, solns: [Soln], units: str):
             }
             for t in ts
         ]
-        violin_plt.violin(vpstats, showextrema=False, widths=1)
-        det_plt.plot(p_det * 100, 'k')
+        parts = violin_plt.violin(vpstats, showextrema=False, widths=1)
+        for pc in parts['bodies']:
+            pc.set_facecolor('black')
+        violin_plt.plot([1, len(p_det)], [config.wmin, config.wmax], 'k--')
+        det_plt.scatter(1 + np.arange(len(p_det)), p_det * 100, color='k')
         trans_plt.plot(waves, p_w_l_D * 100, 'k')
+        trans_plt.axhline(np.mean(p_w_l_D) * 100, color='k', linestyle='--')
+
+        det_plt.set_xlabel("detector bins")
+        trans_plt.set_xlabel("wavelength (μm)")
+        violin_plt.set_xlabel("detector bins")
+        det_plt.set_ylabel("p (%)")
+        trans_plt.set_ylabel("p (%)")
+        violin_plt.set_ylabel("wavelength (μm)")
+        det_plt.set_title("p(D=d|Λ)")
+        trans_plt.set_title("p(D|Λ=λ)")
+        violin_plt.set_title("p(D=d|Λ=λ) as a Pseudo Violin Plot")
+        trans_plt.set_ylim(0, 100)
+        det_plt.set_ylim(bottom=0)
 
         fig.canvas.draw()
         fig.canvas.flush_events()
@@ -224,44 +175,6 @@ def show_interactive(config: Config, solns: [Soln], units: str):
     fig.canvas.mpl_connect('pick_event', pick)
 
     plt.show()
-
-
-class PrismProblem:
-    def __init__(self, config, catalog):
-        self.config, self.catalog = config, catalog
-
-    def fitness(self, v):
-        params = to_params(self.config, self.catalog, v)
-        val = fitness(self.config, params)
-        if val[0] > 30 * self.config.prism_height:
-            return [1e6 * self.config.prism_height] * nobjective
-        else:
-            return val
-
-    def get_bounds(self):
-        nprism = self.config.prism_count
-        glass_bounds = nprism * [(0, len(self.catalog) - 1)]
-        l, u = np.deg2rad(0), np.deg2rad(90)
-        angle_bounds = [(l, u) if i % 2 else (-u, -l) for i in range(nprism + 1)]
-        curvature_bounds = 0.01, 1.0
-        y_mean_bounds = 0, self.config.prism_height
-        sec = np.deg2rad(90)
-        det_arr_angle_bounds = -sec, sec
-        return tuple(zip(*[
-            *glass_bounds,
-            *angle_bounds,
-            curvature_bounds,
-            y_mean_bounds,
-            det_arr_angle_bounds,
-        ]))
-
-    @staticmethod
-    def get_nobj():
-        return nobjective
-
-    @staticmethod
-    def get_name():
-        return "Compound Prism Optimizer"
 
 
 if __name__ == "__main__":
@@ -290,15 +203,8 @@ if __name__ == "__main__":
     if thread_count < 1:
         thread_count = cpu_count()
     pop_size = opt_dict["pop-size"]
-    if pop_size < 5 or pop_size % 4 != 0:
-        pop_size = max(8, pop_size + 4 - pop_size % 4)
-    prob = pg.problem(PrismProblem(config, catalog))
-    algo = pg.algorithm(pg.nsga2(gen=iter_count))
-    archi = pg.archipelago(thread_count, algo=algo, prob=prob, pop_size=pop_size)
-    archi.evolve()
-    archi.wait_check()
-    solutions = [Soln(params=to_params(config, catalog, p), objectives=o) for isl in archi for (p, o) in zip(isl.get_population().get_x(), isl.get_population().get_f())]
 
+    solutions = use_pygmo(iter_count, thread_count, pop_size, config, catalog)
     print(len(solutions))
 
     show_interactive(config, solutions, units)

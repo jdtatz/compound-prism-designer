@@ -1,5 +1,5 @@
-matplotlib >= 3.0
 numpy >= 1.17.0
+matplotlib >= 3.0
 pygmo >= 2.10
-pyo3-pack >= 0.6.1
 toml >= 0.10.0
+setuptools-rust >= 0.10.0
