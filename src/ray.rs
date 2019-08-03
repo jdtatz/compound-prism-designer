@@ -497,11 +497,13 @@ fn p_dets_l_wavelength(
 }
 
 /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
-/// I(Λ; D) = H(D) - H(Λ|D)
+/// I(Λ; D) = H(D) - H(D|Λ)
 ///   = Sum(Integrate(p(Λ=λ) p(D=d|Λ=λ) log2(p(D=d|Λ=λ)), {λ, wmin, wmax}), d in D)
 ///      - Sum(p(D=d) log2(p(D=d)), d in D)
 /// p(D=d) = Expectation_Λ(p(D=d|Λ=λ)) = Integrate(p(Λ=λ) p(D=d|Λ=λ), {λ, wmin, wmax})
 /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
+/// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
+/// https://en.wikipedia.org/wiki/Differential_entropy#Definition
 fn mutual_information(
     prism: &CompoundPrism,
     detarr: &DetectorArray,

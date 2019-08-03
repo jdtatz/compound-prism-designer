@@ -94,7 +94,7 @@ class PyGmoPrismProblem:
     def fitness(self, v):
         params = to_params(self.config, self.catalog, v)
         val = fitness(self.config, params)
-        if val[0] > 30 * self.config.prism_height:
+        if val[0] > 30 * self.config.prism_height or abs(val[1]) < 0.1:
             return [np.inf] * nobjective
         else:
             return val
@@ -129,7 +129,7 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config, catalog):
     if pop_size < 5 or pop_size % 4 != 0:
         pop_size = max(8, pop_size + 4 - pop_size % 4)
     prob = pg.problem(PyGmoPrismProblem(config, catalog))
-    algo = pg.algorithm(pg.nsga2(gen=iter_count))
+    algo = pg.algorithm(pg.nsga2(gen=iter_count, m=0.05))
     archi = pg.archipelago(thread_count, algo=algo, prob=prob, pop_size=pop_size)
     archi.evolve()
     archi.wait_check()
