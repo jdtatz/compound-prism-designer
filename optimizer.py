@@ -4,6 +4,7 @@ from sys import argv
 import numpy as np
 import toml
 from prism import Config, Params, Soln, RayTraceError, create_catalog, detector_array_position, trace, transmission_data, use_pygmo
+from prism.zemax import create_zmx
 
 
 def show_interactive(config: Config, solns: [Soln], units: str):
@@ -45,19 +46,6 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         soln = sorted((solns[i] for i in event.ind), key=lambda s: s.objectives[-1])[0]
         params: Params = soln.params
         size, ninfo, dev = soln.objectives
-        display = f"""Prism ({', '.join(params.glass_names)})
-    Parameters:
-        angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.thetas)}
-        y_mean ({units}): {params.y_mean:.4}
-        curvature: {params.curvature:.4}
-        detector array angle (deg): {np.rad2deg(params.det_arr_angle):.4}
-        objectives: (size={size:.4} ({units}), info: {-ninfo:.4} (bits), deviation: {np.rad2deg(np.arcsin(dev)):.4} (deg))"""
-        print(display)
-        text_ax.cla()
-        text_ax.text(0, 0.5, display, horizontalalignment='left', verticalalignment='center',
-                     transform=text_ax.transAxes)
-        text_ax.axis('scaled')
-        text_ax.axis('off')
 
         det_arr_pos, det_arr_dir = det = detector_array_position(config, params)
         det_arr_end = det_arr_pos + det_arr_dir * config.det_arr_length
@@ -112,7 +100,14 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         newline = "\n        "
 
         detarr_offset = (det_arr_pos + det_arr_dir * config.det_arr_length / 2) - midpt
-        zemax_info = (f"""\
+
+        display = f"""CompoundPrism ({', '.join(params.glass_names)})
+    Parameters:
+        angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.thetas)}
+        y_mean ({units}): {params.y_mean:.4}
+        curvature: {params.curvature:.4}
+        detector array angle (deg): {np.rad2deg(params.det_arr_angle):.4}
+        objectives: (size={size:.4} ({units}), info: {-ninfo:.4} (bits), deviation: {np.rad2deg(np.arcsin(dev)):.4} (deg))
     Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {config.wmin} to {config.wmax}: 
         Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
         {f"{newline}".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
@@ -121,14 +116,15 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         Coord break: tilt about x = {np.rad2deg(params.thetas[-1])}
         Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
         Coord break: tilt about x = {-np.rad2deg(params.det_arr_angle)}
-        Image (Standard): semi-dimater = {config.det_arr_length / 2}
-""")
-        print(zemax_info)
-        """c_x = 1 / R_x
-            c_y = 1 / R_y
-            z = (c_x x^2 + c_y y^2 ) / (1 + Sqrt[1 - (1 + k_x)c_x^2 x^2 - (1 + k_y) c_y^2 y^2])
-            """
-
+        Image (Standard): semi-dimater = {config.det_arr_length / 2}"""
+        print(display)
+        with open("len.zmx", "w") as f:
+            f.write(create_zmx(config, params, ytans, thickness, lens_radius, chord, detarr_offset))
+        text_ax.cla()
+        text_ax.text(0, 0.5, display, horizontalalignment='left', verticalalignment='center',
+                     transform=text_ax.transAxes)
+        text_ax.axis('scaled')
+        text_ax.axis('off')
 
         det_plt.clear()
         trans_plt.cla()

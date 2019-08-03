@@ -6,26 +6,26 @@ length-unit = "mm"
 # Genetic algorithm(NSAGII) optimizer properties (Optional)
 [optimizer]
 # Number of times to evolve the optimization population (Optional, default=1000)
-iteration-count = 1000
+iteration-count = 150
 # Number of threads to use (Optional), if not givent or < 1, then will use maximum
 thread-count = 0
 # For each thread, the number of candiatie solutions to be used / evolved
 # Must be > 5 and a multiple of 4, (Optional, default=20), will round up if conditions not met
-pop-size = 40
+pop-size = 800
 
 # Compound prism design specification
 [compound-prism]
 # Number of prisms to use in design
-count = 3
+count = 5
 # Height of the prisms in [length-unit]
-height = 25
+height = 15
 # Width of the prisms in [length-unit]
-width = 7
+width = 15
 
 # Incoming gaussian beam properties
 [gaussian-beam]
 # 1/e^2 beam width in [length-unit]
-width = 4
+width = 3.1
 # Minimum wavelength in [micrometers]
 wmin = 0.5
 # Maximum wavelength in [micrometers]
@@ -35,8 +35,8 @@ wmax = 0.82
 [detector-array]
 # Total length of array in [length-unit]
 length = 32
-# Maximum accepted incident angle in [degrees] (Optional, default=90)
-max-incident-angle = 60
+# Maximum accepted incident angle in [degrees] (Optional, max / default=90)
+max-incident-angle = 45
 # Boundries of the detector bins in the array, an Nx2 list, in [length-unit]
 bounds = [[ 0.1,  0.9],
         [ 1.1,  1.9],
