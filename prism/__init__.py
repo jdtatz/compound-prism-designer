@@ -101,13 +101,11 @@ class PyGmoPrismProblem:
 
     def get_bounds(self):
         nprism = self.config.prism_count
-        glass_bounds = nprism * [(0, len(self.catalog) - 1)]
-        l, u = np.deg2rad(0), np.deg2rad(90)
-        angle_bounds = [(l, u) if i % 2 else (-u, -l) for i in range(nprism + 1)]
+        glass_bounds = nprism * [(0, len(self.catalog))]
+        angle_bounds = (nprism + 1) * [(-np.pi / 2, np.pi / 2)]
         curvature_bounds = 0.001, 1.0
         y_mean_bounds = 0, self.config.prism_height
-        sec = np.deg2rad(180)
-        det_arr_angle_bounds = -sec, sec
+        det_arr_angle_bounds = -np.pi, np.pi
         return tuple(zip(*[
             *glass_bounds,
             *angle_bounds,
