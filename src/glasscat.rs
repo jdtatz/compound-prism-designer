@@ -11,7 +11,7 @@ pub enum CatalogError {
     DuplicateGlass,
 }
 
-impl  CatalogError {
+impl CatalogError {
     pub fn name(self) -> &'static str {
         match self {
             CatalogError::NameNotFound => "NameNotFound",
@@ -49,7 +49,9 @@ pub enum Glass {
     Extended3([f64; 9]),
 }
 
-fn iter_to_array<A: arrayvec::Array<Item=f64>>(it: impl IntoIterator<Item = f64>) -> Result<A, CatalogError> {
+fn iter_to_array<A: arrayvec::Array<Item = f64>>(
+    it: impl IntoIterator<Item = f64>,
+) -> Result<A, CatalogError> {
     it.into_iter()
         .collect::<ArrayVec<_>>()
         .into_inner()
