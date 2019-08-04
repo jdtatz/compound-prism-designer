@@ -1,7 +1,6 @@
-use std::borrow::Cow;
 use crate::glasscat::Glass;
 use crate::quad::{Quadrature, KR21};
-
+use std::borrow::Cow;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -18,7 +17,9 @@ impl RayTraceError {
             RayTraceError::NoSurfaceIntersection => "NoSurfaceIntersection",
             RayTraceError::OutOfBounds => "OutOfBounds",
             RayTraceError::TotalInternalReflection => "TotalInternalReflection",
-            RayTraceError::SpectrometerAngularResponseTooWeak => "SpectrometerAngularResponseTooWeak",
+            RayTraceError::SpectrometerAngularResponseTooWeak => {
+                "SpectrometerAngularResponseTooWeak"
+            }
             RayTraceError::Unknown => "Unknown",
         }
     }
@@ -56,6 +57,7 @@ impl Pair {
 }
 
 /// rotate `vector` by `angle` CCW
+#[inline(always)]
 fn rotate(angle: f64, vector: Pair) -> Pair {
     debug_assert!(vector.is_unit());
     Pair {

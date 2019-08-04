@@ -1,12 +1,12 @@
-use cpython::{
-    exc, FromPyObject, ObjectProtocol, PyErr, PyObject, PyResult, Python, ToPyObject,
-};
-use zerocopy::{FromBytes, LayoutVerified};
 use crate::glasscat::{new_catalog, CatalogError as _CatalogError, Glass};
 use crate::ray::{
     detector_array_positioning, fitness, trace, transmission, CompoundPrism, DetectorArray,
     DetectorArrayPositioning, GaussianBeam, Pair, RayTraceError as _RayTraceError,
 };
+use cpython::{
+    exc, FromPyObject, ObjectProtocol, PyErr, PyObject, PyResult, Python, PythonObject, ToPyObject,
+};
+use zerocopy::{FromBytes, LayoutVerified};
 
 trait IntoPyResult<T> {
     fn into_py_result(self, py: Python) -> PyResult<T>;
@@ -27,19 +27,38 @@ impl<T> IntoPyResult<T> for Result<T, _CatalogError> {
     }
 }
 
+py_class!(class PyGlass |py| {
+    data glass: Glass;
+    def __new__(_cls, dispform: i32, cd: Vec<f64>) -> PyResult<PyGlass> {
+        PyGlass::create_instance(py, Glass::new(dispform, cd).into_py_result(py)?)
+    }
+    def __getnewargs__(&self) -> PyResult<impl ToPyObject> {
+        let (n, v): (i32, &[f64]) = self.glass(py).into();
+        Ok((n, v.to_vec()))
+    }
+    def __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self.glass(py)))
+    }
+});
+
 impl ToPyObject for Glass {
-    type ObjectType = cpython::PyTuple;
+    type ObjectType = PyObject;
 
     fn to_py_object(&self, py: Python) -> Self::ObjectType {
-        let pyglass: (i32, &[f64]) = self.into();
-        ToPyObject::into_py_object(pyglass, py)
+        match PyGlass::create_instance(py, *self) {
+            Ok(pg) => pg.into_object(),
+            Err(e) => {
+                e.restore(py);
+                py.None()
+            }
+        }
     }
 }
 
 impl FromPyObject<'_> for Glass {
     fn extract(py: Python, obj: &PyObject) -> PyResult<Self> {
-        let (glass_type, glass_descr): (i32, Vec<f64>) = FromPyObject::extract(py, obj)?;
-        Glass::new(glass_type, glass_descr).into_py_result(py)
+        let pg: &PyGlass = obj.cast_as(py)?;
+        Ok(*pg.glass(py))
     }
 }
 
@@ -82,13 +101,22 @@ where
     obj.getattr(py, k)?.extract(py)
 }
 
-fn get_buffer_attr<'p, T: FromBytes>(py: Python, obj: &'p PyObject, k: &'static str) -> PyResult<&'p [T]> {
+fn get_buffer_attr<'p, T: FromBytes>(
+    py: Python,
+    obj: &'p PyObject,
+    k: &'static str,
+) -> PyResult<&'p [T]> {
     let obj = obj.getattr(py, k)?;
     let buffer = cpython::buffer::PyBuffer::get(py, &obj)?;
     if !buffer.is_c_contiguous() {
-        Err(PyErr::new::<exc::BufferError, _>(py, "buffer must be C contiguous"))
+        Err(PyErr::new::<exc::BufferError, _>(
+            py,
+            "buffer must be C contiguous",
+        ))
     } else {
-        let bytes = unsafe { core::slice::from_raw_parts(buffer.buf_ptr() as *const u8, buffer.len_bytes()) };
+        let bytes = unsafe {
+            core::slice::from_raw_parts(buffer.buf_ptr() as *const u8, buffer.len_bytes())
+        };
         LayoutVerified::new_slice(bytes)
             .map(LayoutVerified::into_slice)
             .ok_or_else(|| PyErr::new::<exc::BufferError, _>(py, "Invalid buffer"))
@@ -141,6 +169,7 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
     )?;
     let det_tuple = namedtuple.call(py, ("DetectorArray", "bins, min_ci, angle, length"), None)?;
     let beam_tuple = namedtuple.call(py, ("GaussianBeam", "width, y_mean, w_range"), None)?;
+    m.add_class::<PyGlass>(py)?;
     m.add(py, "Prism", prism_tuple)?;
     m.add(py, "DetectorArray", det_tuple)?;
     m.add(py, "GaussianBeam", beam_tuple)?;
@@ -166,4 +195,6 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
     Ok(())
 }
 
-py_module_initializer!(_prism, init_prism, PyInit__prism, |py, m| { init_mod(py, m) });
+py_module_initializer!(_prism, init_prism, PyInit__prism, |py, m| {
+    init_mod(py, m)
+});
