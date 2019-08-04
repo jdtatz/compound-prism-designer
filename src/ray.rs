@@ -24,7 +24,6 @@ impl RayTraceError {
     }
 }
 
-
 impl std::error::Error for RayTraceError {}
 
 /// vector in R^2 represented as a 2-tuple
@@ -35,9 +34,6 @@ pub struct Pair {
 }
 
 impl Pair {
-    /// zero vector (0, 0)
-    pub const ZERO: Self = Self { x: 0_f64, y: 0_f64 };
-
     /// dot product of two vectors, a • b
     pub fn dot(self, other: Self) -> f64 {
         self.x * other.x + self.y * other.y
@@ -66,6 +62,27 @@ fn rotate(angle: f64, vector: Pair) -> Pair {
         x: angle.cos() * vector.x - angle.sin() * vector.y,
         y: angle.sin() * vector.x + angle.cos() * vector.y,
     }
+}
+
+fn midpts<'a>(angles: &'a [f64], h: f64) -> impl Iterator<Item = Pair> + 'a {
+    let h2 = h * 0.5;
+    std::iter::once(angles[0].abs().tan() * h2)
+        .chain(angles.windows(2).map(move |win| {
+            let last = win[0];
+            let angle = win[1];
+            if (last >= 0.) ^ (angle >= 0.) {
+                (last.abs().tan() + angle.abs().tan()) * h2
+            } else if last.abs() > angle.abs() {
+                (last.abs().tan() - angle.abs().tan()) * h2
+            } else {
+                (angle.abs().tan() - last.abs().tan()) * h2
+            }
+        }))
+        .scan(0_f64, |x, width| {
+            *x += width;
+            Some(*x)
+        })
+        .map(move |x| Pair { x, y: h2 })
 }
 
 /// Collimated Polychromatic Gaussian Beam
@@ -280,32 +297,24 @@ impl Ray {
         prism: &CompoundPrism,
         wavelength: f64,
     ) -> Result<Ray, RayTraceError> {
-        let (ray, n1, vertex) = prism.glasses.iter().zip(prism.angles.iter()).try_fold(
-            (self, 1_f64, Pair::ZERO),
-            |(ray, n1, vertex), (glass, angle)| {
+        let mut mids = midpts(&prism.angles, prism.height);
+        let (ray, n1) = prism
+            .glasses
+            .iter()
+            .zip(prism.angles.iter())
+            .zip(&mut mids)
+            .try_fold((self, 1_f64), |(ray, n1), ((glass, angle), vertex)| {
                 let n2 = glass.calc_n(wavelength);
                 let normal = rotate(*angle, (-1_f64, 0_f64).into());
                 debug_assert!(normal.is_unit());
-                let vertex = Pair {
-                    x: vertex.x + angle.abs().tan() * prism.height,
-                    y: if vertex.y == 0_f64 {
-                        prism.height
-                    } else {
-                        0_f64
-                    },
-                };
                 let ray = ray.intersect_plane_interface(vertex, normal, n1, n2, prism.height)?;
-                Ok((ray, n2, vertex))
-            },
-        )?;
+                Ok((ray, n2))
+            })?;
+        let midpt = mids.next().unwrap();
         let angle = prism.angles[prism.angles.len() - 1];
         let n2 = 1_f64;
         let normal = rotate(angle, (-1_f64, 0_f64).into());
         debug_assert!(normal.is_unit());
-        let midpt = Pair {
-            x: vertex.x + angle.abs().tan() * prism.height * (0.5),
-            y: prism.height * (0.5),
-        };
         ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)
     }
 
@@ -346,33 +355,26 @@ impl Ray {
         detpos: DetectorArrayPositioning,
     ) -> Result<Vec<Pair>, RayTraceError> {
         let mut traced = Vec::new();
-        let (ray, n1, vertex) = prism.glasses.iter().zip(prism.angles.iter()).try_fold(
-            (self, 1_f64, Pair::ZERO),
-            |(ray, n1, vertex), (glass, angle)| {
+        let mut mids = midpts(&prism.angles, prism.height);
+        let (ray, n1) = prism
+            .glasses
+            .iter()
+            .zip(prism.angles.iter())
+            .zip(&mut mids)
+            .try_fold((self, 1_f64), |(ray, n1), ((glass, angle), vertex)| {
                 traced.push(ray.origin);
                 let n2 = glass.calc_n(wavelength);
                 let normal = rotate(*angle, (-1_f64, 0_f64).into());
-                let vertex = Pair {
-                    x: vertex.x + angle.abs().tan() * prism.height,
-                    y: if vertex.y == 0_f64 {
-                        prism.height
-                    } else {
-                        0_f64
-                    },
-                };
                 let ray = ray.intersect_plane_interface(vertex, normal, n1, n2, prism.height)?;
-                Ok((ray, n2, vertex))
-            },
-        )?;
+                Ok((ray, n2))
+            })?;
         traced.push(ray.origin);
         let angle = prism.angles[prism.glasses.len()];
         let n2 = 1_f64;
         let normal = rotate(angle, (-1_f64, 0_f64).into());
-        let midpt = Pair {
-            x: vertex.x + angle.abs().tan() * prism.height * (0.5),
-            y: prism.height * (0.5),
-        };
-        let ray = ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)?;
+        let midpt = mids.next().unwrap();
+        let ray =
+            ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)?;
         traced.push(ray.origin);
         let normal = rotate(detarr.angle, (-1_f64, 0_f64).into());
         let ci = -ray.direction.dot(normal);

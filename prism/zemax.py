@@ -2,12 +2,47 @@ import numpy as np
 from itertools import count
 
 
-def create_zmx(config, params, ytans, thickness, lens_radius, chord, detarr_offset):
+def _thickness_fn(h, angles):
+    h = h / 2
+    for last, angle in zip(angles[:-1], angles[1:]):
+        if (last >= 0) ^ (angle >= 0):
+            yield (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h
+        elif np.abs(last) > np.abs(angle):
+            yield (np.tan(np.abs(last)) - np.tan(np.abs(angle))) * h
+        else:
+            yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h
+
+
+def create_zmx(config, params, detarr_offset):
     incrementer = count(1)
+
+    angles = params.thetas
+    ytans = np.tan(angles)
+    thickness = list(_thickness_fn(config.prism_height, angles))
+
+    c, s = np.cos(params.thetas[-1]), np.sin(params.thetas[-1])
+    chord = config.prism_height / c
+    # curvature = R_max / R_lens
+    # R_max = chord / 2
+    # R_lens = chord / (2 curvature)
+    lens_radius = chord / (2 * params.curvature)
+
     waves = np.linspace(config.wmin, config.wmax, 24)
     waves = "\n".join(f"WAVM {1 + i} {w} 1" for i, w in enumerate(waves))
     newline = "\n"
-    return f"""\
+
+    zemax_design = f"""\
+    Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {config.wmin} to {config.wmax}: 
+        Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
+        {f"{newline}".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
+        Coord break: tilt about x = {-np.rad2deg(params.thetas[-1])}
+        Biconic: radius = {-lens_radius} semi-dimater = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
+        Coord break: tilt about x = {np.rad2deg(params.thetas[-1])}
+        Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
+        Coord break: tilt about x = {-np.rad2deg(params.det_arr_angle)}
+        Image (Standard): semi-dimater = {config.det_arr_length / 2}\
+    """
+    zemax_file = f"""\
 VERS 181119 693 105780 L105780
 MODE SEQ
 NAME 
@@ -79,6 +114,7 @@ TOL TOFF   0   0 0.0000000000000000E+00 0.0000000000000000E+00   0 0 0 0 0
 MNUM 1 1
 MOFF   0   1 "" 0 0 0 1 1 0 0.0 "" 0
 """
+    return zemax_design, zemax_file
 
 
 def create_standard(

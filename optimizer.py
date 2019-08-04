@@ -5,12 +5,10 @@ import numpy as np
 import toml
 from prism import Config, Params, Soln, RayTraceError, create_catalog, detector_array_position, trace, transmission_data, use_pygmo
 from prism.zemax import create_zmx
+from prism.utils import draw_compound_prism, midpts_gen
 
 
 def show_interactive(config: Config, solns: [Soln], units: str):
-    import matplotlib as mpl
-    import matplotlib.path
-    import matplotlib.patches
     import matplotlib.pyplot as plt
     fig = plt.figure()
     nrows, ncols = 2, 4
@@ -50,56 +48,24 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         det_arr_pos, det_arr_dir = det = detector_array_position(config, params)
         det_arr_end = det_arr_pos + det_arr_dir * config.det_arr_length
 
-        prism_vertices = np.empty((config.prism_count + 2, 2))
-        prism_vertices[::2, 1] = 0
-        prism_vertices[1::2, 1] = config.prism_height
-        prism_vertices[0, 0] = 0
-        prism_vertices[1:, 0] = np.add.accumulate(np.tan(np.abs(params.thetas)) * config.prism_height)
-        triangles = np.stack((prism_vertices[1:-1], prism_vertices[:-2], prism_vertices[2:]), axis=1)
+        midpt = list(midpts_gen(config.prism_height, params.thetas))[-1]
+        detarr_offset = (det_arr_pos + det_arr_dir * config.det_arr_length / 2) - midpt
 
-        midpt = prism_vertices[-2] + (prism_vertices[-1] - prism_vertices[-2]) / 2
-        c, s = np.cos(params.thetas[-1]), np.sin(params.thetas[-1])
-        R = np.array(((c, -s), (s, c)))
-        normal = R @ (-1, 0)
-        chord = config.prism_height / c
-        # curvature = R_max / R_lens
-        # R_max = chord / 2
-        # R_lens = chord / (2 curvature)
-        lens_radius = chord / (2 * params.curvature)
-        center = midpt + normal * np.sqrt(lens_radius ** 2 - chord ** 2 / 4)
-        t1 = np.rad2deg(np.arctan2(prism_vertices[-1, 1] - center[1], prism_vertices[-1, 0] - center[0]))
-        t2 = np.rad2deg(np.arctan2(prism_vertices[-2, 1] - center[1], prism_vertices[-2, 0] - center[0]))
-        if config.prism_count % 2 == 0:
-            t1, t2 = t2, t1
-
-        prism_plt.cla()
-        for i, tri in enumerate(triangles):
-            poly = plt.Polygon(tri, edgecolor='k', facecolor=('gray' if i % 2 else 'white'), closed=False)
-            prism_plt.add_patch(poly)
-        arc = mpl.path.Path.arc(t1, t2)
-        arc = mpl.path.Path(arc.vertices * lens_radius + center, arc.codes)
-        arc = mpl.patches.PathPatch(arc, fill=None)
-        prism_plt.add_patch(arc)
-
+        draw_compound_prism(prism_plt, config, params)
         spectro = plt.Polygon((det_arr_pos, det_arr_end), closed=None, fill=None, edgecolor='k')
         prism_plt.add_patch(spectro)
 
         for w, color in zip((config.wmin, (config.wmin + config.wmax) / 2, config.wmax), ('r', 'g', 'b')):
-            try:
-                ray = np.stack(tuple(trace(w, params.y_mean, config, params, det)), axis=0)
-                poly = plt.Polygon(ray, closed=None, fill=None, edgecolor=color)
-                prism_plt.add_patch(poly)
-            except RayTraceError:
-                pass
+            for y in (params.y_mean - config.beam_width, params.y_mean, params.y_mean + config.beam_width):
+                try:
+                    ray = np.stack(tuple(trace(w, y, config, params, det)), axis=0)
+                    poly = plt.Polygon(ray, closed=None, fill=None, edgecolor=color)
+                    prism_plt.add_patch(poly)
+                except RayTraceError:
+                    pass
 
         prism_plt.axis('scaled')
         prism_plt.axis('off')
-
-        ytans = np.tan(params.thetas)
-        thickness = [abs(t0) * config.prism_height / 2 + abs(t1) * config.prism_height / 2 for t0, t1 in zip(ytans[:-1], ytans[1:])]
-        newline = "\n        "
-
-        detarr_offset = (det_arr_pos + det_arr_dir * config.det_arr_length / 2) - midpt
 
         display = f"""CompoundPrism ({', '.join(params.glass_names)})
     Parameters:
@@ -108,18 +74,12 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         curvature: {params.curvature:.4}
         detector array angle (deg): {np.rad2deg(params.det_arr_angle):.4}
         objectives: (size={size:.4} ({units}), info: {-ninfo:.4} (bits), deviation: {np.rad2deg(np.arcsin(dev)):.4} (deg))
-    Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {config.wmin} to {config.wmax}: 
-        Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
-        {f"{newline}".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
-        Coord break: tilt about x = {-np.rad2deg(params.thetas[-1])}
-        Biconic: radius = {-lens_radius} semi-dimater = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
-        Coord break: tilt about x = {np.rad2deg(params.thetas[-1])}
-        Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
-        Coord break: tilt about x = {-np.rad2deg(params.det_arr_angle)}
-        Image (Standard): semi-dimater = {config.det_arr_length / 2}"""
+"""
+        zemax_design, zemax_file = create_zmx(config, params, detarr_offset)
+        display += zemax_design
         print(display)
-        with open("len.zmx", "w") as f:
-            f.write(create_zmx(config, params, ytans, thickness, lens_radius, chord, detarr_offset))
+        with open("spec.zmx", "w") as f:
+            f.write(zemax_file)
         text_ax.cla()
         text_ax.text(0, 0.5, display, horizontalalignment='left', verticalalignment='center',
                      transform=text_ax.transAxes)
