@@ -90,7 +90,7 @@ SURF 0
   MEMA 0 0 0 0 1 ""
   POPS 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0
 {create_coord_break(next(incrementer), decenter_y=config.prism_height / 2 - params.y_mean)}
-{f"{newline}".join(create_tilt(next(incrementer), t, config.prism_height / 2, glass=g, y_tangent=y) for i, (g, y, t) in enumerate(zip(params.glass_names, ytans, thickness)))}
+{f"{newline}".join(create_tilt(next(incrementer), thickness=t, semi_diameter=config.prism_height / 2, glass=g, y_tangent=-y) for i, (g, y, t) in enumerate(zip(params.glass_names, ytans, thickness)))}
 {create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.thetas[-1]))}
 {create_biconic(next(incrementer), radius=-lens_radius, semi_diameter=chord / 2)}
 {create_coord_break(next(incrementer), tilt_about_x=np.rad2deg(params.thetas[-1]))}
@@ -192,7 +192,7 @@ def create_biconic(
 ):
     return new_surface(
         surface_number,
-        "TILTSURF",
+        "BICONICX",
         params=[
             x_radius,
         ],
@@ -229,7 +229,7 @@ SURF {surface_number}
   SLAB 0
   {params}
   DISZ {thickness}{glass}
-  DIAM {semi_diameter} 0 0 0 1 ""
+  DIAM {semi_diameter} 1 0 0 1 ""
   MEMA {semi_diameter} 0 0 0 1 ""
   POPS 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0{flap}\
 """
