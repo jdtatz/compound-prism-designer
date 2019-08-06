@@ -32,7 +32,7 @@ impl std::error::Error for CatalogError {}
 ///
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Glass {
     Schott([f64; 6]),
     Sellmeier1([f64; 6]),
@@ -239,7 +239,7 @@ pub fn new_catalog(file: &str) -> Result<BTreeMap<String, Glass>, CatalogError> 
             }
             dispform = nm
                 .next()
-                .and_then(|d| d.parse().ok())
+                .and_then(|d| d.parse().ok().or_else(|| d.parse::<f64>().ok().map(|f| f as _)))
                 .ok_or(CatalogError::GlassTypeNotFound)?;
         } else if line.starts_with("CD") {
             let cd = line
