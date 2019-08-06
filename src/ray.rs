@@ -66,27 +66,6 @@ fn rotate(angle: f64, vector: Pair) -> Pair {
     }
 }
 
-fn midpts<'a>(angles: &'a [f64], h: f64) -> impl Iterator<Item = Pair> + 'a {
-    let h2 = h * 0.5;
-    std::iter::once(angles[0].abs().tan() * h2)
-        .chain(angles.windows(2).map(move |win| {
-            let last = win[0];
-            let angle = win[1];
-            if (last >= 0.) ^ (angle >= 0.) {
-                (last.abs().tan() + angle.abs().tan()) * h2
-            } else if last.abs() > angle.abs() {
-                (last.abs().tan() - angle.abs().tan()) * h2
-            } else {
-                (angle.abs().tan() - last.abs().tan()) * h2
-            }
-        }))
-        .scan(0_f64, |x, width| {
-            *x += width;
-            Some(*x)
-        })
-        .map(move |x| Pair { x, y: h2 })
-}
-
 /// Collimated Polychromatic Gaussian Beam
 #[derive(Debug, Clone)]
 pub struct GaussianBeam {
@@ -111,6 +90,30 @@ pub struct CompoundPrism<'a> {
     pub height: f64,
     /// Width of compound prism
     pub width: f64,
+}
+
+impl<'a> CompoundPrism<'a> {
+    /// Iterator over the midpts of each prism surface
+    fn midpts<'s>(&'s self) -> impl Iterator<Item=Pair> + 's {
+        let h2 = self.height * 0.5;
+        std::iter::once(self.angles[0].abs().tan() * h2)
+            .chain(self.angles.windows(2).map(move |win| {
+                let last = win[0];
+                let angle = win[1];
+                if (last >= 0.) ^ (angle >= 0.) {
+                    (last.abs().tan() + angle.abs().tan()) * h2
+                } else if last.abs() > angle.abs() {
+                    (last.abs().tan() - angle.abs().tan()) * h2
+                } else {
+                    (angle.abs().tan() - last.abs().tan()) * h2
+                }
+            }))
+            .scan(0_f64, |x, width| {
+                *x += width;
+                Some(*x)
+            })
+            .map(move |x| Pair { x, y: h2 })
+    }
 }
 
 /// Array of detectors
@@ -299,7 +302,7 @@ impl Ray {
         prism: &CompoundPrism,
         wavelength: f64,
     ) -> Result<Ray, RayTraceError> {
-        let mut mids = midpts(&prism.angles, prism.height);
+        let mut mids = prism.midpts();
         let (ray, n1) = prism
             .glasses
             .iter()
@@ -357,7 +360,7 @@ impl Ray {
         detpos: DetectorArrayPositioning,
     ) -> Result<Vec<Pair>, RayTraceError> {
         let mut traced = Vec::new();
-        let mut mids = midpts(&prism.angles, prism.height);
+        let mut mids = prism.midpts();
         let (ray, n1) = prism
             .glasses
             .iter()

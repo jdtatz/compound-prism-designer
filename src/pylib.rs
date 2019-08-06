@@ -45,7 +45,17 @@ impl ToPyObject for Glass {
     type ObjectType = PyObject;
 
     fn to_py_object(&self, py: Python) -> Self::ObjectType {
-        match PyGlass::create_instance(py, *self) {
+        match PyGlass::create_instance(py, self.clone()) {
+            Ok(pg) => pg.into_object(),
+            Err(e) => {
+                e.restore(py);
+                py.None()
+            }
+        }
+    }
+
+    fn into_py_object(self, py: Python) -> Self::ObjectType {
+        match PyGlass::create_instance(py, self) {
             Ok(pg) => pg.into_object(),
             Err(e) => {
                 e.restore(py);
@@ -58,7 +68,7 @@ impl ToPyObject for Glass {
 impl FromPyObject<'_> for Glass {
     fn extract(py: Python, obj: &PyObject) -> PyResult<Self> {
         let pg: &PyGlass = obj.cast_as(py)?;
-        Ok(*pg.glass(py))
+        Ok(pg.glass(py).clone())
     }
 }
 
