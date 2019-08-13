@@ -1,5 +1,4 @@
 use arrayvec::ArrayVec;
-use std::collections::BTreeMap;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -222,42 +221,60 @@ impl<'g> Into<(i32, &'g [f64])> for &'g Glass {
     }
 }
 
-/// Create glass catalog from .agf file
-pub fn new_catalog(file: &str) -> Result<BTreeMap<String, Glass>, CatalogError> {
-    let mut catalog = BTreeMap::new();
-    let mut name = None;
-    let mut dispform: i32 = -1;
-    for line in file.lines() {
-        if line.starts_with("NM") {
-            let mut nm = line.split(' ');
-            nm.next(); // == "NM"
-            if name
-                .replace(nm.next().ok_or(CatalogError::NameNotFound)?)
-                .is_some()
-            {
-                return Err(CatalogError::GlassDescriptionNotFound);
-            }
-            dispform = nm
-                .next()
-                .and_then(|d| d.parse().ok().or_else(|| d.parse::<f64>().ok().map(|f| f as _)))
-                .ok_or(CatalogError::GlassTypeNotFound)?;
-        } else if line.starts_with("CD") {
-            let cd = line
-                .get(2..)
-                .map(|l| l.split(' ').filter_map(|s| s.parse().ok()))
-                .ok_or(CatalogError::GlassDescriptionNotFound)?;
-            if catalog
-                .insert(
-                    name.take()
-                        .ok_or(CatalogError::NameNotFound)?
-                        .to_uppercase(),
-                    Glass::new(dispform, cd)?,
-                )
-                .is_some()
-            {
-                return Err(CatalogError::DuplicateGlass);
-            }
+struct CatalogIter<'s> {
+    file_lines: core::str::Lines<'s>,
+    name: Option<&'s str>,
+    dispersion_form: i32,
+}
+
+impl<'s> CatalogIter<'s> {
+    fn new(file: &'s str) -> Self {
+        CatalogIter {
+            file_lines: file.lines(),
+            name: None,
+            dispersion_form: -1,
         }
     }
-    Ok(catalog)
+
+    fn next_result(&mut self) -> Result<Option<(&'s str, Glass)>, CatalogError> {
+        while let Some(line) = self.file_lines.next() {
+            if line.starts_with("NM") {
+                let mut nm = line.split(' ');
+                nm.next(); // == "NM"
+                if self.name
+                    .replace(nm.next().ok_or(CatalogError::NameNotFound)?)
+                    .is_some()
+                {
+                    return Err(CatalogError::GlassDescriptionNotFound);
+                }
+                self.dispersion_form = nm
+                    .next()
+                    .and_then(|d| d.parse().ok().or_else(|| d.parse::<f64>().ok().map(|f| f as _)))
+                    .ok_or(CatalogError::GlassTypeNotFound)?;
+            } else if line.starts_with("CD") {
+                let cd = line
+                    .get(2..)
+                    .map(|l| l.split(' ').filter_map(|s| s.parse().ok()))
+                    .ok_or(CatalogError::GlassDescriptionNotFound)?;
+                return Ok(Some((
+                    self.name.take().ok_or(CatalogError::NameNotFound)?,
+                    Glass::new(self.dispersion_form, cd)?
+                )));
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl<'s> Iterator for CatalogIter<'s> {
+    type Item = Result<(&'s str, Glass), CatalogError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_result().transpose()
+    }
+}
+
+/// Create glass catalog from .agf file
+pub fn new_catalog(file: &str) -> impl Iterator<Item=Result<(&str, Glass), CatalogError>> {
+    CatalogIter::new(file)
 }

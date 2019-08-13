@@ -15,6 +15,7 @@ def _thickness_fn(h, angles):
 
 def create_zmx(config, params, detarr_offset):
     incrementer = count(1)
+    wmin, wmax = config.wavelength_range
 
     angles = params.thetas
     ytans = np.tan(angles)
@@ -27,20 +28,20 @@ def create_zmx(config, params, detarr_offset):
     # R_lens = chord / (2 curvature)
     lens_radius = chord / (2 * params.curvature)
 
-    waves = np.linspace(config.wmin, config.wmax, 24)
+    waves = np.linspace(wmin, wmax, 24)
     waves = "\n".join(f"WAVM {1 + i} {w} 1" for i, w in enumerate(waves))
     newline = "\n"
 
     zemax_design = f"""\
-    Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {config.wmin} to {config.wmax}: 
+    Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {wmin} to {wmax}: 
         Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
-        {f"{newline}".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
+        {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
         Coord break: tilt about x = {-np.rad2deg(params.thetas[-1])}
         Biconic: radius = {-lens_radius} semi-dimater = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
         Coord break: tilt about x = {np.rad2deg(params.thetas[-1])}
         Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
         Coord break: tilt about x = {-np.rad2deg(params.det_arr_angle)}
-        Image (Standard): semi-dimater = {config.det_arr_length / 2}\
+        Image (Standard): semi-dimater = {config.detector_array_length / 2}\
     """
     zemax_file = f"""\
 VERS 181119 693 105780 L105780
@@ -105,8 +106,8 @@ SURF {next(incrementer)}
   MIRR 2 0
   SLAB 0
   DISZ 0
-  DIAM {config.det_arr_length / 2} 1 0 0 1 ""
-  MEMA {config.det_arr_length / 2} 0 0 0 1 ""
+  DIAM {config.detector_array_length / 2} 1 0 0 1 ""
+  MEMA {config.detector_array_length / 2} 0 0 0 1 ""
   POPS 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0
 BLNK
 BLNK 

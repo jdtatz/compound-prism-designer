@@ -4,7 +4,7 @@ import pygmo as pg
 import prism._prism as _prism
 from prism._prism import RayTraceError, create_catalog, Prism, DetectorArray, GaussianBeam
 
-Config = namedtuple("Config", "prism_count, wmin, wmax, prism_height, prism_width, det_arr_length, beam_width, det_arr_min_ci, bounds")
+Config = namedtuple("Config", "prism_count, wavelength_range, beam_width, prism_height, prism_width, detector_array_length, detector_array_min_ci, detector_array_bin_bounds, glasses")
 Params = namedtuple("Params", "glass_names, glasses, thetas, curvature, y_mean, det_arr_angle")
 Soln = namedtuple("Soln", "params, objectives")
 nobjective = 3
@@ -29,10 +29,10 @@ def to_prism(config: Config, params: Params):
 
 def to_det_array(config: Config, params: Params):
     return DetectorArray(
-        bins=config.bounds,
-        min_ci=config.det_arr_min_ci,
+        bins=config.detector_array_bin_bounds,
+        min_ci=config.detector_array_min_ci,
         angle=params.det_arr_angle,
-        length=config.det_arr_length,
+        length=config.detector_array_length,
     )
 
 
@@ -40,7 +40,7 @@ def to_beam(config: Config, params: Params):
     return GaussianBeam(
         width=config.beam_width,
         y_mean=params.y_mean,
-        w_range=(config.wmin, config.wmax),
+        w_range=config.wavelength_range,
     )
 
 
