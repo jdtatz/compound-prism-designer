@@ -3,9 +3,7 @@ use crate::ray::{
     detector_array_positioning, fitness, trace, transmission, CompoundPrism, DetectorArray,
     DetectorArrayPositioning, GaussianBeam, Pair, RayTraceError as _RayTraceError,
 };
-use cpython::{
-    exc, FromPyObject, ObjectProtocol, PyErr, PyObject, PyResult, Python, PythonObject, ToPyObject,
-};
+use cpython::*;
 use zerocopy::{FromBytes, LayoutVerified};
 
 trait IntoPyResult<T> {
@@ -40,30 +38,6 @@ py_class!(class PyGlass |py| {
         Ok(format!("{:?}", self.glass(py)))
     }
 });
-
-impl ToPyObject for Glass {
-    type ObjectType = PyObject;
-
-    fn to_py_object(&self, py: Python) -> Self::ObjectType {
-        match PyGlass::create_instance(py, self.clone()) {
-            Ok(pg) => pg.into_object(),
-            Err(e) => {
-                e.restore(py);
-                py.None()
-            }
-        }
-    }
-
-    fn into_py_object(self, py: Python) -> Self::ObjectType {
-        match PyGlass::create_instance(py, self) {
-            Ok(pg) => pg.into_object(),
-            Err(e) => {
-                e.restore(py);
-                py.None()
-            }
-        }
-    }
-}
 
 impl FromPyObject<'_> for Glass {
     fn extract(py: Python, obj: &PyObject) -> PyResult<Self> {
@@ -187,7 +161,12 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
         py,
         "create_catalog",
         py_fn!(py, __create_catalog(file: &str) -> PyResult<impl ToPyObject> {
-                new_catalog(file).into_py_result(py)
+                new_catalog(file)
+                .map(|r| r
+                    .into_py_result(py)
+                    .and_then(|(k, v)|
+                        Ok((k.to_owned(), PyGlass::create_instance(py, v)?))))
+                .collect::<PyResult<std::collections::BTreeMap<_, _>>>()
         }),
     )?;
     m.add(py, "fitness", py_fn!(py, __fitness(prism: CompoundPrism, pmts: DetectorArray, beam: GaussianBeam) -> PyResult<impl ToPyObject> {

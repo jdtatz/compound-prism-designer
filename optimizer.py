@@ -46,16 +46,17 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         size, ninfo, dev = soln.objectives
 
         det_arr_pos, det_arr_dir = det = detector_array_position(config, params)
-        det_arr_end = det_arr_pos + det_arr_dir * config.det_arr_length
+        det_arr_end = det_arr_pos + det_arr_dir * config.detector_array_length
 
         midpt = list(midpts_gen(config.prism_height, params.thetas))[-1]
-        detarr_offset = (det_arr_pos + det_arr_dir * config.det_arr_length / 2) - midpt
+        detarr_offset = (det_arr_pos + det_arr_dir * config.detector_array_length / 2) - midpt
 
         draw_compound_prism(prism_plt, config, params)
         spectro = plt.Polygon((det_arr_pos, det_arr_end), closed=None, fill=None, edgecolor='k')
         prism_plt.add_patch(spectro)
 
-        for w, color in zip((config.wmin, (config.wmin + config.wmax) / 2, config.wmax), ('r', 'g', 'b')):
+        wmin, wmax = config.wavelength_range
+        for w, color in zip((wmin, (wmin + wmax) / 2, wmax), ('r', 'g', 'b')):
             for y in (params.y_mean - config.beam_width, params.y_mean, params.y_mean + config.beam_width):
                 try:
                     ray = np.stack(tuple(trace(w, y, config, params, det)), axis=0)
@@ -90,7 +91,7 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         trans_plt.cla()
         violin_plt.cla()
 
-        waves = np.linspace(config.wmin, config.wmax, 100)
+        waves = np.linspace(config.wavelength_range[0], config.wavelength_range[1], 100)
         ts = transmission_data(waves, config, params, det)
         p_det = ts.sum(axis=1) * (1 / len(waves))
         p_w_l_D = ts.sum(axis=0)
@@ -108,7 +109,7 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         parts = violin_plt.violin(vpstats, showextrema=False, widths=1)
         for pc in parts['bodies']:
             pc.set_facecolor('black')
-        violin_plt.plot([1, len(p_det)], [config.wmin, config.wmax], 'k--')
+        violin_plt.plot([1, len(p_det)], config.wavelength_range, 'k--')
         det_plt.scatter(1 + np.arange(len(p_det)), p_det * 100, color='k')
         trans_plt.plot(waves, p_w_l_D * 100, 'k')
         trans_plt.axhline(np.mean(p_w_l_D) * 100, color='k', linestyle='--')
@@ -146,11 +147,11 @@ if __name__ == "__main__":
         prism_height=toml_spec["compound-prism"]["height"],
         prism_width=toml_spec["compound-prism"]["width"],
         beam_width=toml_spec["gaussian-beam"]["width"],
-        wmin=toml_spec["gaussian-beam"]["wmin"],
-        wmax=toml_spec["gaussian-beam"]["wmax"],
-        det_arr_length=toml_spec["detector-array"]["length"],
-        det_arr_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"].get("max-incident-angle", 90))),
-        bounds=np.array(toml_spec["detector-array"]["bounds"])
+        wavelength_range=(toml_spec["gaussian-beam"]["wmin"], toml_spec["gaussian-beam"]["wmax"]),
+        detector_array_length=toml_spec["detector-array"]["length"],
+        detector_array_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"].get("max-incident-angle", 90))),
+        detector_array_bin_bounds=np.array(toml_spec["detector-array"]["bounds"]),
+        glasses=list(catalog.items())
     )
 
     opt_dict = {"iteration-count": 1000, "thread-count": 0, "pop-size": 20, **toml_spec.get("optimizer", {})}

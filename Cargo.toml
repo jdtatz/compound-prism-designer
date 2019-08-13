@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 derive_more = { version = "0.15.0", features = ["no_std"]}
 libm = "0.1.4"
 arrayvec = { version = "0.4.11", default-features = false, features = ["array-sizes-33-128"] }
-cpython = { version = "0.2.1", features = ["extension-module"]}
+cpython = { version = "0.3.0", features = ["extension-module"]}
 zerocopy = "0.2.7"
 
 [profile.release]
