@@ -84,6 +84,8 @@ pub struct CompoundPrism<'a> {
     pub glasses: Cow<'a, [Glass]>,
     /// Angles that parameterize the shape of the compound prism
     pub angles: Cow<'a, [f64]>,
+    /// Lengths that parameterize the trapezoidal shape of the compound prism
+    pub lengths: Cow<'a, [f64]>,
     /// Lens Curvature of last surface of compound prism
     pub curvature: f64,
     /// Height of compound prism
@@ -97,17 +99,20 @@ impl<'a> CompoundPrism<'a> {
     fn midpts<'s>(&'s self) -> impl Iterator<Item=Pair> + 's {
         let h2 = self.height * 0.5;
         std::iter::once(self.angles[0].abs().tan() * h2)
-            .chain(self.angles.windows(2).map(move |win| {
-                let last = win[0];
-                let angle = win[1];
-                if (last >= 0.) ^ (angle >= 0.) {
-                    (last.abs().tan() + angle.abs().tan()) * h2
-                } else if last.abs() > angle.abs() {
-                    (last.abs().tan() - angle.abs().tan()) * h2
-                } else {
-                    (angle.abs().tan() - last.abs().tan()) * h2
-                }
-            }))
+            .chain(self.angles
+                .windows(2)
+                .zip(self.lengths.iter())
+                .map(move |(win, len)| {
+                    let last = win[0];
+                    let angle = win[1];
+                    if (last >= 0.) ^ (angle >= 0.) {
+                        (last.abs().tan() + angle.abs().tan()) * h2 + len
+                    } else if last.abs() > angle.abs() {
+                        (last.abs().tan() - angle.abs().tan()) * h2 + len
+                    } else {
+                        (angle.abs().tan() - last.abs().tan()) * h2 + len
+                    }
+                }))
             .scan(0_f64, |x, width| {
                 *x += width;
                 Some(*x)
@@ -274,7 +279,7 @@ impl Ray {
         self,
         detarr: &DetectorArray,
         detpos: DetectorArrayPositioning,
-    ) -> Result<(f64, f64), RayTraceError> {
+    ) -> Result<(Pair, f64, f64), RayTraceError> {
         let normal = rotate(detarr.angle, (-1_f64, 0_f64).into());
         debug_assert!(normal.is_unit());
         let ci = -self.direction.dot(normal);
@@ -289,7 +294,10 @@ impl Ray {
         let p = self.origin + self.direction * d;
         debug_assert!((detpos.dir).is_unit());
         let pos = (p - detpos.pos).dot(detpos.dir);
-        Ok((pos, self.transmittance))
+        if pos < 0_f64 || detarr.length < pos {
+            return Err(RayTraceError::NoSurfaceIntersection);
+        }
+        Ok((p, pos, self.transmittance))
     }
 
     /// Propagate a ray of `wavelength` through the compound prism
@@ -338,7 +346,7 @@ impl Ray {
         prism: &CompoundPrism,
         detarr: &DetectorArray,
         detpos: DetectorArrayPositioning,
-    ) -> Result<(f64, f64), RayTraceError> {
+    ) -> Result<(Pair, f64, f64), RayTraceError> {
         self.propagate_internal(prism, wavelength)?
             .intersect_detector_array(detarr, detpos)
     }
@@ -374,24 +382,15 @@ impl Ray {
                 Ok((ray, n2))
             })?;
         traced.push(ray.origin);
-        let angle = prism.angles[prism.glasses.len()];
+        let midpt = mids.next().unwrap();
+        let angle = prism.angles[prism.angles.len() - 1];
         let n2 = 1_f64;
         let normal = rotate(angle, (-1_f64, 0_f64).into());
-        let midpt = mids.next().unwrap();
         let ray =
             ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)?;
         traced.push(ray.origin);
-        let normal = rotate(detarr.angle, (-1_f64, 0_f64).into());
-        let ci = -ray.direction.dot(normal);
-        if ci <= detarr.min_ci {
-            return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
-        }
-        let d = (ray.origin - detpos.pos).dot(normal) / ci;
-        if d <= 0_f64 {
-            return Err(RayTraceError::Unknown);
-        }
-        let p = ray.origin + ray.direction * d;
-        traced.push(p);
+        let (pos, _, _) = ray.intersect_detector_array(detarr, detpos)?;
+        traced.push(pos);
         Ok(traced)
     }
 }
@@ -482,8 +481,8 @@ fn p_dets_l_wavelength(
                 * libm::erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width)
                 * FRAC_SQRT_2_SQRT_PI
                 / beam.width;
-            debug_assert!(g_y.is_finite() && g_y >= 0.);
-            if let Ok((pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
+            debug_assert!(g_y.is_finite() && 0. <= g_y && (g_y * integration_factor) <= 1.);
+            if let Ok((_, pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
                 debug_assert!(pos.is_finite());
                 debug_assert!(t.is_finite());
                 debug_assert!(0. <= t && t <= 1.);
@@ -674,9 +673,11 @@ mod tests {
         ];
         let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
+        let lengths = [0_f64; 3];
         let prism = CompoundPrism {
             glasses: glasses.as_ref().into(),
             angles: angles.as_ref().into(),
+            lengths: lengths.as_ref().into(),
             curvature: 0.21,
             height: 2.5,
             width: 2.,

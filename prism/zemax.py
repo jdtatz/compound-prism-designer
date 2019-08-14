@@ -3,15 +3,15 @@ from itertools import count
 from prism import Config, Params
 
 
-def _thickness_fn(h, angles):
+def _thickness_fn(h, angles, lengths):
     h = h / 2
-    for last, angle in zip(angles[:-1], angles[1:]):
+    for last, angle, l in zip(angles[:-1], angles[1:], lengths):
         if (last >= 0) ^ (angle >= 0):
-            yield (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h
+            yield (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h + l
         elif np.abs(last) > np.abs(angle):
-            yield (np.tan(np.abs(last)) - np.tan(np.abs(angle))) * h
+            yield (np.tan(np.abs(last)) - np.tan(np.abs(angle))) * h + l
         else:
-            yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h
+            yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h + l
 
 
 def create_zmx(config: Config, params: Params, detarr_offset):
@@ -20,7 +20,7 @@ def create_zmx(config: Config, params: Params, detarr_offset):
 
     angles = params.angles
     ytans = np.tan(angles)
-    thickness = list(_thickness_fn(config.prism_height, angles))
+    thickness = list(_thickness_fn(config.prism_height, angles, params.lengths))
 
     c, s = np.cos(params.angles[-1]), np.sin(params.angles[-1])
     chord = config.prism_height / c

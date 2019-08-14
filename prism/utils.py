@@ -2,22 +2,22 @@ import numpy as np
 from prism import Config, Params
 
 
-def midpts_gen(h, angles):
+def midpts_gen(h, angles, lengths):
     h = h / 2
     x = np.tan(np.abs(angles[0])) * h
     yield x, h
-    for last, angle in zip(angles[:-1], angles[1:]):
+    for last, angle, l in zip(angles[:-1], angles[1:], lengths):
         if (last >= 0) ^ (angle >= 0):
-            x += (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h
+            x += (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h + l
         elif np.abs(last) > np.abs(angle):
-            x += (np.tan(np.abs(last)) - np.tan(np.abs(angle))) * h
+            x += (np.tan(np.abs(last)) - np.tan(np.abs(angle))) * h + l
         else:
-            x += (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h
+            x += (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h + l
         yield x, h
 
 
-def lines_gen(h, angles):
-    for midpt, angle in zip(midpts_gen(h, angles), angles):
+def lines_gen(h, angles, lengths):
+    for midpt, angle in zip(midpts_gen(h, angles, lengths), angles):
         mid_x = midpt[0]
         diff = np.tan(np.abs(angle)) * (h / 2)
         l, r = mid_x - diff, mid_x + diff
@@ -33,19 +33,19 @@ def draw_compound_prism(ax, config: Config, params: Params):
     import matplotlib.patches
 
     angles = params.angles
-    lines = np.array(list(lines_gen(config.prism_height, params.angles)))
+    lines = np.array(list(lines_gen(config.prism_height, params.angles, params.lengths)))
 
-    def triange_gen():
+    def polygon_gen():
         for (a, b), (c, d), last, angle in zip(lines[:-1], lines[1:], angles[:-1], angles[1:]):
             if (last >= 0) ^ (angle >= 0):
-                yield np.array((d, a, b))
+                yield np.array((d, a, b, c))
             elif np.abs(last) > np.abs(angle):
-                yield np.array((b, a, c))
+                yield np.array((d, b, a, c))
             else:
-                yield np.array((a, b, d))
-    triangles = list(triange_gen())
+                yield np.array((c, a, b, d))
+    polygons = list(polygon_gen())
 
-    midpt = list(midpts_gen(config.prism_height, params.angles))[-1]
+    midpt = list(midpts_gen(config.prism_height, params.angles, params.lengths))[-1]
     c, s = np.cos(params.angles[-1]), np.sin(params.angles[-1])
     R = np.array(((c, -s), (s, c)))
     normal = R @ (-1, 0)
@@ -61,8 +61,8 @@ def draw_compound_prism(ax, config: Config, params: Params):
         t1, t2 = t2, t1
 
     ax.cla()
-    for i, tri in enumerate(triangles):
-        poly = mpl.patches.Polygon(tri, edgecolor='k', facecolor=('gray' if i % 2 else 'white'), closed=False)
+    for i, poly in enumerate(polygons):
+        poly = mpl.patches.Polygon(poly, edgecolor='k', facecolor=('gray' if i % 2 else 'white'), closed=False)
         ax.add_patch(poly)
     arc = mpl.path.Path.arc(t1, t2)
     arc = mpl.path.Path(arc.vertices * lens_radius + center, arc.codes)

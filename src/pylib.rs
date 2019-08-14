@@ -112,6 +112,7 @@ impl<'p> FromPyObject<'p> for CompoundPrism<'p> {
         Ok(CompoundPrism {
             glasses: get_attr::<Vec<_>>(py, obj, "glasses")?.into(),
             angles: get_buffer_attr::<f64>(py, obj, "angles")?.into(),
+            lengths: get_buffer_attr::<f64>(py, obj, "lengths")?.into(),
             curvature: get_attr(py, obj, "curvature")?,
             height: get_attr(py, obj, "height")?,
             width: get_attr(py, obj, "width")?,
@@ -148,7 +149,7 @@ fn init_mod(py: Python, m: &cpython::PyModule) -> PyResult<()> {
     let namedtuple = collections.get(py, "namedtuple")?;
     let prism_tuple = namedtuple.call(
         py,
-        ("Prism", "glasses, angles, curvature, height, width"),
+        ("Prism", "glasses, angles, lengths, curvature, height, width"),
         None,
     )?;
     let det_tuple = namedtuple.call(py, ("DetectorArray", "bins, min_ci, angle, length"), None)?;
