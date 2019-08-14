@@ -1,5 +1,6 @@
 import numpy as np
 from itertools import count
+from prism import Config, Params
 
 
 def _thickness_fn(h, angles):
@@ -13,15 +14,15 @@ def _thickness_fn(h, angles):
             yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h
 
 
-def create_zmx(config, params, detarr_offset):
+def create_zmx(config: Config, params: Params, detarr_offset):
     incrementer = count(1)
     wmin, wmax = config.wavelength_range
 
-    angles = params.thetas
+    angles = params.angles
     ytans = np.tan(angles)
     thickness = list(_thickness_fn(config.prism_height, angles))
 
-    c, s = np.cos(params.thetas[-1]), np.sin(params.thetas[-1])
+    c, s = np.cos(params.angles[-1]), np.sin(params.angles[-1])
     chord = config.prism_height / c
     # curvature = R_max / R_lens
     # R_max = chord / 2
@@ -36,11 +37,11 @@ def create_zmx(config, params, detarr_offset):
     Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {wmin} to {wmax}: 
         Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
         {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
-        Coord break: tilt about x = {-np.rad2deg(params.thetas[-1])}
+        Coord break: tilt about x = {-np.rad2deg(params.angles[-1])}
         Biconic: radius = {-lens_radius} semi-dimater = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
-        Coord break: tilt about x = {np.rad2deg(params.thetas[-1])}
+        Coord break: tilt about x = {np.rad2deg(params.angles[-1])}
         Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
-        Coord break: tilt about x = {-np.rad2deg(params.det_arr_angle)}
+        Coord break: tilt about x = {-np.rad2deg(params.detector_array_angle)}
         Image (Standard): semi-dimater = {config.detector_array_length / 2}\
     """
     zemax_file = f"""\
@@ -92,11 +93,11 @@ SURF 0
   POPS 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0
 {create_coord_break(next(incrementer), decenter_y=config.prism_height / 2 - params.y_mean)}
 {f"{newline}".join(create_tilt(next(incrementer), thickness=t, semi_diameter=config.prism_height / 2, glass=g, y_tangent=-y) for i, (g, y, t) in enumerate(zip(params.glass_names, ytans, thickness)))}
-{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.thetas[-1]))}
+{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.angles[-1]))}
 {create_biconic(next(incrementer), radius=-lens_radius, semi_diameter=chord / 2)}
-{create_coord_break(next(incrementer), tilt_about_x=np.rad2deg(params.thetas[-1]))}
+{create_coord_break(next(incrementer), tilt_about_x=np.rad2deg(params.angles[-1]))}
 {create_coord_break(next(incrementer), thickness=detarr_offset[0], decenter_y=detarr_offset[1])}
-{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.det_arr_angle))}
+{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.detector_array_angle))}
 SURF {next(incrementer)}
   TYPE STANDARD
   FIMP 
