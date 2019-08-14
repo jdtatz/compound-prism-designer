@@ -48,7 +48,7 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         det_arr_pos, det_arr_dir = det = detector_array_position(config, params)
         det_arr_end = det_arr_pos + det_arr_dir * config.detector_array_length
 
-        midpt = list(midpts_gen(config.prism_height, params.angles))[-1]
+        midpt = list(midpts_gen(config.prism_height, params.angles, params.lengths))[-1]
         detarr_offset = (det_arr_pos + det_arr_dir * config.detector_array_length / 2) - midpt
 
         draw_compound_prism(prism_plt, config, params)
@@ -71,6 +71,7 @@ def show_interactive(config: Config, solns: [Soln], units: str):
         display = f"""CompoundPrism ({', '.join(params.glass_names)})
     Parameters:
         angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in params.angles)}
+        lengths: {', '.join(f'{l:.4}' for l in params.lengths)}
         y_mean ({units}): {params.y_mean:.4}
         curvature: {params.curvature:.4}
         detector array angle (deg): {np.rad2deg(params.detector_array_angle):.4}
@@ -143,7 +144,7 @@ if __name__ == "__main__":
     units = toml_spec.get("length-unit", "a.u.")
 
     config = Config(
-        prism_count=toml_spec["compound-prism"]["count"],
+        max_prism_count=toml_spec["compound-prism"]["max-count"],
         prism_height=toml_spec["compound-prism"]["height"],
         prism_width=toml_spec["compound-prism"]["width"],
         beam_width=toml_spec["gaussian-beam"]["width"],

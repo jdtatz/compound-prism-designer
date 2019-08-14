@@ -6,7 +6,7 @@ from prism._prism import RayTraceError, create_catalog, Prism, DetectorArray, Ga
 
 
 class Config(typing.NamedTuple):
-    prism_count: int
+    max_prism_count: int
     wavelength_range: typing.Tuple[float, float]
     beam_width: float
     prism_height: float
@@ -18,9 +18,11 @@ class Config(typing.NamedTuple):
 
 
 class Params(typing.NamedTuple):
+    prism_count: int
     glass_names: typing.Sequence[str]
     glasses: typing.Sequence[PyGlass]
     angles: typing.Sequence[float]
+    lengths: typing.Sequence[float]
     curvature: float
     y_mean: float
     detector_array_angle: float
@@ -35,14 +37,27 @@ nobjective = 3
 
 
 def to_params(config: Config, p: np.ndarray):
-    glass_names, glasses = zip(*(config.glasses[min(int(i), len(config.glasses) - 1)] for i in p[:config.prism_count]))
+    def slices():
+        arr = np.asarray(p)
+        sizes = 1, config.max_prism_count, config.max_prism_count + 1, config.max_prism_count, 1, 1, 1
+        for i in sizes:
+            if i == 1:
+                yield arr[0]
+            else:
+                yield arr[:i]
+            arr = arr[i:]
+    params = list(slices())
+    prism_count = int(np.clip(params[0], 1, config.max_prism_count))
+    glass_names, glasses = zip(*(config.glasses[min(int(i), len(config.glasses) - 1)] for i in params[1][:prism_count]))
     return Params(
+        prism_count=prism_count,
         glass_names=glass_names,
         glasses=glasses,
-        angles=np.asarray(p[config.prism_count:config.prism_count * 2 + 1]),
-        curvature=p[-3],
-        y_mean=p[-2],
-        detector_array_angle=p[-1]
+        angles=params[2][:prism_count + 1],
+        lengths=params[3][:prism_count],
+        curvature=params[4],
+        y_mean=params[5],
+        detector_array_angle=params[6]
     )
 
 
@@ -50,6 +65,7 @@ def to_prism(config: Config, params: Params):
     return Prism(
         glasses=params.glasses,
         angles=params.angles,
+        lengths=params.lengths,
         curvature=params.curvature,
         height=config.prism_height,
         width=config.prism_width,
@@ -132,18 +148,22 @@ class PyGmoPrismProblem:
         # from multiprocessing.dummy import Pool
         return np.concatenate(list(map(
             lambda v: self.fitness(v),
-            vs.reshape(-1, 2 * self.config.prism_count + 4))), axis=None)
+            vs.reshape(-1, 3 * self.config.max_prism_count + 5))), axis=None)
 
     def get_bounds(self):
-        nprism = self.config.prism_count
+        nprism = self.config.max_prism_count
+        prism_count_bounds = 1, 1 + self.config.max_prism_count
         glass_bounds = nprism * [(0, len(self.config.glasses))]
         angle_bounds = (nprism + 1) * [(-np.pi / 2, np.pi / 2)]
+        length_bounds = nprism * [(0., self.config.prism_height)]
         curvature_bounds = 0.001, 1.0
         y_mean_bounds = 0, self.config.prism_height
         det_arr_angle_bounds = -np.pi, np.pi
         return tuple(zip(*[
+            prism_count_bounds,
             *glass_bounds,
             *angle_bounds,
+            *length_bounds,
             curvature_bounds,
             y_mean_bounds,
             det_arr_angle_bounds,
