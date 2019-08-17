@@ -1,5 +1,4 @@
 use crate::glasscat::Glass;
-use crate::quad::{Quadrature, KR21};
 use std::borrow::Cow;
 
 #[derive(Debug, Display, Clone, Copy)]
@@ -444,6 +443,39 @@ pub fn detector_array_positioning(
     Ok(DetectorArrayPositioning { pos, dir })
 }
 
+/// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
+#[derive(Clone)]
+struct Welford {
+    count: f64,
+    mean: f64,
+    m2: f64,
+}
+
+impl Welford {
+    fn new() -> Self {
+        Welford {
+            count: 0.,
+            mean: 0.,
+            m2: 0.,
+        }
+    }
+    fn next_sample(&mut self, x: f64) {
+        self.count += 1.;
+        let delta = x - self.mean;
+        self.mean += delta / self.count;
+        let delta2 = x - self.mean;
+        self.m2 += delta * delta2;
+    }
+    #[allow(dead_code)]
+    fn variance(&self) -> f64 {
+        self.m2 / self.count
+    }
+    fn sample_variance(&self) -> f64 {
+        self.m2 / (self.count - 1.)
+    }
+
+}
+
 /// Conditional Probability of detection per detector given a wavelength
 /// { p(D=d|Λ=λ) : d in D }
 ///
@@ -459,47 +491,51 @@ fn p_dets_l_wavelength(
     detarr: &DetectorArray,
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
-) -> Vec<f64> {
-    let mut p_dets_l_w = vec![0_f64; detarr.bins.len()];
-    // p(D=d|Λ=λ) = Integrate(T(λ, y) * g(y) * step(d_l <= S(λ, y) < d_u), {y, 0, prism.height})
-    KR21::inplace_integrate(
-        |y, integration_factor| {
-            let ray = Ray {
-                origin: (0., y).into(),
-                direction: (1., 0.).into(),
-                transmittance: 1.,
-            };
-            let y_bar = y - beam.y_mean;
-            // sqrt(2 / π)
-            const FRAC_SQRT_2_SQRT_PI: f64 =
-                core::f64::consts::FRAC_1_SQRT_2 * core::f64::consts::FRAC_2_SQRT_PI;
-            // circular gaussian beam pdf parameterized by 1/e2 beam width
-            // f(z, y) = Exp[-2 (z^2 + y^2) / beam.width^2] * 2 / (π beam.width^2)
-            // g(y) = Integrate[f(z, y), {z, -prism.width / 2, prism.width / 2}]
-            // g(y) = Exp[-2 y^2 / beam.width^2] Erf[w / (Sqrt[2] beam.width)] Sqrt[2 / π] / beam_width
-            let g_y = f64::exp(-2. * y_bar * y_bar / (beam.width * beam.width))
-                * libm::erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width)
-                * FRAC_SQRT_2_SQRT_PI
-                / beam.width;
-            debug_assert!(g_y.is_finite() && 0. <= g_y && (g_y * integration_factor) <= 1.);
-            if let Ok((_, pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
-                debug_assert!(pos.is_finite());
-                debug_assert!(t.is_finite());
-                debug_assert!(0. <= t && t <= 1.);
-                let pdf = t * g_y * integration_factor;
-                for (p_det_l_w, &[l, u]) in p_dets_l_w.iter_mut().zip(detarr.bins.iter()) {
-                    if l <= pos && pos < u {
-                        *p_det_l_w += pdf;
-                    }
+) -> impl IntoIterator<Item=f64> {
+    const MAX_N: usize = 1000;
+    let mut p_dets_l_w_stats = vec![Welford::new(); detarr.bins.len()];
+    let p_z = statrs::function::erf::erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width);
+    let mut qrng = quasirandom::Qrng::new(0);
+    for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+        let y = beam.y_mean - beam.width * core::f64::consts::FRAC_1_SQRT_2 * statrs::function::erf::erfc_inv(2. * u);
+        if y <= 0. || prism.height <= y {
+            for stat in p_dets_l_w_stats.iter_mut() {
+                stat.next_sample(0.);
+            }
+            continue;
+        }
+        let ray = Ray {
+            origin: (0., y).into(),
+            direction: (1., 0.).into(),
+            transmittance: 1.,
+        };
+        if let Ok((_, pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
+            debug_assert!(pos.is_finite());
+            debug_assert!(t.is_finite());
+            debug_assert!(0. <= t && t <= 1.);
+            let p_t = p_z * t;
+            debug_assert!(0. <= p_t && p_t <= 1.);
+            for (stat, &[l, u]) in p_dets_l_w_stats.iter_mut().zip(detarr.bins.iter()) {
+                if l <= pos && pos < u {
+                    stat.next_sample(p_t);
+                } else {
+                    stat.next_sample(0.);
                 }
             }
-        },
-        0.,
-        prism.height,
-        10,
-    );
-    debug_assert!(p_dets_l_w.iter().all(|&p| 0. <= p && p <= 1.));
-    p_dets_l_w
+        } else {
+            for stat in p_dets_l_w_stats.iter_mut() {
+                stat.next_sample(0.);
+            }
+        }
+        if p_dets_l_w_stats.iter().all(|stat| {
+            let err = stat.sample_variance() / stat.count.sqrt();
+            err < 5e-3
+        }) {
+            break;
+        }
+    };
+    debug_assert!(p_dets_l_w_stats.iter().all(|s| 0. <= s.mean && s.mean <= 1.));
+    p_dets_l_w_stats.into_iter().map(|w| w.mean)
 }
 
 /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
@@ -516,28 +552,33 @@ fn mutual_information(
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
 ) -> f64 {
-    let nbins = detarr.bins.len();
+    const MAX_N: usize = 1000;
     let (wmin, wmax) = beam.w_range;
-    let p_w = 1. / (wmax - wmin);
-    let mut info = 0_f64;
-    let mut p_dets = vec![0_f64; nbins];
-    // p(D=d) = Integrate[p(D=d|Λ=λ), {λ, wmin, wmax}]
-    KR21::inplace_integrate(
-        |w, integration_factor| {
-            let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
-            for (p_det, p_det_l_w) in p_dets.iter_mut().zip(p_dets_l_w) {
-                debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
-                if p_det_l_w > 0. {
-                    *p_det += p_w * p_det_l_w * integration_factor;
-                    info += p_w * p_det_l_w * p_det_l_w.log2() * integration_factor;
-                }
+    let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
+    let mut info_stats = vec![Welford::new(); detarr.bins.len()];
+    let mut qrng = quasirandom::Qrng::new(0);
+    for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+        let w = wmin + u * (wmax - wmin);
+        let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
+        for ((dstat, istat), p_det_l_w) in p_dets_stats.iter_mut().zip(info_stats.iter_mut()).zip(p_dets_l_w) {
+            debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
+            dstat.next_sample(p_det_l_w);
+            if p_det_l_w > 0. {
+                istat.next_sample(p_det_l_w * p_det_l_w.log2());
+            } else {
+                istat.next_sample(0.);
             }
-        },
-        wmin,
-        wmax,
-        5,
-    );
-    for p_det in p_dets {
+        }
+        if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
+            let err = stat.sample_variance() / stat.count.sqrt();
+            err < 5e-3
+        }) {
+            break;
+        }
+    }
+    let mut info: f64 = info_stats.into_iter().map(|s| s.mean).sum();
+    for stat in p_dets_stats {
+        let p_det = stat.mean;
         debug_assert!(0. <= p_det && p_det <= 1.);
         if p_det > 0. {
             info -= p_det * p_det.log2();
@@ -706,12 +747,12 @@ mod tests {
         let v = fitness(&prism, &detarr, &beam).expect("Merit function failed");
         assert!(
             approx_eq(v[0], 41.324065257329245, 1e-3),
-            "Size is incorrect. {} ≉ 41.324",
+            "Size is incorrect. {} ≉ 41.3",
             v[0]
         );
         assert!(
             approx_eq(v[1], -1.444212905142612, 1e-3),
-            "Mutual information is incorrect. {} ≉ -1.444",
+            "Mutual information is incorrect. {} ≉ -1.44",
             v[1]
         );
         assert!(
