@@ -1,8 +1,9 @@
+import dataclasses
 import typing
 import numpy as np
 import pygmo as pg
-import prism._prism as _prism
-from prism._prism import RayTraceError, create_catalog, Prism, DetectorArray, GaussianBeam, PyGlass
+import prism.rffi as _prism
+from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, PyGlass, DesignFitness
 
 
 class Config(typing.NamedTuple):
@@ -21,8 +22,8 @@ class Params(typing.NamedTuple):
     prism_count: int
     glass_names: typing.Sequence[str]
     glasses: typing.Sequence[PyGlass]
-    angles: typing.Sequence[float]
-    lengths: typing.Sequence[float]
+    angles: np.ndarray
+    lengths: np.ndarray
     curvature: float
     y_mean: float
     detector_array_angle: float
@@ -33,7 +34,7 @@ class Soln(typing.NamedTuple):
     objectives: typing.Tuple[float, float, float]
 
 
-nobjective = 3
+nobjective = len(dataclasses.fields(DesignFitness))
 
 
 def to_params(config: Config, p: np.ndarray):
@@ -62,7 +63,7 @@ def to_params(config: Config, p: np.ndarray):
 
 
 def to_prism(config: Config, params: Params):
-    return Prism(
+    return CompoundPrism(
         glasses=params.glasses,
         angles=params.angles,
         lengths=params.lengths,
@@ -85,19 +86,20 @@ def to_beam(config: Config, params: Params):
     return GaussianBeam(
         width=config.beam_width,
         y_mean=params.y_mean,
-        w_range=config.wavelength_range,
+        wavelength_range=config.wavelength_range,
     )
 
 
 def transmission_data(wavelengths: [float], config: Config, params: Params, det):
-    return np.array(
-        _prism.transmission(
-            wavelengths,
+    return np.stack([
+        _prism.p_dets_l_wavelength(
+            w,
             to_prism(config, params),
             to_det_array(config, params),
             to_beam(config, params),
             det
-        )
+        ) for w in wavelengths],
+        axis=1
     )
 
 
@@ -129,7 +131,7 @@ def fitness(config: Config, params: Params):
             to_beam(config, params),
         )
     except RayTraceError:
-        return [np.inf] * nobjective
+        return DesignFitness(size=np.inf, info=np.inf, deviation=np.inf)
 
 
 class PyGmoPrismProblem:
@@ -139,10 +141,10 @@ class PyGmoPrismProblem:
     def fitness(self, v: np.ndarray):
         params = to_params(self.config, v)
         val = fitness(self.config, params)
-        if val[0] > 30 * self.config.prism_height or abs(val[1]) < 0.1:
+        if val.size > 30 * self.config.prism_height or abs(val.info) < 0.1:
             return [np.inf] * nobjective
         else:
-            return val
+            return dataclasses.astuple(val)
 
     def batch_fitness(self, vs: np.ndarray):
         # from multiprocessing.dummy import Pool
@@ -183,7 +185,7 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config):
         pop_size = max(8, pop_size + 4 - pop_size % 4)
     prob = pg.problem(PyGmoPrismProblem(config))
     bfe = pg.bfe(pg.member_bfe())
-    a = pg.nsga2(gen=iter_count, m=0.05)
+    a = pg.nsga2(gen=iter_count, cr=0.98, m=0.1)
     a.set_bfe(bfe)
     algo = pg.algorithm(a)
     # w = np.array((1e-3, 1, 1e-4))

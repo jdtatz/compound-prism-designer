@@ -1,11 +1,29 @@
 from setuptools import setup
-from setuptools_rust import Binding, RustExtension
+
+
+def build_native(spec):
+    build = spec.add_external_build(
+        cmd=['cargo', 'build', '--release'],
+        path='./'
+    )
+
+    spec.add_cffi_module(
+        module_path='prism._native',
+        dylib=lambda: build.find_dylib('prism', in_path='target/release'),
+        header_filename=lambda: build.find_header('bindings.h', in_path='target'),
+        rtld_flags=['NOW', 'NODELETE']
+    )
+
 
 setup(
     name="prism",
-    version="0.0.1",
-    rust_extensions=[RustExtension("prism._prism", debug=False, binding=Binding.RustCPython)],
+    version="0.0.2",
     packages=["prism"],
-    install_requires=["numpy", "pygmo"],
     zip_safe=False,
+    platforms='any',
+    setup_requires=["milksnake"],
+    install_requires=["cffi", "numpy", "pygmo"],
+    milksnake_tasks=[
+        build_native
+    ]
 )
