@@ -1,4 +1,5 @@
 use arrayvec::ArrayVec;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -31,7 +32,7 @@ impl std::error::Error for CatalogError {}
 ///
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Glass {
     Schott([f64; 6]),
     Sellmeier1([f64; 6]),
@@ -241,7 +242,8 @@ impl<'s> CatalogIter<'s> {
             if line.starts_with("NM") {
                 let mut nm = line.split(' ');
                 nm.next(); // == "NM"
-                if self.name
+                if self
+                    .name
                     .replace(nm.next().ok_or(CatalogError::NameNotFound)?)
                     .is_some()
                 {
@@ -249,7 +251,11 @@ impl<'s> CatalogIter<'s> {
                 }
                 self.dispersion_form = nm
                     .next()
-                    .and_then(|d| d.parse().ok().or_else(|| d.parse::<f64>().ok().map(|f| f as _)))
+                    .and_then(|d| {
+                        d.parse()
+                            .ok()
+                            .or_else(|| d.parse::<f64>().ok().map(|f| f as _))
+                    })
                     .ok_or(CatalogError::GlassTypeNotFound)?;
             } else if line.starts_with("CD") {
                 let cd = line
@@ -258,7 +264,7 @@ impl<'s> CatalogIter<'s> {
                     .ok_or(CatalogError::GlassDescriptionNotFound)?;
                 return Ok(Some((
                     self.name.take().ok_or(CatalogError::NameNotFound)?,
-                    Glass::new(self.dispersion_form, cd)?
+                    Glass::new(self.dispersion_form, cd)?,
                 )));
             }
         }
@@ -275,6 +281,6 @@ impl<'s> Iterator for CatalogIter<'s> {
 }
 
 /// Create glass catalog from .agf file
-pub fn new_catalog(file: &str) -> impl Iterator<Item=Result<(&str, Glass), CatalogError>> {
+pub fn new_catalog(file: &str) -> impl Iterator<Item = Result<(&str, Glass), CatalogError>> {
     CatalogIter::new(file)
 }

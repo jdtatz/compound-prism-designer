@@ -3,7 +3,7 @@ from os import cpu_count
 from sys import argv
 import numpy as np
 import toml
-from prism import Config, Params, Soln, RayTraceError, create_catalog, detector_array_position, trace, transmission_data, use_pygmo
+from prism import Config, Params, Soln, RayTraceError, create_glass_catalog, detector_array_position, trace, transmission_data, use_pygmo
 from prism.zemax import create_zmx
 from prism.utils import draw_compound_prism, midpts_gen
 
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     toml_spec = toml.load(toml_file)
     catalog_path = toml_spec["catalog-path"]
     with open(catalog_path) as f:
-        catalog = create_catalog(f.read())
+        catalog = create_glass_catalog(f.read())
     units = toml_spec.get("length-unit", "a.u.")
 
     config = Config(

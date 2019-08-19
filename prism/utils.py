@@ -61,11 +61,15 @@ def draw_compound_prism(ax, config: Config, params: Params):
         t1, t2 = t2, t1
 
     ax.cla()
-    for i, poly in enumerate(polygons):
+    for i, poly in enumerate(polygons[:-1]):
         poly = mpl.patches.Polygon(poly, edgecolor='k', facecolor=('gray' if i % 2 else 'white'), closed=False)
         ax.add_patch(poly)
     arc = mpl.path.Path.arc(t1, t2)
     arc = mpl.path.Path(arc.vertices * lens_radius + center, arc.codes)
-    arc = mpl.patches.PathPatch(arc, fill=None)
-    ax.add_patch(arc)
+    if np.allclose(arc.vertices[-1], polygons[-1][0]):
+        last = mpl.path.Path.make_compound_path(arc, mpl.path.Path(polygons[-1]))
+    else:
+        last = mpl.path.Path.make_compound_path(arc, mpl.path.Path(polygons[-1][::-1]))
+    last = mpl.patches.PathPatch(last, fill=True, edgecolor='k', facecolor=('white' if len(polygons) % 2 else 'gray'))
+    ax.add_patch(last)
 

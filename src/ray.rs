@@ -1,4 +1,5 @@
 use crate::glasscat::Glass;
+use statrs::function::erf::{erf, erfc_inv};
 use std::borrow::Cow;
 
 #[derive(Debug, Display, Clone, Copy)]
@@ -27,6 +28,7 @@ impl RayTraceError {
 impl std::error::Error for RayTraceError {}
 
 /// vector in R^2 represented as a 2-tuple
+#[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, From, Neg, Add, Sub, Mul, Div)]
 pub struct Pair {
     pub x: f64,
@@ -95,23 +97,25 @@ pub struct CompoundPrism<'a> {
 
 impl<'a> CompoundPrism<'a> {
     /// Iterator over the midpts of each prism surface
-    fn midpts<'s>(&'s self) -> impl Iterator<Item=Pair> + 's {
+    fn midpts<'s>(&'s self) -> impl Iterator<Item = Pair> + 's {
         let h2 = self.height * 0.5;
         std::iter::once(self.angles[0].abs().tan() * h2)
-            .chain(self.angles
-                .windows(2)
-                .zip(self.lengths.iter())
-                .map(move |(win, len)| {
-                    let last = win[0];
-                    let angle = win[1];
-                    if (last >= 0.) ^ (angle >= 0.) {
-                        (last.abs().tan() + angle.abs().tan()) * h2 + len
-                    } else if last.abs() > angle.abs() {
-                        (last.abs().tan() - angle.abs().tan()) * h2 + len
-                    } else {
-                        (angle.abs().tan() - last.abs().tan()) * h2 + len
-                    }
-                }))
+            .chain(
+                self.angles
+                    .windows(2)
+                    .zip(self.lengths.iter())
+                    .map(move |(win, len)| {
+                        let last = win[0];
+                        let angle = win[1];
+                        if (last >= 0.) ^ (angle >= 0.) {
+                            (last.abs().tan() + angle.abs().tan()) * h2 + len
+                        } else if last.abs() > angle.abs() {
+                            (last.abs().tan() - angle.abs().tan()) * h2 + len
+                        } else {
+                            (angle.abs().tan() - last.abs().tan()) * h2 + len
+                        }
+                    }),
+            )
             .scan(0_f64, |x, width| {
                 *x += width;
                 Some(*x)
@@ -134,12 +138,13 @@ pub struct DetectorArray<'a> {
 }
 
 /// Positioning of detector array
+#[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct DetectorArrayPositioning {
     /// Position vector of array
-    pub pos: Pair,
+    pub position: Pair,
     /// Unit direction vector of array
-    pub dir: Pair,
+    pub direction: Pair,
 }
 
 /// Light Ray
@@ -285,14 +290,14 @@ impl Ray {
         if ci <= detarr.min_ci {
             return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
         }
-        let d = (self.origin - detpos.pos).dot(normal) / ci;
+        let d = (self.origin - detpos.position).dot(normal) / ci;
         if d <= 0_f64 {
             // panic!("RayTraceError::Unknown");
             return Err(RayTraceError::Unknown);
         }
         let p = self.origin + self.direction * d;
-        debug_assert!((detpos.dir).is_unit());
-        let pos = (p - detpos.pos).dot(detpos.dir);
+        debug_assert!((detpos.direction).is_unit());
+        let pos = (p - detpos.position).dot(detpos.direction);
         if pos < 0_f64 || detarr.length < pos {
             return Err(RayTraceError::NoSurfaceIntersection);
         }
@@ -440,7 +445,10 @@ pub fn detector_array_positioning(
         let u_vertex = lower_ray.origin + lower_ray.direction * d2;
         (u_vertex, -spec_dir)
     };
-    Ok(DetectorArrayPositioning { pos, dir })
+    Ok(DetectorArrayPositioning {
+        position: pos,
+        direction: dir,
+    })
 }
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
@@ -473,7 +481,6 @@ impl Welford {
     fn sample_variance(&self) -> f64 {
         self.m2 / (self.count - 1.)
     }
-
 }
 
 /// Conditional Probability of detection per detector given a wavelength
@@ -485,19 +492,22 @@ impl Welford {
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 ///  * `detpos` - the position and orientation of the detector array
-fn p_dets_l_wavelength(
+pub fn p_dets_l_wavelength(
     wavelength: f64,
     prism: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
-) -> impl IntoIterator<Item=f64> {
+) -> impl IntoIterator<Item = f64> {
     const MAX_N: usize = 1000;
+    // const FRAC_SQRT_2_SQRT_PI: f64 = core::f64::consts::FRAC_1_SQRT_2 * core::f64::consts::FRAC_2_SQRT_PI;
     let mut p_dets_l_w_stats = vec![Welford::new(); detarr.bins.len()];
-    let p_z = statrs::function::erf::erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width);
+    let p_z = erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width);
     let mut qrng = quasirandom::Qrng::new(0);
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
-        let y = beam.y_mean - beam.width * core::f64::consts::FRAC_1_SQRT_2 * statrs::function::erf::erfc_inv(2. * u);
+        let y = beam.y_mean - beam.width * core::f64::consts::FRAC_1_SQRT_2 * erfc_inv(2. * u);
+        // let y_bar = y - beam.y_mean;
+        // let pdf_y = f64::exp(-2. * y_bar * y_bar / (beam.width * beam.width)) * FRAC_SQRT_2_SQRT_PI / beam.width;
         if y <= 0. || prism.height <= y {
             for stat in p_dets_l_w_stats.iter_mut() {
                 stat.next_sample(0.);
@@ -529,12 +539,14 @@ fn p_dets_l_wavelength(
         }
         if p_dets_l_w_stats.iter().all(|stat| {
             let err = stat.sample_variance() / stat.count.sqrt();
-            err < 5e-3
+            err < 3e-3
         }) {
             break;
         }
-    };
-    debug_assert!(p_dets_l_w_stats.iter().all(|s| 0. <= s.mean && s.mean <= 1.));
+    }
+    debug_assert!(p_dets_l_w_stats
+        .iter()
+        .all(|s| 0. <= s.mean && s.mean <= 1.));
     p_dets_l_w_stats.into_iter().map(|w| w.mean)
 }
 
@@ -560,7 +572,11 @@ fn mutual_information(
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
         let w = wmin + u * (wmax - wmin);
         let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
-        for ((dstat, istat), p_det_l_w) in p_dets_stats.iter_mut().zip(info_stats.iter_mut()).zip(p_dets_l_w) {
+        for ((dstat, istat), p_det_l_w) in p_dets_stats
+            .iter_mut()
+            .zip(info_stats.iter_mut())
+            .zip(p_dets_l_w)
+        {
             debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
             dstat.next_sample(p_det_l_w);
             if p_det_l_w > 0. {
@@ -571,7 +587,7 @@ fn mutual_information(
         }
         if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
             let err = stat.sample_variance() / stat.count.sqrt();
-            err < 5e-3
+            err < 3e-3
         }) {
             break;
         }
@@ -612,32 +628,6 @@ pub fn trace(
     ray.trace(wavelength, prism, detarr, detpos)
 }
 
-/// Returns the matrix of transmission probabilities for the given `wavelengths` with the detectors
-/// { { p(D=d|Λ=λ) : λ in `wavelengths` } : d in D }
-///
-/// # Arguments
-///  * `wavelengths` - the wavelengths to find the transmission probabilities of
-///  * `prism` - the compound prism specification
-///  * `detarr` - detector array specification
-///  * `beam` - input gaussian beam specification
-///  * `detpos` - the position and orientation of the detector array
-pub fn transmission(
-    wavelengths: &[f64],
-    prism: &CompoundPrism,
-    detarr: &DetectorArray,
-    beam: &GaussianBeam,
-    detpos: DetectorArrayPositioning,
-) -> Vec<Vec<f64>> {
-    let mut ts = vec![vec![0_f64; wavelengths.len()]; detarr.bins.len()];
-    for (w_idx, w) in wavelengths.iter().cloned().enumerate() {
-        let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
-        for (b_idx, p_det_l_w) in p_dets_l_w.into_iter().enumerate() {
-            ts[b_idx][w_idx] = p_det_l_w;
-        }
-    }
-    ts
-}
-
 /// Return the fitness of the spectrometer design to be minimized by an optimizer.
 /// The fitness objectives are
 /// * size = the distance from the mean starting position of the beam to the center of detector array
@@ -654,7 +644,8 @@ pub fn fitness(
     beam: &GaussianBeam,
 ) -> Result<[f64; 3], RayTraceError> {
     let detpos = detector_array_positioning(prism, detarr, beam)?;
-    let deviation_vector = detpos.pos + detpos.dir * detarr.length * 0.5 - (0., beam.y_mean).into();
+    let deviation_vector =
+        detpos.position + detpos.direction * detarr.length * 0.5 - (0., beam.y_mean).into();
     let size = deviation_vector.norm();
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
     let info = mutual_information(prism, detarr, beam, detpos);

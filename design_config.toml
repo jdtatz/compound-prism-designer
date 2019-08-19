@@ -15,7 +15,7 @@ pop-size = 800
 
 # Compound prism design specification
 [compound-prism]
-# Number of prisms to use in design
+# Max number of prisms to use in design
 max-count = 6
 # Height of the prisms in [length-unit]
 height = 15

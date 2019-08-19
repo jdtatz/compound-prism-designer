@@ -34,15 +34,15 @@ def create_zmx(config: Config, params: Params, detarr_offset):
     newline = "\n"
 
     zemax_design = f"""\
-    Zemax Rows with Apeature pupil diameter = {config.beam_width} & Wavelengths from {wmin} to {wmax}: 
+    Zemax Rows with Aperture pupil diameter = {config.beam_width} & Wavelengths from {wmin} to {wmax}: 
         Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
-        {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-dimater = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
+        {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
         Coord break: tilt about x = {-np.rad2deg(params.angles[-1])}
-        Biconic: radius = {-lens_radius} semi-dimater = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
+        Biconic: radius = {-lens_radius} semi-diameter = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
         Coord break: tilt about x = {np.rad2deg(params.angles[-1])}
         Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
         Coord break: tilt about x = {-np.rad2deg(params.detector_array_angle)}
-        Image (Standard): semi-dimater = {config.detector_array_length / 2}\
+        Image (Standard): semi-diameter = {config.detector_array_length / 2}\
     """
     zemax_file = f"""\
 VERS 181119 693 105780 L105780

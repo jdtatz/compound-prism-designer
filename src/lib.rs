@@ -2,6 +2,6 @@
 #[macro_use]
 extern crate derive_more;
 
+mod clib;
 mod glasscat;
 mod ray;
-mod pylib;
