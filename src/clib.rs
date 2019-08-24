@@ -67,18 +67,20 @@ pub unsafe extern "C" fn update_glass_catalog(
     }
 }
 
+#[repr(C)]
+pub struct SerializeBytesState { _private: [u8; 0], }
+
 #[no_mangle]
 pub unsafe extern "C" fn serialize_glass(
     glass: &Glass,
-    buffer: *mut *mut u8,
-    length: *mut usize,
+    append_next_byte: fn(*mut SerializeBytesState, u8),
+    state_ptr: *mut SerializeBytesState,
 ) -> FfiResult {
     match serde_cbor::to_vec(glass) {
-        Ok(mut v) => {
-            v.shrink_to_fit();
-            length.write(v.len());
-            buffer.write(v.as_mut_ptr());
-            core::mem::forget(v);
+        Ok(v) => {
+            for b in v {
+                append_next_byte(state_ptr, b)
+            }
             None
         }
         Err(_) => Some("Failed to serialize"),
@@ -89,10 +91,10 @@ pub unsafe extern "C" fn serialize_glass(
 #[no_mangle]
 pub unsafe extern "C" fn deserialize_glass(
     glass: *mut *mut Glass,
-    buffer: *const u8,
-    length: usize,
+    serialized_bytes: *const u8,
+    serialized_bytes_length: usize,
 ) -> FfiResult {
-    match serde_cbor::from_slice(core::slice::from_raw_parts(buffer, length)) {
+    match serde_cbor::from_slice(core::slice::from_raw_parts(serialized_bytes, serialized_bytes_length)) {
         Ok(g) => {
             glass.write(Box::into_raw(Box::new(g)));
             None
@@ -103,11 +105,6 @@ pub unsafe extern "C" fn deserialize_glass(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn free_serialized_buffer(buffer: *mut u8, length: usize) {
-    drop(Vec::from_raw_parts(buffer, length, length))
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn free_glass(glass: *mut Glass) {
     drop(Box::from_raw(glass))
 }
@@ -115,7 +112,7 @@ pub unsafe extern "C" fn free_glass(glass: *mut Glass) {
 #[no_mangle]
 pub unsafe extern "C" fn create_compound_prism(
     prism_count: usize,
-    glasses: *const &Glass,
+    glasses: *const &'static Glass,
     angles: *const f64,
     lengths: *const f64,
     curvature: f64,
@@ -126,13 +123,9 @@ pub unsafe extern "C" fn create_compound_prism(
     let angles = core::slice::from_raw_parts(angles, 1 + prism_count);
     let lengths = core::slice::from_raw_parts(lengths, prism_count);
     Box::into_raw(Box::new(CompoundPrism {
-        glasses: glasses
-            .iter()
-            .map(|g| (*g).clone())
-            .collect::<Vec<Glass>>()
-            .into(),
-        angles: angles.into(),
-        lengths: lengths.into(),
+        glasses: glasses.to_owned().into(),
+        angles: angles.to_owned().into(),
+        lengths: lengths.to_owned().into(),
         curvature,
         height,
         width,
@@ -154,7 +147,7 @@ pub unsafe extern "C" fn create_detector_array(
 ) -> *mut DetectorArray<'static> {
     let bins = core::slice::from_raw_parts(bins, bin_count);
     Box::into_raw(Box::new(DetectorArray {
-        bins: bins.into(),
+        bins: bins.to_owned().into(),
         min_ci,
         angle,
         length,
@@ -230,6 +223,9 @@ pub unsafe extern "C" fn detector_array_position(
     .into()
 }
 
+#[repr(C)]
+pub struct ProbabilitiesState { _private: [u8; 0], }
+
 #[no_mangle]
 pub unsafe extern "C" fn p_dets_l_wavelength(
     wavelength: f64,
@@ -237,27 +233,16 @@ pub unsafe extern "C" fn p_dets_l_wavelength(
     detector_array: &DetectorArray,
     gaussian_beam: &GaussianBeam,
     detpos: &DetectorArrayPositioning,
-    probabilities: *mut *mut f64,
-    probabilities_len: *mut usize,
+    append_next_detector_probability: fn(*mut ProbabilitiesState, f64),
+    state_ptr: *mut ProbabilitiesState,
 ) {
-    let mut ps =
-        crate::ray::p_dets_l_wavelength(wavelength, prism, detector_array, gaussian_beam, *detpos)
-            .into_iter()
-            .collect::<Vec<_>>();
-    ps.shrink_to_fit();
-    probabilities.write(ps.as_mut_ptr());
-    probabilities_len.write(ps.len());
-    core::mem::forget(ps);
+    for p in crate::ray::p_dets_l_wavelength(wavelength, prism, detector_array, gaussian_beam, *detpos) {
+        append_next_detector_probability(state_ptr, p)
+    }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn free_probabilities(probabilities: *mut f64, probabilities_length: usize) {
-    drop(Vec::from_raw_parts(
-        probabilities,
-        probabilities_length,
-        probabilities_length,
-    ))
-}
+#[repr(C)]
+pub struct TracedRayState { _private: [u8; 0], }
 
 #[no_mangle]
 pub unsafe extern "C" fn trace(
@@ -266,30 +251,17 @@ pub unsafe extern "C" fn trace(
     prism: &CompoundPrism,
     detector_array: &DetectorArray,
     detpos: &DetectorArrayPositioning,
-    traced_positions: *mut *mut Pair,
-    traced_positions_len: *mut usize,
+    append_next_ray_position: fn(*mut TracedRayState, Pair),
+    state_ptr: *mut TracedRayState,
 ) -> FfiResult {
     match crate::ray::trace(wavelength, inital_y, prism, detector_array, *detpos) {
-        Ok(mut t) => {
-            t.shrink_to_fit();
-            traced_positions.write(t.as_mut_ptr());
-            traced_positions_len.write(t.len());
-            core::mem::forget(t);
+        Ok(t) => {
+            for p in t {
+                append_next_ray_position(state_ptr,  p)
+            }
             None
         }
         Err(e) => Some(e.name()),
     }
     .into()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn free_traced_positions(
-    traced_positions: *mut Pair,
-    traced_positions_length: usize,
-) {
-    drop(Vec::from_raw_parts(
-        traced_positions,
-        traced_positions_length,
-        traced_positions_length,
-    ))
 }
