@@ -8,7 +8,15 @@ fn main() {
         .with_language(cbindgen::Language::C)
         .with_no_includes()
         .exclude_item("GlassCatalogState")
-        .with_header("typedef void GlassCatalogState;")
+        .exclude_item("SerializeBytesState")
+        .exclude_item("ProbabilitiesState")
+        .exclude_item("TracedRayState")
+        .with_header(r#"
+typedef void GlassCatalogState;
+typedef void SerializeBytesState;
+typedef void ProbabilitiesState;
+typedef void TracedRayState;
+"#)
         .generate()
         .expect("Unable to generate bindings")
         .write_to_file("target/bindings.h");

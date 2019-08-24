@@ -26,12 +26,12 @@ class PyGlass:
         self._ptr = ffi.gc(ptr, lib.free_glass)
 
     def __getstate__(self):
-        buffer = ffi.new("uint8_t**")
-        buffer_len = ffi.new("uintptr_t*")
-        _from_ffi_result(lib.serialize_glass(self._ptr, buffer, buffer_len))
-        arr = bytes(buffer[0][0:buffer_len[0]])
-        lib.free_serialized_buffer(buffer[0], buffer_len[0])
-        return {"serialized": arr}
+        serialized_bytes = []
+        @ffi.callback("void(void*, uint8_t)")
+        def append(_state, byte):
+            serialized_bytes.append(byte)
+        _from_ffi_result(lib.serialize_glass(self._ptr, append, ffi.NULL))
+        return {"serialized": bytes(serialized_bytes)}
 
     def __setstate__(self, state):
         glass_ptr = ffi.new("Glass**")
@@ -163,20 +163,20 @@ def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detect
     ptr.position.y = detpos[0][1]
     ptr.direction.x = detpos[1][0]
     ptr.direction.y = detpos[1][1]
-    arr = ffi.new("Pair**")
-    arr_size = ffi.new("uintptr_t*")
+    array = []
+    @ffi.callback("void(void*, Pair)")
+    def append_next_ray_position(_state, pos):
+        array.append((pos.x, pos.y))
     _from_ffi_result(lib.trace(
         wavelength,
         inital_y,
         cmpnd_prism.cffi_ptr,
         detector_array.cffi_ptr,
         ptr,
-        arr,
-        arr_size,
+        append_next_ray_position,
+        ffi.NULL,
     ), RayTraceError)
-    array = np.array([(p.x, p.y) for p in arr[0][0:arr_size[0]]])
-    lib.free_traced_positions(arr[0], arr_size[0])
-    return array
+    return np.array(array)
 
 
 def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam, detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
@@ -185,17 +185,17 @@ def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_
     ptr.position.y = detpos[0][1]
     ptr.direction.x = detpos[1][0]
     ptr.direction.y = detpos[1][1]
-    arr = ffi.new("double**")
-    arr_size = ffi.new("uintptr_t*")
+    array = []
+    @ffi.callback("void(void*, double)")
+    def append_next_detector_probability(_state, p):
+        array.append(p)
     lib.p_dets_l_wavelength(
         wavelength,
         cmpnd_prism.cffi_ptr,
         detector_array.cffi_ptr,
         gaussian_beam.cffi_ptr,
         ptr,
-        arr,
-        arr_size,
+        append_next_detector_probability,
+        ffi.NULL,
     )
-    array = np.array([*arr[0][0:arr_size[0]]])
-    lib.free_probabilities(arr[0], arr_size[0])
-    return array
+    return np.array(array)
