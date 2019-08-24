@@ -22,7 +22,8 @@ def _from_ffi_result(ffi_result: ffi.CData, exception_type=Exception):
 
 
 class PyGlass:
-    def __init__(self, ptr: ffi.CData):
+    def __init__(self, name: str, ptr: ffi.CData):
+        self.name = name
         self._ptr = ffi.gc(ptr, lib.free_glass)
 
     def __getstate__(self):
@@ -31,9 +32,10 @@ class PyGlass:
         def append(_state, byte):
             serialized_bytes.append(byte)
         _from_ffi_result(lib.serialize_glass(self._ptr, append, ffi.NULL))
-        return {"serialized": bytes(serialized_bytes)}
+        return {"name": self.name, "serialized": bytes(serialized_bytes)}
 
     def __setstate__(self, state):
+        self.name = state["name"]
         glass_ptr = ffi.new("Glass**")
         _from_ffi_result(lib.deserialize_glass(glass_ptr, state["serialized"], len(state["serialized"])))
         self._ptr = ffi.gc(glass_ptr[0], lib.free_glass)
@@ -43,7 +45,8 @@ def create_glass_catalog(file_contents: str) -> typing.Mapping[str, PyGlass]:
     catalog = {}
     @ffi.callback("void(void*, FFiStr, Glass*)")
     def update(_state, ffi_str, glass):
-        catalog[_from_ffi_str(ffi_str)] = PyGlass(glass)
+        name = _from_ffi_str(ffi_str)
+        catalog[name] = PyGlass(name, glass)
     file_contents = file_contents.encode("UTF-8")
     _from_ffi_result(lib.update_glass_catalog(file_contents, len(file_contents), update, ffi.NULL), CatalogError)
     return catalog

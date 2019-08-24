@@ -660,7 +660,7 @@ pub fn trace(
 /// Return the fitness of the spectrometer design to be minimized by an optimizer.
 /// The fitness objectives are
 /// * size = the distance from the mean starting position of the beam to the center of detector array
-/// * info = -I(Λ; D)
+/// * info = I(Λ; D)
 /// * deviation = sin(abs(angle of deviation))
 ///
 /// # Arguments
@@ -678,7 +678,7 @@ pub fn fitness(
     let size = deviation_vector.norm();
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
     let info = mutual_information(prism, detarr, beam, detpos);
-    Ok([size, -info, deviation])
+    Ok([size, info, deviation])
 }
 
 #[cfg(test)]
@@ -770,8 +770,7 @@ mod tests {
                     assert!(p.is_finite() && 0. <= p && p <= 1.);
                 }
             }
-            let [size, ninfo, deviation] = fitness(&prism, &detarr, &beam).unwrap();
-            let info = -ninfo;
+            let [size, info, deviation] = fitness(&prism, &detarr, &beam).unwrap();
             assert!(size > 0.);
             assert!(0. <= info && info <= (NBIN as f64).log2());
             assert!(0. <= deviation && deviation < FRAC_PI_2);
@@ -845,8 +844,8 @@ mod tests {
             v[0]
         );
         assert!(
-            approx_eq(v[1], -1.444212905142612, 5e-3),
-            "Mutual information is incorrect. {} ≉ -1.44",
+            approx_eq(v[1], 1.444212905142612, 5e-3),
+            "Mutual information is incorrect. {} ≉ 1.44",
             v[1]
         );
         assert!(
