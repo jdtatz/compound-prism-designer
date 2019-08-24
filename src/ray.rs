@@ -1,6 +1,7 @@
 use crate::glasscat::Glass;
 use statrs::function::erf::{erf, erfc_inv};
 use std::borrow::Cow;
+use core::f64::consts::*;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -8,7 +9,6 @@ pub enum RayTraceError {
     OutOfBounds,
     TotalInternalReflection,
     SpectrometerAngularResponseTooWeak,
-    Unknown,
 }
 
 impl RayTraceError {
@@ -20,7 +20,6 @@ impl RayTraceError {
             RayTraceError::SpectrometerAngularResponseTooWeak => {
                 "SpectrometerAngularResponseTooWeak"
             }
-            RayTraceError::Unknown => "Unknown",
         }
     }
 }
@@ -67,6 +66,36 @@ fn rotate(angle: f64, vector: Pair) -> Pair {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Mat2([f64; 4]);
+
+impl Mat2 {
+    fn from_cols(col1: Pair, col2: Pair) -> Self {
+        Self([col1.x, col2.x, col1.y, col2.y])
+    }
+    fn inverse(self) -> Option<Self> {
+        let [a, b, c, d]  = self.0;
+        let det = a * d - b * c;
+        if det == 0. {
+            None
+        } else {
+            Some(Self( [ d / det, -b / det, -c /det, a / det ] ))
+        }
+    }
+}
+
+impl core::ops::Mul<Pair> for Mat2 {
+    type Output = Pair;
+
+    fn mul(self, rhs: Pair) -> Self::Output {
+        let [a, b, c, d]  = self.0;
+        Pair {
+            x: a * rhs.x + b * rhs.y,
+            y: c * rhs.x + d * rhs.y,
+        }
+    }
+}
+
 /// Collimated Polychromatic Gaussian Beam
 #[derive(Debug, Clone)]
 pub struct GaussianBeam {
@@ -82,7 +111,7 @@ pub struct GaussianBeam {
 #[derive(Debug, Clone)]
 pub struct CompoundPrism<'a> {
     /// List of glasses the compound prism is composed of, in order
-    pub glasses: Cow<'a, [Glass]>,
+    pub glasses: Cow<'a, [&'a Glass]>,
     /// Angles that parameterize the shape of the compound prism
     pub angles: Cow<'a, [f64]>,
     /// Lengths that parameterize the trapezoidal shape of the compound prism
@@ -291,10 +320,7 @@ impl Ray {
             return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
         }
         let d = (self.origin - detpos.position).dot(normal) / ci;
-        if d <= 0_f64 {
-            // panic!("RayTraceError::Unknown");
-            return Err(RayTraceError::Unknown);
-        }
+        debug_assert!(d > 0.);
         let p = self.origin + self.direction * d;
         debug_assert!((detpos.direction).is_unit());
         let pos = (p - detpos.position).dot(detpos.direction);
@@ -427,21 +453,19 @@ pub fn detector_array_positioning(
     debug_assert!(upper_ray.direction.is_unit());
     let spec_dir = rotate(detarr.angle, (0_f64, 1_f64).into());
     let spec = spec_dir * detarr.length;
-    let det = upper_ray.direction.y * lower_ray.direction.x
-        - upper_ray.direction.x * lower_ray.direction.y;
-    if det == 0_f64 {
-        return Err(RayTraceError::NoSurfaceIntersection);
-    }
-    let v = Pair {
-        x: -upper_ray.direction.y,
-        y: upper_ray.direction.x,
-    } / det;
-    let d2 = v.dot(spec - upper_ray.origin + lower_ray.origin);
+    let mat = Mat2::from_cols(upper_ray.direction, -lower_ray.direction);
+    let imat = mat.inverse().ok_or(RayTraceError::NoSurfaceIntersection)?;
+    let dists = imat * (spec - upper_ray.origin + lower_ray.origin);
+    let d2 = dists.y;
     let l_vertex = lower_ray.origin + lower_ray.direction * d2;
     let (pos, dir) = if d2 > 0_f64 {
         (l_vertex, spec_dir)
     } else {
-        let d2 = v.dot(-spec - upper_ray.origin + lower_ray.origin);
+        let dists = imat * (-spec - upper_ray.origin + lower_ray.origin);
+        let d2 = dists.y;
+        if d2 < 0. {
+            return Err(RayTraceError::NoSurfaceIntersection);
+        }
         let u_vertex = lower_ray.origin + lower_ray.direction * d2;
         (u_vertex, -spec_dir)
     };
@@ -498,16 +522,15 @@ pub fn p_dets_l_wavelength(
     detarr: &DetectorArray,
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
-) -> impl IntoIterator<Item = f64> {
+) -> impl Iterator<Item = f64> {
     const MAX_N: usize = 1000;
-    // const FRAC_SQRT_2_SQRT_PI: f64 = core::f64::consts::FRAC_1_SQRT_2 * core::f64::consts::FRAC_2_SQRT_PI;
     let mut p_dets_l_w_stats = vec![Welford::new(); detarr.bins.len()];
-    let p_z = erf(prism.width * core::f64::consts::FRAC_1_SQRT_2 / beam.width);
-    let mut qrng = quasirandom::Qrng::new(0);
+    let p_z = erf(prism.width * FRAC_1_SQRT_2 / beam.width);
+    debug_assert!(0. <= p_z && p_z <= 1.);
+    let mut qrng = quasirandom::Qrng::new(1);
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
-        let y = beam.y_mean - beam.width * core::f64::consts::FRAC_1_SQRT_2 * erfc_inv(2. * u);
-        // let y_bar = y - beam.y_mean;
-        // let pdf_y = f64::exp(-2. * y_bar * y_bar / (beam.width * beam.width)) * FRAC_SQRT_2_SQRT_PI / beam.width;
+        // Transform uniform random value to normal random value, using inverse cdf
+        let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
         if y <= 0. || prism.height <= y {
             for stat in p_dets_l_w_stats.iter_mut() {
                 stat.next_sample(0.);
@@ -521,13 +544,19 @@ pub fn p_dets_l_wavelength(
         };
         if let Ok((_, pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
             debug_assert!(pos.is_finite());
+            debug_assert!(0. <= pos && pos <= detarr.length);
             debug_assert!(t.is_finite());
             debug_assert!(0. <= t && t <= 1.);
-            let p_t = p_z * t;
-            debug_assert!(0. <= p_t && p_t <= 1.);
+            // What is actually being integrated is
+            // pdf_t = p_z * t * pdf(y);
+            // But because of importance sampling using the same distribution
+            // pdf_t /= pdf(y);
+            // the pdf(y) is cancelled, so.
+            // pdf_t = p_z * t;
+            let pdf_t = p_z * t;
             for (stat, &[l, u]) in p_dets_l_w_stats.iter_mut().zip(detarr.bins.iter()) {
                 if l <= pos && pos < u {
-                    stat.next_sample(p_t);
+                    stat.next_sample(pdf_t);
                 } else {
                     stat.next_sample(0.);
                 }
@@ -539,7 +568,7 @@ pub fn p_dets_l_wavelength(
         }
         if p_dets_l_w_stats.iter().all(|stat| {
             let err = stat.sample_variance() / stat.count.sqrt();
-            err < 3e-3
+            err < 7.5e-3
         }) {
             break;
         }
@@ -568,7 +597,7 @@ fn mutual_information(
     let (wmin, wmax) = beam.w_range;
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
     let mut info_stats = vec![Welford::new(); detarr.bins.len()];
-    let mut qrng = quasirandom::Qrng::new(0);
+    let mut qrng = quasirandom::Qrng::new(1);
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
         let w = wmin + u * (wmax - wmin);
         let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
@@ -587,7 +616,7 @@ fn mutual_information(
         }
         if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
             let err = stat.sample_variance() / stat.count.sqrt();
-            err < 3e-3
+            err < 2.5e-3
         }) {
             break;
         }
@@ -655,6 +684,7 @@ pub fn fitness(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::prelude::*;
 
     fn approx_eq(lhs: f64, rhs: f64, epsilon: f64) -> bool {
         let diff = f64::abs(lhs - rhs);
@@ -676,9 +706,82 @@ mod tests {
     }
 
     #[test]
+    fn test_many() {
+        let catalog_contents = include_str!("../catalog.agf");
+        let catalog = crate::glasscat::new_catalog(catalog_contents).collect::<Result<Vec<_>, _>>().unwrap();
+        let nglass = catalog.len();
+        let seed = 123456;
+        let mut rng = rand_xoshiro::Xoshiro256StarStar::seed_from_u64(seed);
+        let ntest = 500;
+        let max_nprism = 6;
+        let prism_height = 25.;
+        let prism_width = 25.;
+        let max_length = 0.5 * prism_height;
+        let pmt_length = 3.2;
+        const NBIN: usize = 32;
+        let bounds: Box<[_]> = (0..=NBIN)
+            .map(|i| (i as f64) / (NBIN as f64) * pmt_length)
+            .collect();
+        let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
+        let spec_max_accepted_angle = (45_f64).to_radians();
+        let beam_width = 0.2;
+        let wavelegth_range= (0.5, 0.82);
+        let mut nvalid = 0;
+        while nvalid < ntest {
+            let nprism: usize = rng.gen_range(1, 1 + max_nprism);
+            let glasses = (0..nprism).map(|_| &catalog[rng.gen_range(0, nglass)].1).collect::<Vec<_>>();
+            let angles = (0..nprism + 1).map(|_| rng.gen_range(-FRAC_PI_2, FRAC_PI_2)).collect::<Vec<_>>();
+            let lengths = (0..nprism).map(|_| rng.gen_range(0., max_length)).collect::<Vec<_>>();
+            let curvature = rng.gen_range(0., 1.);
+            let prism = CompoundPrism {
+                glasses: glasses.into(),
+                angles: angles.into(),
+                lengths: lengths.into(),
+                curvature,
+                height: prism_height,
+                width: prism_width,
+            };
+
+            let detarr_angle = rng.gen_range(-PI, PI);
+            let detarr = DetectorArray {
+                bins: bins.as_ref().into(),
+                min_ci: spec_max_accepted_angle.cos(),
+                angle: detarr_angle,
+                length: pmt_length,
+            };
+
+            let y_mean = rng.gen_range(0., prism_height);
+            let beam = GaussianBeam {
+                width: beam_width,
+                y_mean,
+                w_range: wavelegth_range,
+            };
+
+            let detpos = match detector_array_positioning(&prism, &detarr, &beam) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            nvalid += 1;
+            let nwlen  =  25;
+            for i in 0..nwlen {
+                let w = wavelegth_range.0 + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
+                let ps = p_dets_l_wavelength(w, &prism, &detarr, &beam, detpos);
+                for p in ps {
+                    assert!(p.is_finite() && 0. <= p && p <= 1.);
+                }
+            }
+            let [size, ninfo, deviation] = fitness(&prism, &detarr, &beam).unwrap();
+            let info = -ninfo;
+            assert!(size > 0.);
+            assert!(0. <= info && info <= (NBIN as f64).log2());
+            assert!(0. <= deviation && deviation < FRAC_PI_2);
+        }
+    }
+
+    #[test]
     fn test_with_known_prism() {
         let glasses = [
-            Glass::Sellmeier1([
+            &Glass::Sellmeier1([
                 1.029607,
                 0.00516800155,
                 0.1880506,
@@ -686,7 +789,7 @@ mod tests {
                 0.736488165,
                 138.964129,
             ]),
-            Glass::Sellmeier1([
+            &Glass::Sellmeier1([
                 1.87543831,
                 0.0141749518,
                 0.37375749,
@@ -694,7 +797,7 @@ mod tests {
                 2.30001797,
                 177.389795,
             ]),
-            Glass::Sellmeier1([
+            &Glass::Sellmeier1([
                 0.738042712,
                 0.00339065607,
                 0.363371967,
@@ -715,10 +818,10 @@ mod tests {
             width: 2.,
         };
 
-        const nbin: usize = 32;
+        const NBIN: usize = 32;
         let pmt_length = 3.2;
-        let bounds: Box<[_]> = (0..=nbin)
-            .map(|i| (i as f64) / (nbin as f64) * pmt_length)
+        let bounds: Box<[_]> = (0..=NBIN)
+            .map(|i| (i as f64) / (NBIN as f64) * pmt_length)
             .collect();
         let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (60_f64).to_radians();
@@ -731,7 +834,7 @@ mod tests {
 
         let beam = GaussianBeam {
             width: 0.2,
-            y_mean: 0.38 * prism.height,
+            y_mean: 0.95,
             w_range: (0.5, 0.82),
         };
 
@@ -742,7 +845,7 @@ mod tests {
             v[0]
         );
         assert!(
-            approx_eq(v[1], -1.444212905142612, 1e-3),
+            approx_eq(v[1], -1.444212905142612, 5e-3),
             "Mutual information is incorrect. {} ≉ -1.44",
             v[1]
         );
