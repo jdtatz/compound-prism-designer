@@ -1,11 +1,11 @@
 import numpy as np
 from itertools import count
-from prism import Config, Params
+from prism import CompoundPrism, DetectorArray, GaussianBeam
 
 
-def _thickness_fn(h, angles, lengths):
-    h = h / 2
-    for last, angle, l in zip(angles[:-1], angles[1:], lengths):
+def _thickness_fn(prism: CompoundPrism):
+    h = prism.height / 2
+    for last, angle, l in zip(prism.angles[:-1], prism.angles[1:], prism.lengths):
         if (last >= 0) ^ (angle >= 0):
             yield (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h + l
         elif np.abs(last) > np.abs(angle):
@@ -14,35 +14,35 @@ def _thickness_fn(h, angles, lengths):
             yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h + l
 
 
-def create_zmx(config: Config, params: Params, detarr_offset):
+def create_zmx(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam, detarr_offset):
     incrementer = count(1)
-    wmin, wmax = config.wavelength_range
+    wmin, wmax = beam.wavelength_range
 
-    angles = params.angles
+    angles = prism.angles
     ytans = np.tan(angles)
-    thickness = list(_thickness_fn(config.prism_height, angles, params.lengths))
+    thickness = list(_thickness_fn(prism))
 
-    c, s = np.cos(params.angles[-1]), np.sin(params.angles[-1])
-    chord = config.prism_height / c
+    c, s = np.cos(prism.angles[-1]), np.sin(prism.angles[-1])
+    chord = prism.height / c
     # curvature = R_max / R_lens
     # R_max = chord / 2
     # R_lens = chord / (2 curvature)
-    lens_radius = chord / (2 * params.curvature)
+    lens_radius = chord / (2 * prism.curvature)
 
     waves = np.linspace(wmin, wmax, 24)
     waves = "\n".join(f"WAVM {1 + i} {w} 1" for i, w in enumerate(waves))
     newline = "\n"
 
     zemax_design = f"""\
-    Zemax Rows with Aperture pupil diameter = {config.beam_width} & Wavelengths from {wmin} to {wmax}: 
-        Coord break: decenter y = {config.prism_height / 2 - params.y_mean}
-        {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {config.prism_height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip(params.glass_names, ytans, thickness))}
-        Coord break: tilt about x = {-np.rad2deg(params.angles[-1])}
+    Zemax Rows with Aperture pupil diameter = {beam.width} & Wavelengths from {wmin} to {wmax}: 
+        Coord break: decenter y = {prism.height / 2 - beam.y_mean}
+        {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {prism.height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip((g.name for g in prism.glasses), ytans, thickness))}
+        Coord break: tilt about x = {-np.rad2deg(prism.angles[-1])}
         Biconic: radius = {-lens_radius} semi-diameter = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
-        Coord break: tilt about x = {np.rad2deg(params.angles[-1])}
+        Coord break: tilt about x = {np.rad2deg(prism.angles[-1])}
         Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
-        Coord break: tilt about x = {-np.rad2deg(params.detector_array_angle)}
-        Image (Standard): semi-diameter = {config.detector_array_length / 2}\
+        Coord break: tilt about x = {-np.rad2deg(detarr.angle)}
+        Image (Standard): semi-diameter = {detarr.length / 2}\
     """
     zemax_file = f"""\
 VERS 181119 693 105780 L105780
@@ -51,7 +51,7 @@ NAME
 PFIL 0 0 0
 LANG 0
 UNIT MM X W X CM MR CPMM
-ENPD {config.beam_width}
+ENPD {beam.width}
 ENVD 20 1 0
 GFAC 0 0
 GCAT SCHOTT 
@@ -91,13 +91,13 @@ SURF 0
   DIAM 0 0 0 0 1 ""
   MEMA 0 0 0 0 1 ""
   POPS 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0
-{create_coord_break(next(incrementer), decenter_y=config.prism_height / 2 - params.y_mean)}
-{f"{newline}".join(create_tilt(next(incrementer), thickness=t, semi_diameter=config.prism_height / 2, glass=g, y_tangent=-y) for i, (g, y, t) in enumerate(zip(params.glass_names, ytans, thickness)))}
-{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.angles[-1]))}
+{create_coord_break(next(incrementer), decenter_y=prism.height / 2 - beam.y_mean)}
+{f"{newline}".join(create_tilt(next(incrementer), thickness=t, semi_diameter=prism.height / 2, glass=g, y_tangent=-y) for i, (g, y, t) in enumerate(zip((g.name for g in prism.glasses), ytans, thickness)))}
+{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(prism.angles[-1]))}
 {create_biconic(next(incrementer), radius=-lens_radius, semi_diameter=chord / 2)}
-{create_coord_break(next(incrementer), tilt_about_x=np.rad2deg(params.angles[-1]))}
+{create_coord_break(next(incrementer), tilt_about_x=np.rad2deg(prism.angles[-1]))}
 {create_coord_break(next(incrementer), thickness=detarr_offset[0], decenter_y=detarr_offset[1])}
-{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(params.detector_array_angle))}
+{create_coord_break(next(incrementer), tilt_about_x=-np.rad2deg(detarr.angle))}
 SURF {next(incrementer)}
   TYPE STANDARD
   FIMP 
@@ -107,8 +107,8 @@ SURF {next(incrementer)}
   MIRR 2 0
   SLAB 0
   DISZ 0
-  DIAM {config.detector_array_length / 2} 1 0 0 1 ""
-  MEMA {config.detector_array_length / 2} 0 0 0 1 ""
+  DIAM {detarr.length / 2} 1 0 0 1 ""
+  MEMA {detarr.length / 2} 0 0 0 1 ""
   POPS 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0
 BLNK
 BLNK 
