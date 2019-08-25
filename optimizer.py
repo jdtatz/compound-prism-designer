@@ -71,8 +71,9 @@ def show_interactive(config: Config, solns: [Soln], units: str):
 
         display = f"""CompoundPrism ({', '.join(g.name for g in prism.glasses)})
     Parameters:
+        height ({units}): {prism.height:.4}
         angles (deg): {', '.join(f'{np.rad2deg(angle):.4}' for angle in prism.angles)}
-        lengths: {', '.join(f'{l:.4}' for l in prism.lengths)}
+        lengths ({units}): {', '.join(f'{l:.4}' for l in prism.lengths)}
         y_mean ({units}): {beam.y_mean:.4}
         curvature: {prism.curvature:.4}
         detector array angle (deg): {np.rad2deg(detarr.angle):.4}
@@ -146,7 +147,7 @@ if __name__ == "__main__":
 
     config = Config(
         max_prism_count=toml_spec["compound-prism"]["max-count"],
-        prism_height=toml_spec["compound-prism"]["height"],
+        max_prism_height=toml_spec["compound-prism"]["max-height"],
         prism_width=toml_spec["compound-prism"]["width"],
         beam_width=toml_spec["gaussian-beam"]["width"],
         wavelength_range=(toml_spec["gaussian-beam"]["wmin"], toml_spec["gaussian-beam"]["wmax"]),
