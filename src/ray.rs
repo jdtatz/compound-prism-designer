@@ -132,7 +132,7 @@ impl<'a> CompoundPrism<'a> {
             .chain(
                 self.angles
                     .windows(2)
-                    .zip(self.lengths.iter())
+                    .zip(self.lengths.iter().copied())
                     .map(move |(win, len)| {
                         let last = win[0];
                         let angle = win[1];
@@ -180,14 +180,28 @@ pub struct DetectorArrayPositioning {
 #[derive(Constructor, Debug, PartialEq, Clone, Copy)]
 struct Ray {
     /// Origin position vector
-    pub origin: Pair,
+    origin: Pair,
     /// Unit normal direction vector
-    pub direction: Pair,
-    /// Transmittance probability
-    pub transmittance: f64,
+    direction: Pair,
+    /// S-Polarization Transmittance probability
+    s_transmittance: f64,
+    /// P-Polarization Transmittance probability
+    p_transmittance: f64,
 }
 
 impl Ray {
+    fn new_from_start(y: f64) -> Self {
+        Ray {
+            origin: Pair { x: 0., y },
+            direction: Pair { x: 1., y: 0. },
+            s_transmittance: 1.,
+            p_transmittance: 1.,
+        }
+    }
+
+    fn average_transmittance(self) -> f64 {
+        (self.s_transmittance + self.p_transmittance) * 0.5
+    }
     /// Refract ray through interface of two different media
     /// using vector form of snell's law
     ///
@@ -217,11 +231,11 @@ impl Ray {
         let v = self.direction * r + normal * (r * ci - cr);
         let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
         let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
-        let transmittance = 1_f64 - (fresnel_rs * fresnel_rs + fresnel_rp * fresnel_rp) * (0.5);
         Ok(Self {
             origin: intersection,
             direction: v,
-            transmittance: self.transmittance * transmittance,
+            s_transmittance: self.s_transmittance * (1_f64 - fresnel_rs * fresnel_rs),
+            p_transmittance: self.p_transmittance * (1_f64 - fresnel_rp * fresnel_rp),
         })
     }
 
@@ -327,7 +341,7 @@ impl Ray {
         if pos < 0_f64 || detarr.length < pos {
             return Err(RayTraceError::NoSurfaceIntersection);
         }
-        Ok((p, pos, self.transmittance))
+        Ok((p, pos, self.average_transmittance()))
     }
 
     /// Propagate a ray of `wavelength` through the compound prism
@@ -438,15 +452,11 @@ pub fn detector_array_positioning(
     detarr: &DetectorArray,
     beam: &GaussianBeam,
 ) -> Result<DetectorArrayPositioning, RayTraceError> {
-    let ray = Ray {
-        origin: (0_f64, beam.y_mean).into(),
-        direction: (1_f64, 0_f64).into(),
-        transmittance: 1_f64,
-    };
+    let ray = Ray::new_from_start(beam.y_mean);
     let (wmin, wmax) = beam.w_range;
     let lower_ray = ray.propagate_internal(prism, wmin)?;
     let upper_ray = ray.propagate_internal(prism, wmax)?;
-    if lower_ray.transmittance <= (1e-3) || upper_ray.transmittance <= (1e-3) {
+    if lower_ray.average_transmittance() <= (1e-3) || upper_ray.average_transmittance() <= (1e-3) {
         return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
     }
     debug_assert!(lower_ray.direction.is_unit());
@@ -537,11 +547,7 @@ pub fn p_dets_l_wavelength(
             }
             continue;
         }
-        let ray = Ray {
-            origin: (0., y).into(),
-            direction: (1., 0.).into(),
-            transmittance: 1.,
-        };
+        let ray = Ray::new_from_start(y);
         if let Ok((_, pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
             debug_assert!(pos.is_finite());
             debug_assert!(0. <= pos && pos <= detarr.length);
@@ -649,11 +655,7 @@ pub fn trace(
     detarr: &DetectorArray,
     detpos: DetectorArrayPositioning,
 ) -> Result<Vec<Pair>, RayTraceError> {
-    let ray = Ray {
-        origin: (0., init_y).into(),
-        direction: (1., 0.).into(),
-        transmittance: 1.,
-    };
+    let ray = Ray::new_from_start(init_y);
     ray.trace(wavelength, prism, detarr, detpos)
 }
 
