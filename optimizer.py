@@ -154,7 +154,7 @@ if __name__ == "__main__":
         detector_array_length=toml_spec["detector-array"]["length"],
         detector_array_min_ci=np.cos(np.deg2rad(toml_spec["detector-array"].get("max-incident-angle", 90))),
         detector_array_bin_bounds=np.array(toml_spec["detector-array"]["bounds"]),
-        glasses=list(catalog.items())
+        glass_catalog=catalog
     )
 
     opt_dict = {"iteration-count": 1000, "thread-count": 0, "pop-size": 20, **toml_spec.get("optimizer", {})}

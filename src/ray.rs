@@ -1,7 +1,7 @@
 use crate::glasscat::Glass;
 use statrs::function::erf::{erf, erfc_inv};
 use std::borrow::Cow;
-use core::f64::consts::*;
+use std::f64::consts::*;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -11,8 +11,8 @@ pub enum RayTraceError {
     SpectrometerAngularResponseTooWeak,
 }
 
-impl RayTraceError {
-    pub fn name(self) -> &'static str {
+impl Into<&'static str> for RayTraceError {
+    fn into(self) -> &'static str {
         match self {
             RayTraceError::NoSurfaceIntersection => "NoSurfaceIntersection",
             RayTraceError::OutOfBounds => "OutOfBounds",
@@ -66,20 +66,24 @@ fn rotate(angle: f64, vector: Pair) -> Pair {
     }
 }
 
+/// Matrix in R^(2x2)
 #[derive(Debug, Clone, Copy)]
 struct Mat2([f64; 4]);
 
 impl Mat2 {
-    fn from_cols(col1: Pair, col2: Pair) -> Self {
+    /// New Matrix from the two given columns
+    fn new_from_cols(col1: Pair, col2: Pair) -> Self {
         Self([col1.x, col2.x, col1.y, col2.y])
     }
+
+    /// Matrix inverse if it exists
     fn inverse(self) -> Option<Self> {
-        let [a, b, c, d]  = self.0;
+        let [a, b, c, d] = self.0;
         let det = a * d - b * c;
         if det == 0. {
             None
         } else {
-            Some(Self( [ d / det, -b / det, -c /det, a / det ] ))
+            Some(Self([d / det, -b / det, -c / det, a / det]))
         }
     }
 }
@@ -87,8 +91,9 @@ impl Mat2 {
 impl core::ops::Mul<Pair> for Mat2 {
     type Output = Pair;
 
+    /// Matrix x Vector -> Vector multiplication
     fn mul(self, rhs: Pair) -> Self::Output {
-        let [a, b, c, d]  = self.0;
+        let [a, b, c, d] = self.0;
         Pair {
             x: a * rhs.x + b * rhs.y,
             y: c * rhs.x + d * rhs.y,
@@ -190,6 +195,11 @@ struct Ray {
 }
 
 impl Ray {
+    /// Create a new unpolarized ray with full transmittance with a origin at (0, `y`) and a
+    /// direction of (1, 0)
+    ///
+    /// # Arguments
+    ///  * `y` - the initial y value of the ray's position
     fn new_from_start(y: f64) -> Self {
         Ray {
             origin: Pair { x: 0., y },
@@ -199,9 +209,11 @@ impl Ray {
         }
     }
 
+    /// The average of the S & P Polarizations transmittance's
     fn average_transmittance(self) -> f64 {
         (self.s_transmittance + self.p_transmittance) * 0.5
     }
+
     /// Refract ray through interface of two different media
     /// using vector form of snell's law
     ///
@@ -463,7 +475,7 @@ pub fn detector_array_positioning(
     debug_assert!(upper_ray.direction.is_unit());
     let spec_dir = rotate(detarr.angle, (0_f64, 1_f64).into());
     let spec = spec_dir * detarr.length;
-    let mat = Mat2::from_cols(upper_ray.direction, -lower_ray.direction);
+    let mat = Mat2::new_from_cols(upper_ray.direction, -lower_ray.direction);
     let imat = mat.inverse().ok_or(RayTraceError::NoSurfaceIntersection)?;
     let dists = imat * (spec - upper_ray.origin + lower_ray.origin);
     let d2 = dists.y;
@@ -710,7 +722,9 @@ mod tests {
     #[test]
     fn test_many() {
         let catalog_contents = include_str!("../catalog.agf");
-        let catalog = crate::glasscat::new_catalog(catalog_contents).collect::<Result<Vec<_>, _>>().unwrap();
+        let catalog = crate::glasscat::new_catalog(catalog_contents)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         let nglass = catalog.len();
         let seed = 123456;
         let mut rng = rand_xoshiro::Xoshiro256StarStar::seed_from_u64(seed);
@@ -727,13 +741,19 @@ mod tests {
         let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (45_f64).to_radians();
         let beam_width = 0.2;
-        let wavelegth_range= (0.5, 0.82);
+        let wavelegth_range = (0.5, 0.82);
         let mut nvalid = 0;
         while nvalid < ntest {
             let nprism: usize = rng.gen_range(1, 1 + max_nprism);
-            let glasses = (0..nprism).map(|_| &catalog[rng.gen_range(0, nglass)].1).collect::<Vec<_>>();
-            let angles = (0..nprism + 1).map(|_| rng.gen_range(-FRAC_PI_2, FRAC_PI_2)).collect::<Vec<_>>();
-            let lengths = (0..nprism).map(|_| rng.gen_range(0., max_length)).collect::<Vec<_>>();
+            let glasses = (0..nprism)
+                .map(|_| &catalog[rng.gen_range(0, nglass)].1)
+                .collect::<Vec<_>>();
+            let angles = (0..nprism + 1)
+                .map(|_| rng.gen_range(-FRAC_PI_2, FRAC_PI_2))
+                .collect::<Vec<_>>();
+            let lengths = (0..nprism)
+                .map(|_| rng.gen_range(0., max_length))
+                .collect::<Vec<_>>();
             let curvature = rng.gen_range(0., 1.);
             let prism = CompoundPrism {
                 glasses: glasses.into(),
@@ -764,9 +784,10 @@ mod tests {
                 Err(_) => continue,
             };
             nvalid += 1;
-            let nwlen  =  25;
+            let nwlen = 25;
             for i in 0..nwlen {
-                let w = wavelegth_range.0 + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
+                let w = wavelegth_range.0
+                    + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
                 let ps = p_dets_l_wavelength(w, &prism, &detarr, &beam, detpos);
                 for p in ps {
                     assert!(p.is_finite() && 0. <= p && p <= 1.);

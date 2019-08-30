@@ -5,10 +5,12 @@ import numpy as np
 
 
 class RayTraceError(Exception):
+    """Exception raised for errors during ray-tracing."""
     pass
 
 
 class CatalogError(Exception):
+    """Exception raised for errors while creating the glass catalog."""
     pass
 
 
@@ -22,45 +24,62 @@ def _from_ffi_result(ffi_result: ffi.CData, exception_type=Exception):
 
 
 class PyGlass:
+    """Glass Parametrization"""
     def __init__(self, name: str, ptr: ffi.CData):
         self.name = name
         self._ptr = ffi.gc(ptr, lib.free_glass)
 
+    def refractive_index(self, wavelength: float) -> float:
+        """Computes the refractive index of the given wavelength in this glass.
+
+        :param wavelength: the wavelength, in micrometers.
+        :return: the refractive index.
+        """
+        return lib.glass_refractive_index(self._ptr, wavelength)
+
     def __getstate__(self):
-        serialized_bytes = []
-        @ffi.callback("void(void*, uint8_t)")
-        def append(_state, byte):
-            serialized_bytes.append(byte)
-        _from_ffi_result(lib.serialize_glass(self._ptr, append, ffi.NULL))
-        return {"name": self.name, "serialized": bytes(serialized_bytes)}
+        dispersion_formula_number_ptr = ffi.new("int32_t*")
+        dispersion_constants_ptr = ffi.new("const double**")
+        dispersion_constants_len_ptr = ffi.new("uintptr_t*")
+        lib.glass_parametrization(
+            self._ptr,
+            dispersion_formula_number_ptr,
+            dispersion_constants_ptr,
+            dispersion_constants_len_ptr,
+        )
+        parametrization = dispersion_formula_number_ptr[0], list(dispersion_constants_ptr[0][0:dispersion_constants_len_ptr[0]])
+        return {"name": self.name, "parametrization": parametrization}
 
     def __setstate__(self, state):
         self.name = state["name"]
+        n, coeff = state["parametrization"]
         glass_ptr = ffi.new("Glass**")
-        _from_ffi_result(lib.deserialize_glass(glass_ptr, state["serialized"], len(state["serialized"])))
+        _from_ffi_result(lib.new_glass_from_parametrization(n, coeff, len(coeff), glass_ptr))
         self._ptr = ffi.gc(glass_ptr[0], lib.free_glass)
 
 
-def create_glass_catalog(file_contents: str) -> typing.Mapping[str, PyGlass]:
-    catalog = {}
+def create_glass_catalog(file_contents: str) -> typing.Sequence[PyGlass]:
+    """Create glass parametrization catalog from the contents of a .agf file."""
+    catalog = []
     @ffi.callback("void(void*, FFiStr, Glass*)")
     def update(_state, ffi_str, glass):
         name = _from_ffi_str(ffi_str)
-        catalog[name] = PyGlass(name, glass)
+        catalog.append(PyGlass(name, glass))
     file_contents = file_contents.encode("UTF-8")
     _from_ffi_result(lib.update_glass_catalog(file_contents, len(file_contents), update, ffi.NULL), CatalogError)
     return catalog
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class CompoundPrism:
+    """Specification class for the Compound Prism element of the Spectrometer."""
     glasses: typing.Sequence[PyGlass]
     angles: np.ndarray
     lengths: np.ndarray
     curvature: float
     height: float
     width: float
-    cffi_ptr: ffi.CData = dataclasses.field(init=False)
+    _ptr: ffi.CData = dataclasses.field(init=False)
 
     def __post_init__(self):
         assert len(self.glasses) + 1 == len(self.angles)
@@ -81,16 +100,17 @@ class CompoundPrism:
             self.height,
             self.width,
         )
-        self.cffi_ptr = ffi.gc(ptr, lib.free_compound_prism)
+        super().__setattr__("_ptr", ffi.gc(ptr, lib.free_compound_prism))
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DetectorArray:
+    """Specification class for the Detector Array element of the Spectrometer."""
     bins: np.ndarray
     min_ci: float
     angle: float
     length: float
-    cffi_ptr: ffi.CData = dataclasses.field(init=False)
+    _ptr: ffi.CData = dataclasses.field(init=False)
 
     def __post_init__(self):
         assert self.bins.dtype == np.float64
@@ -107,15 +127,16 @@ class DetectorArray:
             self.angle,
             self.length,
         )
-        self.cffi_ptr = ffi.gc(ptr, lib.free_detector_array)
+        super().__setattr__("_ptr", ffi.gc(ptr, lib.free_detector_array))
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GaussianBeam:
+    """Specification class for the Gaussian Beam source of the Spectrometer."""
     width: float
     y_mean: float
     wavelength_range: typing.Tuple[float, float]
-    cffi_ptr: ffi.CData = dataclasses.field(init=False)
+    _ptr: ffi.CData = dataclasses.field(init=False)
 
     def __post_init__(self):
         assert 0 < self.width
@@ -128,39 +149,43 @@ class GaussianBeam:
             self.wavelength_range[0],
             self.wavelength_range[1],
         )
-        self.cffi_ptr = ffi.gc(ptr, lib.free_gaussian_beam)
+        super().__setattr__("_ptr", ffi.gc(ptr, lib.free_gaussian_beam))
 
 
 @dataclasses.dataclass(order=True)
 class DesignFitness:
+    """The multi-objective fitness of the spectrometer design."""
     size: float
     info: float
     deviation: float
 
 
 def fitness(cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam) -> DesignFitness:
+    """Return the multi-objective fitness of the spectrometer design."""
     ptr = ffi.new("DesignFitness*")
     _from_ffi_result(lib.fitness(
-        cmpnd_prism.cffi_ptr,
-        detector_array.cffi_ptr,
-        gaussian_beam.cffi_ptr,
+        cmpnd_prism._ptr,
+        detector_array._ptr,
+        gaussian_beam._ptr,
         ptr,
     ), RayTraceError)
     return DesignFitness(size=ptr.size, info=ptr.info, deviation=ptr.deviation)
 
 
 def detector_array_position(cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam) -> typing.Tuple[np.ndarray, np.ndarray]:
+    """Return the position of the detector array in the spectrometer design."""
     ptr = ffi.new("DetectorArrayPositioning*")
     _from_ffi_result(lib.detector_array_position(
-        cmpnd_prism.cffi_ptr,
-        detector_array.cffi_ptr,
-        gaussian_beam.cffi_ptr,
+        cmpnd_prism._ptr,
+        detector_array._ptr,
+        gaussian_beam._ptr,
         ptr,
     ), RayTraceError)
     return np.array((ptr.position.x, ptr.position.y)), np.array((ptr.direction.x, ptr.direction.y))
 
 
 def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray, detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    """Return the traced positions of the specific ray of light through the spectrometer."""
     ptr = ffi.new("DetectorArrayPositioning*")
     ptr.position.x = detpos[0][0]
     ptr.position.y = detpos[0][1]
@@ -173,8 +198,8 @@ def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detect
     _from_ffi_result(lib.trace(
         wavelength,
         inital_y,
-        cmpnd_prism.cffi_ptr,
-        detector_array.cffi_ptr,
+        cmpnd_prism._ptr,
+        detector_array._ptr,
         ptr,
         append_next_ray_position,
         ffi.NULL,
@@ -183,6 +208,7 @@ def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detect
 
 
 def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam, detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    """Return the probabilities of detection of the specific ray of light for all of the detectors."""
     ptr = ffi.new("DetectorArrayPositioning*")
     ptr.position.x = detpos[0][0]
     ptr.position.y = detpos[0][1]
@@ -194,9 +220,9 @@ def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_
         array.append(p)
     lib.p_dets_l_wavelength(
         wavelength,
-        cmpnd_prism.cffi_ptr,
-        detector_array.cffi_ptr,
-        gaussian_beam.cffi_ptr,
+        cmpnd_prism._ptr,
+        detector_array._ptr,
+        gaussian_beam._ptr,
         ptr,
         append_next_detector_probability,
         ffi.NULL,
