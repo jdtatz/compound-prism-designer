@@ -239,17 +239,13 @@ pub struct TracedRayState {
 pub unsafe extern "C" fn trace(
     wavelength: f64,
     inital_y: f64,
-    prism: &CompoundPrism,
-    detector_array: &DetectorArray,
+    prism: &'static CompoundPrism<'static>,
+    detector_array: &'static DetectorArray<'static>,
     detpos: &DetectorArrayPositioning,
     append_next_ray_position: fn(*mut TracedRayState, Pair),
     state_ptr: *mut TracedRayState,
 ) -> FfiResult {
     crate::ray::trace(wavelength, inital_y, prism, detector_array, *detpos)
-        .map(|t| {
-            for p in t {
-                append_next_ray_position(state_ptr, p)
-            }
-        })
+        .try_for_each(|r| r.map(|p| append_next_ray_position(state_ptr, p)))
         .into()
 }
