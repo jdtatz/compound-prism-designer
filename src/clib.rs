@@ -22,14 +22,14 @@ pub struct FfiResult {
     err_str: FFiStr,
 }
 
-impl From<Option<&str>> for FfiResult {
-    fn from(s: Option<&str>) -> Self {
-        match s {
-            Some(s) => Self {
+impl<'s, E: Into<&'s str>> From<Result<(), E>> for FfiResult {
+    fn from(r: Result<(), E>) -> Self {
+        match r {
+            Err(e) => Self {
                 succeeded: false,
-                err_str: s.into(),
+                err_str: e.into().into(),
             },
-            None => Self {
+            Ok(()) => Self {
                 succeeded: true,
                 err_str: FFiStr {
                     str_len: 0,
@@ -56,57 +56,50 @@ pub unsafe extern "C" fn update_glass_catalog(
     if let Ok(file) = core::str::from_utf8(file) {
         new_catalog(file)
             .try_for_each(|r| {
-                let (name, glass) = r.map_err(|e| e.name())?;
-                insert_item(state_ptr, name.into(), Box::into_raw(Box::new(glass)));
-                Ok(())
+                r.map(|(name, glass)| {
+                    insert_item(state_ptr, name.into(), Box::into_raw(Box::new(glass)))
+                })
             })
-            .err()
             .into()
     } else {
-        Some("File has invalid utf-8 encoding").into()
+        Err("File has invalid utf-8 encoding").into()
     }
 }
 
-#[repr(C)]
-pub struct SerializeBytesState { _private: [u8; 0], }
-
 #[no_mangle]
-pub unsafe extern "C" fn serialize_glass(
+pub unsafe extern "C" fn glass_parametrization(
     glass: &Glass,
-    append_next_byte: fn(*mut SerializeBytesState, u8),
-    state_ptr: *mut SerializeBytesState,
-) -> FfiResult {
-    match serde_cbor::to_vec(glass) {
-        Ok(v) => {
-            for b in v {
-                append_next_byte(state_ptr, b)
-            }
-            None
-        }
-        Err(_) => Some("Failed to serialize"),
-    }
-    .into()
+    dispersion_formula_number_ptr: *mut i32,
+    dispersion_constants_ptr: *mut *const f64,
+    dispersion_constants_len_ptr: *mut usize,
+) {
+    let (n, s): (i32, &[f64]) = glass.into();
+    dispersion_formula_number_ptr.write(n);
+    dispersion_constants_ptr.write(s.as_ptr());
+    dispersion_constants_len_ptr.write(s.len());
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn deserialize_glass(
-    glass: *mut *mut Glass,
-    serialized_bytes: *const u8,
-    serialized_bytes_length: usize,
+pub unsafe extern "C" fn new_glass_from_parametrization(
+    dispersion_formula_number: i32,
+    dispersion_constants: *const f64,
+    dispersion_constants_len: usize,
+    glass_ptr: *mut *mut Glass,
 ) -> FfiResult {
-    match serde_cbor::from_slice(core::slice::from_raw_parts(serialized_bytes, serialized_bytes_length)) {
-        Ok(g) => {
-            glass.write(Box::into_raw(Box::new(g)));
-            None
-        }
-        Err(_) => Some("Failed to deserialize"),
-    }
-    .into()
+    let s = core::slice::from_raw_parts(dispersion_constants, dispersion_constants_len);
+    Glass::new(dispersion_formula_number, s.iter().copied())
+        .map(|glass| glass_ptr.write(Box::into_raw(Box::new(glass))))
+        .into()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn free_glass(glass: *mut Glass) {
     drop(Box::from_raw(glass))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glass_refractive_index(glass: &Glass, wavelength: f64) -> f64 {
+    glass.calc_n(wavelength)
 }
 
 #[no_mangle]
@@ -192,18 +185,15 @@ pub unsafe extern "C" fn fitness(
     gaussian_beam: &GaussianBeam,
     design_fitness: *mut DesignFitness,
 ) -> FfiResult {
-    match crate::ray::fitness(prism, detector_array, gaussian_beam) {
-        Ok([size, info, deviation]) => {
+    crate::ray::fitness(prism, detector_array, gaussian_beam)
+        .map(|[size, info, deviation]| {
             design_fitness.write(DesignFitness {
                 size,
                 info,
                 deviation,
-            });
-            None
-        }
-        Err(e) => Some(e.name()),
-    }
-    .into()
+            })
+        })
+        .into()
 }
 
 #[no_mangle]
@@ -213,18 +203,15 @@ pub unsafe extern "C" fn detector_array_position(
     gaussian_beam: &GaussianBeam,
     position: *mut DetectorArrayPositioning,
 ) -> FfiResult {
-    match crate::ray::detector_array_positioning(prism, detector_array, gaussian_beam) {
-        Ok(p) => {
-            position.write(p);
-            None
-        }
-        Err(e) => Some(e.name()),
-    }
-    .into()
+    crate::ray::detector_array_positioning(prism, detector_array, gaussian_beam)
+        .map(|p| position.write(p))
+        .into()
 }
 
 #[repr(C)]
-pub struct ProbabilitiesState { _private: [u8; 0], }
+pub struct ProbabilitiesState {
+    _private: [u8; 0],
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn p_dets_l_wavelength(
@@ -236,13 +223,17 @@ pub unsafe extern "C" fn p_dets_l_wavelength(
     append_next_detector_probability: fn(*mut ProbabilitiesState, f64),
     state_ptr: *mut ProbabilitiesState,
 ) {
-    for p in crate::ray::p_dets_l_wavelength(wavelength, prism, detector_array, gaussian_beam, *detpos) {
+    for p in
+        crate::ray::p_dets_l_wavelength(wavelength, prism, detector_array, gaussian_beam, *detpos)
+    {
         append_next_detector_probability(state_ptr, p)
     }
 }
 
 #[repr(C)]
-pub struct TracedRayState { _private: [u8; 0], }
+pub struct TracedRayState {
+    _private: [u8; 0],
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn trace(
@@ -254,14 +245,11 @@ pub unsafe extern "C" fn trace(
     append_next_ray_position: fn(*mut TracedRayState, Pair),
     state_ptr: *mut TracedRayState,
 ) -> FfiResult {
-    match crate::ray::trace(wavelength, inital_y, prism, detector_array, *detpos) {
-        Ok(t) => {
+    crate::ray::trace(wavelength, inital_y, prism, detector_array, *detpos)
+        .map(|t| {
             for p in t {
-                append_next_ray_position(state_ptr,  p)
+                append_next_ray_position(state_ptr, p)
             }
-            None
-        }
-        Err(e) => Some(e.name()),
-    }
-    .into()
+        })
+        .into()
 }

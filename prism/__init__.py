@@ -3,10 +3,11 @@ import typing
 import numpy as np
 import pygmo as pg
 import prism.rffi as _prism
-from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, PyGlass, DesignFitness
+from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, PyGlass, DesignFitness, detector_array_position, trace, fitness, p_dets_l_wavelength
 
 
 class Config(typing.NamedTuple):
+    """Specification class for the configuration of the Spectrometer Designer."""
     max_prism_count: int
     wavelength_range: typing.Tuple[float, float]
     beam_width: float
@@ -15,10 +16,11 @@ class Config(typing.NamedTuple):
     detector_array_length: float
     detector_array_min_ci: float
     detector_array_bin_bounds: np.ndarray
-    glasses: typing.Sequence[typing.Tuple[str, PyGlass]]
+    glass_catalog: typing.Sequence[PyGlass]
 
     @property
     def params_dtype(self):
+        """The numpy dtype of the optimization parameters."""
         return np.dtype([
             ('nprism', 'f8'),
             ('prism_height', 'f8'),
@@ -31,10 +33,11 @@ class Config(typing.NamedTuple):
         ])
 
     def params_bounds(self) -> typing.Tuple[typing.Iterable[float], typing.Iterable[float]]:
+        """The bounds of the optimization parameters."""
         nprism = self.max_prism_count
         prism_count_bounds = 1, 1 + self.max_prism_count
         prism_height_bounds = 0, self.max_prism_height
-        glass_bounds = nprism * [(0, len(self.glasses))]
+        glass_bounds = nprism * [(0, len(self.glass_catalog))]
         angle_bounds = (nprism + 1) * [(-np.pi / 2, np.pi / 2)]
         length_bounds = nprism * [(0., self.max_prism_height)]
         curvature_bounds = 0.001, 1.0
@@ -53,11 +56,12 @@ class Config(typing.NamedTuple):
         return lb, ub
 
     def array_to_params(self, p: np.ndarray) -> (CompoundPrism, DetectorArray, GaussianBeam):
+        """Creates the spectrometer specification from the config & optimization parameters."""
         params = np.asanyarray(p).view(self.params_dtype)[0]
         prism_count = int(np.clip(params['nprism'], 1, self.max_prism_count))
         prism_height = params['prism_height']
         prism = CompoundPrism(
-            glasses=[self.glasses[min(int(i), len(self.glasses) - 1)][1] for i in params['glass_indices'][:prism_count]],
+            glasses=[self.glass_catalog[min(int(i), len(self.glass_catalog) - 1)] for i in params['glass_indices'][:prism_count]],
             angles=params['angles'][:prism_count + 1],
             lengths=params['lengths'][:prism_count],
             curvature=params['curvature'],
@@ -79,23 +83,24 @@ class Config(typing.NamedTuple):
 
 
 class Soln(typing.NamedTuple):
+    """A spectrometer design returned as a solution to the optimization problem."""
     compound_prism: CompoundPrism
     detector_array: DetectorArray
     beam: GaussianBeam
     fitness: DesignFitness
 
     @staticmethod
-    def from_config_and_array(config: Config, p: np.ndarray):
+    def from_config_and_array(config: Config, p: np.ndarray) -> typing.Optional['Soln']:
         compound_prism, detector_array, beam = config.array_to_params(p)
-        return Soln(
-            compound_prism=compound_prism,
-            detector_array=detector_array,
-            beam=beam,
-            fitness=fitness(compound_prism, detector_array, beam)
-        )
-
-
-nobjective = len(dataclasses.fields(DesignFitness))
+        try:
+            return Soln(
+                compound_prism=compound_prism,
+                detector_array=detector_array,
+                beam=beam,
+                fitness=fitness(compound_prism, detector_array, beam)
+            )
+        except RayTraceError:
+            return None
 
 
 def transmission_data(wavelengths: [float], prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam, det):
@@ -111,35 +116,7 @@ def transmission_data(wavelengths: [float], prism: CompoundPrism, detarr: Detect
     )
 
 
-def detector_array_position(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam):
-    return np.array(
-        _prism.detector_array_position(
-            prism,
-            detarr,
-            beam,
-        )
-    )
-
-
-def trace(wavelength: float, initial_y: float, prism: CompoundPrism, detarr: DetectorArray, det):
-    return _prism.trace(
-        wavelength,
-        initial_y,
-        prism,
-        detarr,
-        det
-    )
-
-
-def fitness(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam):
-    try:
-        return _prism.fitness(
-            prism,
-            detarr,
-            beam,
-        )
-    except RayTraceError:
-        return DesignFitness(size=np.inf, info=0, deviation=np.inf)
+_nobjective = len(dataclasses.fields(DesignFitness))
 
 
 class PyGmoPrismProblem:
@@ -148,18 +125,23 @@ class PyGmoPrismProblem:
 
     def fitness(self, v: np.ndarray):
         prism, detarr, beam = self.config.array_to_params(v)
-        val = fitness(prism, detarr, beam)
-        if val.size > 30 * self.config.max_prism_height or abs(val.info) < 0.1:
-            return [np.inf] * nobjective
-        else:
+        try:
+            val = fitness(
+                prism,
+                detarr,
+                beam,
+            )
+            assert val.size <= 30 * self.config.max_prism_height and abs(val.info) >= 0.1
             return val.size, -val.info, val.deviation
+        except (RayTraceError, AssertionError):
+            return [np.inf] * _nobjective
 
     def get_bounds(self):
         return self.config.params_bounds()
 
     @staticmethod
     def get_nobj():
-        return nobjective
+        return _nobjective
 
     @staticmethod
     def get_name():
@@ -189,4 +171,5 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config):
     print(pop.champion_f, v)
     print(p)
     '''
-    return [Soln.from_config_and_array(config, p) for isl in archi for p in isl.get_population().get_x()]
+    solns = (Soln.from_config_and_array(config, p) for isl in archi for p in isl.get_population().get_x())
+    return list(filter(lambda v: v is not None, solns))

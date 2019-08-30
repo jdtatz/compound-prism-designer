@@ -1,5 +1,4 @@
 use arrayvec::ArrayVec;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -11,8 +10,8 @@ pub enum CatalogError {
     DuplicateGlass,
 }
 
-impl CatalogError {
-    pub fn name(self) -> &'static str {
+impl Into<&'static str> for CatalogError {
+    fn into(self) -> &'static str {
         match self {
             CatalogError::NameNotFound => "NameNotFound",
             CatalogError::GlassTypeNotFound => "GlassTypeNotFound",
@@ -32,7 +31,7 @@ impl std::error::Error for CatalogError {}
 ///
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum Glass {
     Schott([f64; 6]),
     Sellmeier1([f64; 6]),
