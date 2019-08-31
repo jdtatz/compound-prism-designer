@@ -25,6 +25,7 @@ def _from_ffi_result(ffi_result: ffi.CData, exception_type=Exception):
 
 class PyGlass:
     """Glass Parametrization"""
+
     def __init__(self, name: str, ptr: ffi.CData):
         self.name = name
         self._ptr = ffi.gc(ptr, lib.free_glass)
@@ -47,7 +48,8 @@ class PyGlass:
             dispersion_constants_ptr,
             dispersion_constants_len_ptr,
         )
-        parametrization = dispersion_formula_number_ptr[0], list(dispersion_constants_ptr[0][0:dispersion_constants_len_ptr[0]])
+        parametrization = dispersion_formula_number_ptr[0], list(
+            dispersion_constants_ptr[0][0:dispersion_constants_len_ptr[0]])
         return {"name": self.name, "parametrization": parametrization}
 
     def __setstate__(self, state):
@@ -61,10 +63,12 @@ class PyGlass:
 def create_glass_catalog(file_contents: str) -> typing.Sequence[PyGlass]:
     """Create glass parametrization catalog from the contents of a .agf file."""
     catalog = []
+
     @ffi.callback("void(void*, FFiStr, Glass*)")
     def update(_state, ffi_str, glass):
         name = _from_ffi_str(ffi_str)
         catalog.append(PyGlass(name, glass))
+
     file_contents = file_contents.encode("UTF-8")
     _from_ffi_result(lib.update_glass_catalog(file_contents, len(file_contents), update, ffi.NULL), CatalogError)
     return catalog
@@ -172,7 +176,8 @@ def fitness(cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_
     return DesignFitness(size=ptr.size, info=ptr.info, deviation=ptr.deviation)
 
 
-def detector_array_position(cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam) -> typing.Tuple[np.ndarray, np.ndarray]:
+def detector_array_position(cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam) -> \
+        typing.Tuple[np.ndarray, np.ndarray]:
     """Return the position of the detector array in the spectrometer design."""
     ptr = ffi.new("DetectorArrayPositioning*")
     _from_ffi_result(lib.detector_array_position(
@@ -184,7 +189,8 @@ def detector_array_position(cmpnd_prism: CompoundPrism, detector_array: Detector
     return np.array((ptr.position.x, ptr.position.y)), np.array((ptr.direction.x, ptr.direction.y))
 
 
-def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray, detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray,
+          detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
     """Return the traced positions of the specific ray of light through the spectrometer."""
     ptr = ffi.new("DetectorArrayPositioning*")
     ptr.position.x = detpos[0][0]
@@ -192,9 +198,11 @@ def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detect
     ptr.direction.x = detpos[1][0]
     ptr.direction.y = detpos[1][1]
     array = []
+
     @ffi.callback("void(void*, Pair)")
     def append_next_ray_position(_state, pos):
         array.append((pos.x, pos.y))
+
     _from_ffi_result(lib.trace(
         wavelength,
         inital_y,
@@ -207,7 +215,8 @@ def trace(wavelength: float, inital_y: float, cmpnd_prism: CompoundPrism, detect
     return np.array(array)
 
 
-def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray, gaussian_beam: GaussianBeam, detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_array: DetectorArray,
+                        gaussian_beam: GaussianBeam, detpos: typing.Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
     """Return the probabilities of detection of the specific ray of light for all of the detectors."""
     ptr = ffi.new("DetectorArrayPositioning*")
     ptr.position.x = detpos[0][0]
@@ -215,9 +224,11 @@ def p_dets_l_wavelength(wavelength: float, cmpnd_prism: CompoundPrism, detector_
     ptr.direction.x = detpos[1][0]
     ptr.direction.y = detpos[1][1]
     array = []
+
     @ffi.callback("void(void*, double)")
     def append_next_detector_probability(_state, p):
         array.append(p)
+
     lib.p_dets_l_wavelength(
         wavelength,
         cmpnd_prism._ptr,

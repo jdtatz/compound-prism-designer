@@ -3,9 +3,10 @@ from os import cpu_count
 from sys import argv
 import numpy as np
 import toml
-from prism import Config, Soln, RayTraceError, create_glass_catalog, detector_array_position, trace, transmission_data, use_pygmo
-from prism.zemax import create_zmx
+from prism import Config, Soln, RayTraceError, create_glass_catalog, \
+    detector_array_position, trace, transmission_data, use_pygmo
 from prism.utils import draw_compound_prism, midpts_gen
+from prism.zemax import create_zmx
 
 
 def show_interactive(config: Config, solns: [Soln], units: str):
