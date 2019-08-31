@@ -44,6 +44,7 @@ def draw_compound_prism(ax, prism: CompoundPrism):
                 yield np.array((d, b, a, c))
             else:
                 yield np.array((c, a, b, d))
+
     polygons = list(polygon_gen())
 
     midpt = list(midpts_gen(prism))[-1]
@@ -73,4 +74,3 @@ def draw_compound_prism(ax, prism: CompoundPrism):
         last = mpl.path.Path.make_compound_path(arc, mpl.path.Path(polygons[-1][::-1]))
     last = mpl.patches.PathPatch(last, fill=True, edgecolor='k', facecolor=('white' if len(polygons) % 2 else 'gray'))
     ax.add_patch(last)
-

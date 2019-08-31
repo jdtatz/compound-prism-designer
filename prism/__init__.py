@@ -2,8 +2,8 @@ import dataclasses
 import typing
 import numpy as np
 import pygmo as pg
-import prism.rffi as _prism
-from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, PyGlass, DesignFitness, detector_array_position, trace, fitness, p_dets_l_wavelength
+from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, \
+    PyGlass, DesignFitness, detector_array_position, trace, fitness, p_dets_l_wavelength
 
 
 class Config(typing.NamedTuple):
@@ -19,7 +19,7 @@ class Config(typing.NamedTuple):
     glass_catalog: typing.Sequence[PyGlass]
 
     @property
-    def params_dtype(self):
+    def params_dtype(self) -> np.dtype:
         """The numpy dtype of the optimization parameters."""
         return np.dtype([
             ('nprism', 'f8'),
@@ -37,7 +37,7 @@ class Config(typing.NamedTuple):
         nprism = self.max_prism_count
         prism_count_bounds = 1, 1 + self.max_prism_count
         prism_height_bounds = 0, self.max_prism_height
-        glass_bounds = nprism * [(0, len(self.glass_catalog))]
+        glass_bounds = nprism * [(0, len(self.glass_catalog) - 1)]
         angle_bounds = (nprism + 1) * [(-np.pi / 2, np.pi / 2)]
         length_bounds = nprism * [(0., self.max_prism_height)]
         curvature_bounds = 0.001, 1.0
@@ -61,7 +61,7 @@ class Config(typing.NamedTuple):
         prism_count = int(np.clip(params['nprism'], 1, self.max_prism_count))
         prism_height = params['prism_height']
         prism = CompoundPrism(
-            glasses=[self.glass_catalog[min(int(i), len(self.glass_catalog) - 1)] for i in params['glass_indices'][:prism_count]],
+            glasses=[self.glass_catalog[int(i)] for i in params['glass_indices'][:prism_count]],
             angles=params['angles'][:prism_count + 1],
             lengths=params['lengths'][:prism_count],
             curvature=params['curvature'],
@@ -105,7 +105,7 @@ class Soln(typing.NamedTuple):
 
 def transmission_data(wavelengths: [float], prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam, det):
     return np.stack([
-        _prism.p_dets_l_wavelength(
+        p_dets_l_wavelength(
             w,
             prism,
             detarr,
@@ -172,4 +172,6 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config):
     print(p)
     '''
     solns = (Soln.from_config_and_array(config, p) for isl in archi for p in isl.get_population().get_x())
-    return list(filter(lambda v: v is not None, solns))
+    return list(
+        filter(lambda v: v is not None and v.fitness.size <= 30 * config.max_prism_height and v.fitness.info >= 0.1,
+               solns))
