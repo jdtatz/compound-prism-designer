@@ -3,3 +3,4 @@ matplotlib ~= 3.0
 pygmo ~= 2.11
 toml ~= 0.10
 milksnake ~= 0.1.5
+cffi ~= 1.12
