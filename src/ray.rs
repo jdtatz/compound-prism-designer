@@ -609,7 +609,7 @@ pub fn p_dets_l_wavelength(
     debug_assert!(0. <= p_z && p_z <= 1.);
     let mut qrng = quasirandom::Qrng::new(1);
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
-        // Transform uniform random value to normal random value, using inverse cdf
+        // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
         let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
         if y <= 0. || prism.height <= y {
             for stat in p_dets_l_w_stats.iter_mut() {
@@ -675,6 +675,7 @@ fn mutual_information(
     let mut info_stats = vec![Welford::new(); detarr.bins.len()];
     let mut qrng = quasirandom::Qrng::new(1);
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+        // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = wmin + u * (wmax - wmin);
         let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
         for ((dstat, istat), p_det_l_w) in p_dets_stats

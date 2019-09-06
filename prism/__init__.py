@@ -41,7 +41,7 @@ class Config(typing.NamedTuple):
         angle_bounds = (nprism + 1) * [(-np.pi / 2, np.pi / 2)]
         length_bounds = nprism * [(0., self.max_prism_height)]
         curvature_bounds = 0.001, 1.0
-        y_mean_bounds = 0, 1
+        normalized_y_mean_bounds = 0, 1
         det_arr_angle_bounds = -np.pi, np.pi
         lb, ub = np.transpose([
             prism_count_bounds,
@@ -50,7 +50,7 @@ class Config(typing.NamedTuple):
             *angle_bounds,
             *length_bounds,
             curvature_bounds,
-            y_mean_bounds,
+            normalized_y_mean_bounds,
             det_arr_angle_bounds,
         ])
         return lb, ub
@@ -171,7 +171,9 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config):
     print(pop.champion_f, v)
     print(p)
     '''
-    solns = (Soln.from_config_and_array(config, p) for isl in archi for p in isl.get_population().get_x())
-    return list(
-        filter(lambda v: v is not None and v.fitness.size <= 30 * config.max_prism_height and v.fitness.info >= 0.1,
-               solns))
+    solns = (Soln.from_config_and_array(config, x) for isl in archi for x in isl.get_population().get_x())
+    solns = list(filter(lambda v: v is not None and v.fitness.size <= 30 * config.max_prism_height and v.fitness.info >= 0.1, solns))
+    sorted_solns_idxs = pg.select_best_N_mo([
+        (s.fitness.size, -s.fitness.info, s.fitness.deviation) for s in solns
+    ], pop_size)
+    return [solns[i] for i in sorted_solns_idxs]
