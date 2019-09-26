@@ -1,0 +1,63 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\begin{document}
+
+\section{Givens}
+\subsection{Variables}
+$h$ = prism height
+
+$l_z$  = prism width
+
+$l_a$  = detector array length
+
+$\vec{p}_a$ = detector array position vector
+
+$\vec{v}_a$ = detector array direction vector
+
+$w_b  =  1 / e^2$ {beam width}
+
+$D  = \{ d = [lb_d, ub_d) \subseteq [0, l_a] \}$
+
+$\Lambda  =  [\lambda_{min}, \lambda_{max}] $
+
+$Y = (0, h) $
+
+$Z = (-l_z / 2, l_z / 2)$
+
+\subsection{Functions}
+$T(\lambda, y)$ = transmittance probability of a wavelength, $\lambda$, from an inital y, to the intersection with the detector array
+
+$\vec{S}(\lambda, y)$  = position vector of the intersection of the detector array, and of a wavelength, $\lambda$, from an inital y
+
+$f(y, z) = \frac{2}{\pi  w_b^2}exp[-2(y^2 + z^2)/w_b^2]$
+
+$$p(D=d|\Lambda=\lambda \cap Y=y) = \begin{cases}
+T(\lambda, y) & lb_d <= ((\vec{S}(\lambda, y) - \vec{p}_a) \cdot \vec{v}_a) < ub_d \\
+0 & else \end{cases}$$
+
+$p(\Lambda=\lambda) = 1 / (\lambda_{max} - \lambda_{min})$
+
+
+
+\section{Derivations}
+
+$p(D=d|\Lambda=\lambda) = \int_Y\int_Z p(D=d|\Lambda=\lambda \cap Y=y)f(y - y_{mean}, z)dz dy$
+
+$p(D=d) = \int_\Lambda p(\Lambda=\lambda) p(D=d|\Lambda=\lambda)d\lambda$
+
+$\vec{dev} = \vec{p}_a + \vec{v}_a * l_a / 2 - (0, y_{mean})$
+
+$H(D) = -\sum_{d \in D}p(D=d) log_2[p(D=d)]$
+
+$H(D|\Lambda) = -\sum_{d \in D}\int_{\Lambda}p(\Lambda=\lambda) p(D=d|\Lambda=\lambda) log_2[p(D=d|\Lambda=\lambda)] d\lambda$
+
+\section{Optimization Objectives}
+
+spectromter size = $||\vec{dev}||$
+
+spectromter ray deviation = $| \vec{dev} \cdot (0, 1) | / ||\vec{dev}||$
+
+mutual information = $I(\Lambda; D) = H(D) - H(D|\Lambda)$
+
+\end{document}

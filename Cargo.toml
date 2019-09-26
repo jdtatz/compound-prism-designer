@@ -24,3 +24,4 @@ rand_xoshiro = "0.3.1"
 [profile.release]
 opt-level=3
 lto=true
+

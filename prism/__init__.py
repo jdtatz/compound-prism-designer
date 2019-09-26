@@ -2,6 +2,7 @@ import dataclasses
 import typing
 import numpy as np
 import pygmo as pg
+import platypus
 from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, \
     PyGlass, DesignFitness, detector_array_position, trace, fitness, p_dets_l_wavelength
 
@@ -17,6 +18,11 @@ class Config(typing.NamedTuple):
     detector_array_min_ci: float
     detector_array_bin_bounds: np.ndarray
     glass_catalog: typing.Sequence[PyGlass]
+
+    @property
+    def params_count(self) -> int:
+        return 3 * self.max_prism_count + 6
+
 
     @property
     def params_dtype(self) -> np.dtype:
@@ -36,7 +42,7 @@ class Config(typing.NamedTuple):
         """The bounds of the optimization parameters."""
         nprism = self.max_prism_count
         prism_count_bounds = 1, 1 + self.max_prism_count
-        prism_height_bounds = 0, self.max_prism_height
+        prism_height_bounds = 0.001, self.max_prism_height
         glass_bounds = nprism * [(0, len(self.glass_catalog) - 1)]
         angle_bounds = (nprism + 1) * [(-np.pi / 2, np.pi / 2)]
         length_bounds = nprism * [(0., self.max_prism_height)]
@@ -55,9 +61,11 @@ class Config(typing.NamedTuple):
         ])
         return lb, ub
 
-    def array_to_params(self, p: np.ndarray) -> (CompoundPrism, DetectorArray, GaussianBeam):
+    def array_to_params(self, p: 'array_like') -> (CompoundPrism, DetectorArray, GaussianBeam):
         """Creates the spectrometer specification from the config & optimization parameters."""
-        params = np.asanyarray(p).view(self.params_dtype)[0]
+        arr = np.ascontiguousarray(p, dtype=np.float64)
+        assert len(arr) == self.params_count
+        params = arr.view(self.params_dtype)[0]
         prism_count = int(np.clip(params['nprism'], 1, self.max_prism_count))
         prism_height = params['prism_height']
         prism = CompoundPrism(
@@ -90,7 +98,7 @@ class Soln(typing.NamedTuple):
     fitness: DesignFitness
 
     @staticmethod
-    def from_config_and_array(config: Config, p: np.ndarray) -> typing.Optional['Soln']:
+    def from_config_and_array(config: Config, p: 'array_like') -> typing.Optional['Soln']:
         compound_prism, detector_array, beam = config.array_to_params(p)
         try:
             return Soln(
@@ -152,7 +160,6 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config):
     if pop_size < 5 or pop_size % 4 != 0:
         pop_size = max(8, pop_size + 4 - pop_size % 4)
     prob = pg.problem(PyGmoPrismProblem(config))
-    bfe = pg.bfe(pg.member_bfe())
     a = pg.nsga2(gen=iter_count, cr=0.98, m=0.1)
     algo = pg.algorithm(a)
     # w = np.array((1e-3, 1, 1e-4))
@@ -177,3 +184,32 @@ def use_pygmo(iter_count, thread_count, pop_size, config: Config):
         (s.fitness.size, -s.fitness.info, s.fitness.deviation) for s in solns
     ], pop_size)
     return [solns[i] for i in sorted_solns_idxs]
+
+
+class PlatypusPrismProblem(platypus.Problem):
+    def __init__(self, config: Config):
+        bounds = config.params_bounds()
+        super(PlatypusPrismProblem, self).__init__(config.params_count, _nobjective, 1)
+        self.types = [platypus.Real(l, u) for l, u in zip(*bounds)]
+        self.constraints[:] = "!=0"
+        self.directions[:] = platypus.Problem.MAXIMIZE, platypus.Problem.MINIMIZE, platypus.Problem.MAXIMIZE
+        self.config = config
+
+    def evaluate(self, solution: platypus.Solution):
+        prism, detarr, beam = self.config.array_to_params(solution.variables[:])
+        try:
+            val = fitness(
+                prism,
+                detarr,
+                beam,
+            )
+            assert val.size <= 30 * self.config.max_prism_height and val.info >= 0.1
+            solution.objectives[:] = val.size, val.info, val.deviation
+            solution.constraints[:] = 1
+        except (RayTraceError, AssertionError):
+            solution.constraints[:] = 0
+            solution.objectives[:] = 30 * self.config.max_prism_height, 0, 1
+
+    @staticmethod
+    def get_name():
+        return "Compound Prism Optimizer"
