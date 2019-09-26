@@ -37,6 +37,9 @@ class PyGlass:
         :return: the refractive index.
         """
         return lib.glass_refractive_index(self._ptr, wavelength)
+    
+    def __str__(self):
+        return str(self.name)
 
     def __getstate__(self):
         dispersion_formula_number_ptr = ffi.new("int32_t*")
