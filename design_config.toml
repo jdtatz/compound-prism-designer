@@ -6,9 +6,9 @@ length-unit = "mm"
 # Genetic algorithm(NSAGII) optimizer properties (Optional)
 [optimizer]
 # Number of times to evolve the optimization population (Optional, default=1000)
-iteration-count = 200
+iteration-count = 100
 # Number of threads to use (Optional), if not givent or < 1, then will use maximum
-thread-count = 32
+thread-count = 8
 # For each thread, the number of candiatie solutions to be used / evolved
 # Must be > 5 and a multiple of 4, (Optional, default=20), will round up if conditions not met
 pop-size = 120

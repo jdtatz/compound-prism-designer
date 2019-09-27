@@ -1,6 +1,6 @@
 import numpy as np
 from itertools import count
-from prism import CompoundPrism, DetectorArray, GaussianBeam
+from compound_prism_designer import CompoundPrism, DetectorArray, GaussianBeam
 
 
 def _thickness_fn(prism: CompoundPrism):

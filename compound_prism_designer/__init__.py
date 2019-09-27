@@ -3,7 +3,7 @@ import typing
 import numpy as np
 import pygmo as pg
 import platypus
-from prism.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, \
+from compound_prism_designer.rffi import RayTraceError, create_glass_catalog, CompoundPrism, DetectorArray, GaussianBeam, \
     PyGlass, DesignFitness, detector_array_position, trace, fitness, p_dets_l_wavelength
 
 

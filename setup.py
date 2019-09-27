@@ -8,17 +8,17 @@ def build_native(spec):
     )
 
     spec.add_cffi_module(
-        module_path='prism._native',
-        dylib=lambda: build.find_dylib('prism', in_path='target/release'),
+        module_path='compound_prism_designer._native',
+        dylib=lambda: build.find_dylib('compound_prism_designer', in_path='target/release'),
         header_filename=lambda: build.find_header('bindings.h', in_path='target'),
         rtld_flags=['NOW', 'NODELETE']
     )
 
 
 setup(
-    name="prism",
-    version="0.0.2",
-    packages=["prism"],
+    name="compound_prism_designer",
+    version="0.0.3",
+    packages=["compound_prism_designer"],
     zip_safe=False,
     platforms='any',
     setup_requires=["milksnake"],

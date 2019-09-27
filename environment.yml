@@ -1,4 +1,4 @@
-name: prism
+name: compound_prism_designer
 channels:
   - defaults
   - conda-forge
