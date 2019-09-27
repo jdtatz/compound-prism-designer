@@ -14,6 +14,7 @@ derive_more = { version = "0.15.0", features = ["no_std"]}
 arrayvec = { version = "0.4.11", default-features = false, features = ["array-sizes-33-128"] }
 statrs = "0.11.0"
 quasirandom = "0.2.1"
+libm = "0.1.4"
 
 [build-dependencies]
 cbindgen = "0.9.0"
