@@ -2,6 +2,7 @@ use crate::glasscat::Glass;
 use statrs::function::erf::{erf, erfc_inv};
 use std::borrow::Cow;
 use std::f64::consts::*;
+use libm::{cos, sin, tan};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -61,8 +62,8 @@ impl Pair {
 fn rotate(angle: f64, vector: Pair) -> Pair {
     debug_assert!(vector.is_unit());
     Pair {
-        x: angle.cos() * vector.x - angle.sin() * vector.y,
-        y: angle.sin() * vector.x + angle.cos() * vector.y,
+        x: cos(angle) * vector.x - sin(angle) * vector.y,
+        y: sin(angle) * vector.x + cos(angle) * vector.y,
     }
 }
 
@@ -133,7 +134,7 @@ impl<'a> CompoundPrism<'a> {
     /// Iterator over the midpts of each prism surface
     fn midpts<'s>(&'s self) -> impl Iterator<Item = Pair> + 's {
         let h2 = self.height * 0.5;
-        std::iter::once(self.angles[0].abs().tan() * h2)
+        std::iter::once(tan(self.angles[0].abs()) * h2)
             .chain(
                 self.angles
                     .windows(2)
@@ -142,11 +143,11 @@ impl<'a> CompoundPrism<'a> {
                         let last = win[0];
                         let angle = win[1];
                         if (last >= 0.) ^ (angle >= 0.) {
-                            (last.abs().tan() + angle.abs().tan()) * h2 + len
+                            (tan(last.abs()) + tan(angle.abs())) * h2 + len
                         } else if last.abs() > angle.abs() {
-                            (last.abs().tan() - angle.abs().tan()) * h2 + len
+                            (tan(last.abs()) - tan(angle.abs())) * h2 + len
                         } else {
-                            (angle.abs().tan() - last.abs().tan()) * h2 + len
+                            (tan(angle.abs()) - tan(last.abs())) * h2 + len
                         }
                     }),
             )
@@ -643,8 +644,11 @@ pub fn p_dets_l_wavelength(
             }
         }
         if p_dets_l_w_stats.iter().all(|stat| {
-            let err = stat.sample_variance() / stat.count.sqrt();
-            err < 7.5e-3
+            // err = sample_variance / sqrt(N)
+            let var = stat.sample_variance();
+            const MAX_ERR: f64 = 7.5e-3;
+            const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
+            (var * var) < MAX_ERR_SQ * stat.count
         }) {
             break;
         }
@@ -692,8 +696,11 @@ fn mutual_information(
             }
         }
         if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
-            let err = stat.sample_variance() / stat.count.sqrt();
-            err < 2.5e-3
+            // err = sample_variance / sqrt(N)
+            let var = stat.sample_variance();
+            const MAX_ERR: f64 = 2.5e-3;
+            const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
+            (var * var) < MAX_ERR_SQ * stat.count
         }) {
             break;
         }
