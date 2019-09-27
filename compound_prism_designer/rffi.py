@@ -1,4 +1,4 @@
-from prism._native import ffi, lib
+from compound_prism_designer._native import ffi, lib
 import typing
 import dataclasses
 import numpy as np

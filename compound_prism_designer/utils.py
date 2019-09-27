@@ -1,5 +1,5 @@
 import numpy as np
-from prism import CompoundPrism
+from compound_prism_designer import CompoundPrism
 
 
 def midpts_gen(prism: CompoundPrism):

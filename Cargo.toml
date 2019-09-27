@@ -1,5 +1,5 @@
 [package]
-name = "prism"
+name = "compound-prism-designer"
 version = "0.0.1"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"

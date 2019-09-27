@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use prism::*;
+use compound_prism_designer::*;
 
 use criterion::profiler::Profiler;
 use criterion::Criterion;
