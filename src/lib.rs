@@ -5,3 +5,5 @@ extern crate derive_more;
 mod clib;
 mod glasscat;
 mod ray;
+pub use crate::glasscat::*;
+pub use crate::ray::*;
