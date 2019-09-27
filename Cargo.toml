@@ -6,7 +6,8 @@ edition = "2018"
 include = ["src/**/*", "Cargo.toml"]
 
 [lib]
-crate-type = ["cdylib"]
+bench = false
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 derive_more = { version = "0.15.0", features = ["no_std"]}
@@ -20,8 +21,16 @@ cbindgen = "0.9.0"
 [dev-dependencies]
 rand="0.7.0"
 rand_xoshiro = "0.3.1"
+criterion = "0.3"
+cpuprofiler = "0.0.3"
+
+[[bench]]
+name = "benchmark"
+harness = false
 
 [profile.release]
 opt-level=3
 lto=true
 
+[profile.bench]
+debug = true
