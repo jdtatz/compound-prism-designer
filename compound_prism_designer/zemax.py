@@ -1,6 +1,7 @@
 import numpy as np
 from itertools import count
-from compound_prism_designer import CompoundPrism, DetectorArray, GaussianBeam
+from compound_prism_designer import CompoundPrism, DetectorArray, GaussianBeam, detector_array_position
+from compound_prism_designer.utils import midpts_gen
 
 
 def _thickness_fn(prism: CompoundPrism):
@@ -14,7 +15,11 @@ def _thickness_fn(prism: CompoundPrism):
             yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h + l
 
 
-def create_zmx(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam, detarr_offset):
+def create_zmx(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam, detector_array_length: float):
+    det_arr_pos, det_arr_dir = detector_array_position(prism, detarr, beam)
+    midpt = list(midpts_gen(prism))[-1]
+    detarr_offset = (det_arr_pos + det_arr_dir * detector_array_length / 2) - midpt
+
     incrementer = count(1)
     wmin, wmax = beam.wavelength_range
 
