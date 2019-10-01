@@ -1,5 +1,6 @@
 numpy ~= 1.17
 matplotlib ~= 3.0
+PySide2 ~= 5.13
 Platypus-Opt ~= 1.0
 pygmo ~= 2.11
 toml ~= 0.10

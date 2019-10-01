@@ -109,6 +109,17 @@ class CompoundPrism:
         )
         super().__setattr__("_ptr", ffi.gc(ptr, lib.free_compound_prism))
 
+    def __getstate__(self):
+        kws = self.__dict__.copy()
+        kws.pop('_ptr')
+        return kws
+
+    def __setstate__(self, kws):
+        for k, v in kws.items():
+            super().__setattr__(k, v)
+        self.__post_init__()
+
+
 
 @dataclasses.dataclass(frozen=True)
 class DetectorArray:
@@ -136,6 +147,16 @@ class DetectorArray:
         )
         super().__setattr__("_ptr", ffi.gc(ptr, lib.free_detector_array))
 
+    def __getstate__(self):
+        kws = self.__dict__.copy()
+        kws.pop('_ptr')
+        return kws
+
+    def __setstate__(self, kws):
+        for k, v in kws.items():
+            super().__setattr__(k, v)
+        self.__post_init__()
+
 
 @dataclasses.dataclass(frozen=True)
 class GaussianBeam:
@@ -157,6 +178,16 @@ class GaussianBeam:
             self.wavelength_range[1],
         )
         super().__setattr__("_ptr", ffi.gc(ptr, lib.free_gaussian_beam))
+
+    def __getstate__(self):
+        kws = self.__dict__.copy()
+        kws.pop('_ptr')
+        return kws
+
+    def __setstate__(self, kws):
+        for k, v in kws.items():
+            super().__setattr__(k, v)
+        self.__post_init__()
 
 
 @dataclasses.dataclass(order=True)
