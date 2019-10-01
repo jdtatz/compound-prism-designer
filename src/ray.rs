@@ -2,7 +2,8 @@ use crate::glasscat::Glass;
 use statrs::function::erf::{erf, erfc_inv};
 use std::borrow::Cow;
 use std::f64::consts::*;
-use libm::{cos, sin, tan};
+use libm::{cos, sin, tan, log2};
+// Can't use libm::sqrt till https://github.com/rust-lang/libm/pull/222 is merged
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -117,11 +118,11 @@ pub struct GaussianBeam {
 #[derive(Debug, Clone)]
 pub struct CompoundPrism<'a> {
     /// List of glasses the compound prism is composed of, in order
-    pub glasses: Cow<'a, [&'a Glass]>,
-    /// Angles that parameterize the shape of the compound prism
-    pub angles: Cow<'a, [f64]>,
-    /// Lengths that parameterize the trapezoidal shape of the compound prism
-    pub lengths: Cow<'a, [f64]>,
+    glasses: Cow<'a, [&'a Glass]>,
+    /// The normals of each prism surface
+    normals: Vec<Pair>,
+    /// The midpts of each prism surface
+    midpts: Vec<Pair>,
     /// Lens Curvature of last surface of compound prism
     pub curvature: f64,
     /// Height of compound prism
@@ -131,14 +132,34 @@ pub struct CompoundPrism<'a> {
 }
 
 impl<'a> CompoundPrism<'a> {
+    /// Create a new Compound Prism Specification
+    ///
+    /// # Arguments
+    ///  * `glasses` - List of glasses the compound prism is composed of, in order
+    ///  * `angles` - Angles that parameterize the shape of the compound prism
+    ///  * `lengths` - Lengths that parameterize the trapezoidal shape of the compound prism
+    ///  * `curvature` - Lens Curvature of last surface of compound prism
+    ///  * `height` - Height of compound prism
+    ///  * `width` - Width of compound prism
+    pub fn new(glasses: Cow<'a, [&'a Glass]>, angles: &[f64], lengths: &[f64], curvature: f64, height: f64, width: f64) -> Self {
+        Self {
+            glasses,
+            normals: angles.iter().map(|angle| rotate(*angle, (-1_f64, 0_f64).into())).collect(),
+            midpts: Self::gen_midpts(height, angles.as_ref(), lengths.as_ref()),
+            curvature,
+            height,
+            width,
+        }
+    }
+
     /// Iterator over the midpts of each prism surface
-    fn midpts<'s>(&'s self) -> impl Iterator<Item = Pair> + 's {
-        let h2 = self.height * 0.5;
-        std::iter::once(tan(self.angles[0].abs()) * h2)
+    fn gen_midpts(height: f64, angles: &[f64], lengths: &[f64]) -> Vec<Pair> {
+        let h2 = height * 0.5;
+        std::iter::once(tan(angles[0].abs()) * h2)
             .chain(
-                self.angles
+                angles
                     .windows(2)
-                    .zip(self.lengths.iter().copied())
+                    .zip(lengths.iter().copied())
                     .map(move |(win, len)| {
                         let last = win[0];
                         let angle = win[1];
@@ -156,6 +177,7 @@ impl<'a> CompoundPrism<'a> {
                 Some(*x)
             })
             .map(move |x| Pair { x, y: h2 })
+            .collect()
     }
 }
 
@@ -367,23 +389,21 @@ impl Ray {
         prism: &CompoundPrism,
         wavelength: f64,
     ) -> Result<Ray, RayTraceError> {
-        let mut mids = prism.midpts();
+        let mut mids = prism.midpts.iter().copied();
         let (ray, n1) = prism
             .glasses
             .iter()
-            .zip(prism.angles.iter())
+            .zip(prism.normals.iter().copied())
             .zip(&mut mids)
-            .try_fold((self, 1_f64), |(ray, n1), ((glass, angle), vertex)| {
+            .try_fold((self, 1_f64), |(ray, n1), ((glass, normal), vertex)| {
                 let n2 = glass.calc_n(wavelength);
-                let normal = rotate(*angle, (-1_f64, 0_f64).into());
                 debug_assert!(normal.is_unit());
                 let ray = ray.intersect_plane_interface(vertex, normal, n1, n2, prism.height)?;
                 Ok((ray, n2))
             })?;
         let midpt = mids.next().unwrap();
-        let angle = prism.angles[prism.angles.len() - 1];
         let n2 = 1_f64;
-        let normal = rotate(angle, (-1_f64, 0_f64).into());
+        let normal = prism.normals[prism.glasses.len()];
         debug_assert!(normal.is_unit());
         ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)
     }
@@ -427,21 +447,19 @@ impl Ray {
         let mut ray = self;
         let mut n1 = 1_f64;
         let mut glasses = prism.glasses.iter();
-        let mut angles = prism.angles.iter().copied();
-        let mut midpts = prism.midpts();
+        let mut normals = prism.normals.iter().copied();
+        let mut midpts = prism.midpts.iter().copied();
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<Pair>, RayTraceError> {
-            match (glasses.next(), angles.next(), midpts.next()) {
-                (Some(glass), Some(angle), Some(midpt)) if !done => {
+            match (glasses.next(), normals.next(), midpts.next()) {
+                (Some(glass), Some(normal), Some(midpt)) if !done => {
                     let n2 = glass.calc_n(wavelength);
-                    let normal = rotate(angle, (-1_f64, 0_f64).into());
                     ray = ray.intersect_plane_interface(midpt, normal, n1, n2, prism.height)?;
                     n1 = n2;
                     Ok(Some(ray.origin))
                 }
-                (None, Some(angle), Some(midpt)) if !done => {
+                (None, Some(normal), Some(midpt)) if !done => {
                     let n2 = 1_f64;
-                    let normal = rotate(angle, (-1_f64, 0_f64).into());
                     ray = ray.intersect_curved_interface(
                         midpt,
                         normal,
@@ -690,7 +708,7 @@ fn mutual_information(
             debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
             dstat.next_sample(p_det_l_w);
             if p_det_l_w > 0. {
-                istat.next_sample(p_det_l_w * p_det_l_w.log2());
+                istat.next_sample(p_det_l_w * log2(p_det_l_w));
             } else {
                 istat.next_sample(0.);
             }
@@ -710,7 +728,7 @@ fn mutual_information(
         let p_det = stat.mean;
         debug_assert!(0. <= p_det && p_det <= 1.);
         if p_det > 0. {
-            info -= p_det * p_det.log2();
+            info -= p_det * log2(p_det);
         }
     }
     info
@@ -821,14 +839,14 @@ mod tests {
                 .map(|_| rng.gen_range(0., max_length))
                 .collect::<Vec<_>>();
             let curvature = rng.gen_range(0., 1.);
-            let prism = CompoundPrism {
-                glasses: glasses.into(),
-                angles: angles.into(),
-                lengths: lengths.into(),
+            let prism = CompoundPrism::new(
+                glasses.into(),
+                angles.as_ref(),
+                lengths.as_ref(),
                 curvature,
-                height: prism_height,
-                width: prism_width,
-            };
+                prism_height,
+                prism_width,
+            );
 
             let detarr_angle = rng.gen_range(-PI, PI);
             let detarr = DetectorArray {
@@ -897,14 +915,14 @@ mod tests {
         let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
         let lengths = [0_f64; 3];
-        let prism = CompoundPrism {
-            glasses: glasses.as_ref().into(),
-            angles: angles.as_ref().into(),
-            lengths: lengths.as_ref().into(),
-            curvature: 0.21,
-            height: 2.5,
-            width: 2.,
-        };
+        let prism = CompoundPrism::new(
+            glasses.as_ref().into(),
+            angles.as_ref(),
+            lengths.as_ref(),
+            0.21,
+            2.5,
+            2.,
+        );
 
         const NBIN: usize = 32;
         let pmt_length = 3.2;
