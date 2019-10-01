@@ -88,14 +88,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
     let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
     let lengths = [0_f64; 3];
-    let prism = CompoundPrism {
-        glasses: glasses.as_ref().into(),
-        angles: angles.as_ref().into(),
-        lengths: lengths.as_ref().into(),
-        curvature: 0.21,
-        height: 2.5,
-        width: 2.,
-    };
+    let prism = CompoundPrism::new(
+        glasses.as_ref().into(),
+        angles.as_ref().into(),
+        lengths.as_ref().into(),
+        0.21,
+        2.5,
+        2.,
+    );
 
     const NBIN: usize = 32;
     let pmt_length = 3.2;

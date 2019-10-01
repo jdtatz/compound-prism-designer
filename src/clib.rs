@@ -115,14 +115,14 @@ pub unsafe extern "C" fn create_compound_prism(
     let glasses = core::slice::from_raw_parts(glasses, prism_count);
     let angles = core::slice::from_raw_parts(angles, 1 + prism_count);
     let lengths = core::slice::from_raw_parts(lengths, prism_count);
-    Box::into_raw(Box::new(CompoundPrism {
-        glasses: glasses.to_owned().into(),
-        angles: angles.to_owned().into(),
-        lengths: lengths.to_owned().into(),
+    Box::into_raw(Box::new(CompoundPrism::new(
+        glasses.to_owned().into(),
+        angles,
+        lengths,
         curvature,
         height,
         width,
-    }))
+    )))
 }
 
 #[no_mangle]
