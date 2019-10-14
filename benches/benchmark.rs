@@ -45,12 +45,12 @@ impl Profiler for GProf {
             .arg(&profile)
             .stdout(std::process::Stdio::piped())
             .spawn()
-            .unwrap();
+            .expect("Failed to process profiled benchmarks with google-pprof");
         let _inferno = std::process::Command::new("inferno-flamegraph")
             .stdin(pprof.stdout.unwrap())
             .stdout(flamegraph)
             .output()
-            .unwrap();
+            .expect("Failed to create flamegraphs of profiled benchmarks with inferno-flamegraph");
     }
 }
 
@@ -104,12 +104,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         .collect();
     let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
     let spec_max_accepted_angle = (60_f64).to_radians();
-    let detarr = DetectorArray {
-        bins: bins.as_ref().into(),
-        min_ci: spec_max_accepted_angle.cos(),
-        angle: 0.,
-        length: pmt_length,
-    };
+    let detarr = DetectorArray::new(
+        bins.as_ref().into(),
+        spec_max_accepted_angle.cos(),
+        0.,
+        pmt_length,
+    );
 
     let beam = GaussianBeam {
         width: 0.2,

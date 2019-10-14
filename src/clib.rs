@@ -116,7 +116,7 @@ pub unsafe extern "C" fn create_compound_prism(
     let angles = core::slice::from_raw_parts(angles, 1 + prism_count);
     let lengths = core::slice::from_raw_parts(lengths, prism_count);
     Box::into_raw(Box::new(CompoundPrism::new(
-        glasses.to_owned().into(),
+        glasses,
         angles,
         lengths,
         curvature,
@@ -139,12 +139,12 @@ pub unsafe extern "C" fn create_detector_array(
     length: f64,
 ) -> *mut DetectorArray<'static> {
     let bins = core::slice::from_raw_parts(bins, bin_count);
-    Box::into_raw(Box::new(DetectorArray {
-        bins: bins.to_owned().into(),
+    Box::into_raw(Box::new(DetectorArray::new(
+        bins.to_owned().into(),
         min_ci,
         angle,
         length,
-    }))
+    )))
 }
 
 #[no_mangle]
