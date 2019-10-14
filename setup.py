@@ -22,7 +22,8 @@ setup(
     zip_safe=False,
     platforms='any',
     setup_requires=["milksnake"],
-    install_requires=["cffi", "numpy", "pygmo"],
+    install_requires=["cffi", "numpy", "matplotlib", "pygmo", "Platypus-Opt"],
+    extras_require={"qtapp": ["PySide2", "toml"]},
     milksnake_tasks=[
         build_native
     ]
