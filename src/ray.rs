@@ -1,8 +1,8 @@
+use crate::erf::{erf, erfc_inv};
 use crate::glasscat::Glass;
-use statrs::function::erf::{erf, erfc_inv};
+use libm::{log2, sincos};
 use std::borrow::Cow;
 use std::f64::consts::*;
-use libm::{sincos, log2};
 // Can't use libm::sqrt till https://github.com/rust-lang/libm/pull/222 is merged
 
 #[derive(Debug, Display, Clone, Copy)]
@@ -25,8 +25,6 @@ impl Into<&'static str> for RayTraceError {
         }
     }
 }
-
-impl std::error::Error for RayTraceError {}
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
@@ -126,7 +124,7 @@ impl Surface {
         let normal = rotate(angle, (-1_f64, 0_f64).into());
         Self {
             normal,
-            midpt: ((normal.y / normal.x).abs() * height * 0.5, height * 0.5).into()
+            midpt: ((normal.y / normal.x).abs() * height * 0.5, height * 0.5).into(),
         }
     }
 
@@ -134,16 +132,17 @@ impl Surface {
         let normal = rotate(new_angle, (-1_f64, 0_f64).into());
         let d1 = (self.normal.y / self.normal.x).abs() * height * 0.5;
         let d2 = (normal.y / normal.x).abs() * height * 0.5;
-        let sep_dist = sep_length + if (self.normal.y >= 0.) != (normal.y >= 0.) {
-            d1 + d2
-        } else if self.normal.y.abs() > normal.y.abs() {
-            d1 - d2
-        } else {
-            d2 - d1
-        };
+        let sep_dist = sep_length
+            + if (self.normal.y >= 0.) != (normal.y >= 0.) {
+                d1 + d2
+            } else if self.normal.y.abs() > normal.y.abs() {
+                d1 - d2
+            } else {
+                d2 - d1
+            };
         Self {
             normal,
-            midpt: self.midpt + (sep_dist, 0.).into()
+            midpt: self.midpt + (sep_dist, 0.).into(),
         }
     }
 }
@@ -158,7 +157,7 @@ struct CurvedSurface {
     /// The radius of the circle
     radius: f64,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
-    max_dist_sq: f64
+    max_dist_sq: f64,
 }
 
 impl CurvedSurface {
@@ -173,7 +172,7 @@ impl CurvedSurface {
             midpt,
             center,
             radius,
-            max_dist_sq: sagitta * sagitta + chord_length * chord_length * 0.25
+            max_dist_sq: sagitta * sagitta + chord_length * chord_length * 0.25,
         }
     }
 
@@ -193,9 +192,9 @@ pub struct CompoundPrism<'a> {
     /// The curved lens-like last inter-media boundary surface of the compound prism
     lens: CurvedSurface,
     /// Height of compound prism
-    pub height: f64,
+    height: f64,
     /// Width of compound prism
-    pub width: f64,
+    width: f64,
 }
 
 impl<'a> CompoundPrism<'a> {
@@ -208,7 +207,14 @@ impl<'a> CompoundPrism<'a> {
     ///  * `curvature` - Lens Curvature of last surface of compound prism
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
-    pub fn new(glasses: &[&'a Glass], angles: &[f64], lengths: &[f64], curvature: f64, height: f64, width: f64) -> Self {
+    pub fn new(
+        glasses: &[&'a Glass],
+        angles: &[f64],
+        lengths: &[f64],
+        curvature: f64,
+        height: f64,
+        width: f64,
+    ) -> Self {
         debug_assert!(!glasses.is_empty());
         debug_assert!(angles.len() - 1 == glasses.len());
         debug_assert!(lengths.len() == glasses.len());
@@ -233,15 +239,15 @@ impl<'a> CompoundPrism<'a> {
 #[derive(Debug, Clone)]
 pub struct DetectorArray<'a> {
     /// Boundaries of detection bins
-    pub bins: Cow<'a, [[f64; 2]]>,
+    bins: Cow<'a, [[f64; 2]]>,
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
-    pub min_ci: f64,
+    min_ci: f64,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
-    pub angle: f64,
+    angle: f64,
     /// The normal of the array's surface, normal = Rot(θ) @ (-1, 0)
     normal: Pair,
     /// Length of the array
-    pub length: f64,
+    length: f64,
 }
 
 impl<'a> DetectorArray<'a> {
@@ -251,7 +257,7 @@ impl<'a> DetectorArray<'a> {
             min_ci,
             angle,
             normal: rotate(angle, (-1_f64, 0_f64).into()),
-            length
+            length,
         }
     }
 }
@@ -341,8 +347,7 @@ impl Ray {
     /// Then refract the ray through the interface
     ///
     /// # Arguments
-    ///  * `vertex` - point on the interface
-    ///  * `normal` - the unit normal vector of the interface
+    ///  * `plane` - the inter-media interface plane
     ///  * `n1` - index of refraction of the current media
     ///  * `n2` - index of refraction of the new media
     ///  * `prism_height` - the height of the prism
@@ -370,12 +375,9 @@ impl Ray {
     /// Then refract the ray through the interface
     ///
     /// # Arguments
-    ///  * `midpt` - midpoint of the len-like interface
-    ///  * `normal` - the unit normal vector of the interface from the midpt
-    ///  * `curvature` - the normalized curvature value of the interface
+    ///  * `lens` - the parameterized curved surface of the lens
     ///  * `n1` - index of refraction of the current media
     ///  * `n2` - index of refraction of the new media
-    ///  * `prism_height` - the height of the prism
     fn intersect_curved_interface(
         self,
         lens: &CurvedSurface,
@@ -431,24 +433,25 @@ impl Ray {
     /// Propagate a ray of `wavelength` through the compound prism
     ///
     /// # Arguments
-    ///  * `prism` - the compound prism specification
+    ///  * `cmpnd` - the compound prism specification
     ///  * `wavelength` - the wavelength of the light ray
     fn propagate_internal(
         self,
-        prism: &CompoundPrism,
+        cmpnd: &CompoundPrism,
         wavelength: f64,
     ) -> Result<Ray, RayTraceError> {
-        let (ray, n1) = prism
-            .prisms
-            .iter()
-            .try_fold((self, 1_f64), |(ray, n1), (glass, plane)| {
-                let n2 = glass.calc_n(wavelength);
-                debug_assert!(n2 >= 1.);
-                let ray = ray.intersect_plane_interface(plane, n1, n2, prism.height)?;
-                Ok((ray, n2))
-            })?;
+        let (ray, n1) =
+            cmpnd
+                .prisms
+                .iter()
+                .try_fold((self, 1_f64), |(ray, n1), (glass, plane)| {
+                    let n2 = glass.calc_n(wavelength);
+                    debug_assert!(n2 >= 1.);
+                    let ray = ray.intersect_plane_interface(plane, n1, n2, cmpnd.height)?;
+                    Ok((ray, n2))
+                })?;
         let n2 = 1_f64;
-        ray.intersect_curved_interface(&prism.lens, n1, n2)
+        ray.intersect_curved_interface(&cmpnd.lens, n1, n2)
     }
 
     /// Propagate a ray of `wavelength` through the compound prism and
@@ -457,17 +460,17 @@ impl Ray {
     ///
     /// # Arguments
     ///  * `wavelength` - the wavelength of the light ray
-    ///  * `prism` - the compound prism specification
+    ///  * `cmpnd` - the compound prism specification
     ///  * `detarr` - detector array specification
     ///  * `detpos` - the position and orientation of the detector array
     fn propagate(
         self,
         wavelength: f64,
-        prism: &CompoundPrism,
+        cmpnd: &CompoundPrism,
         detarr: &DetectorArray,
         detpos: DetectorArrayPositioning,
     ) -> Result<(Pair, f64, f64), RayTraceError> {
-        self.propagate_internal(prism, wavelength)?
+        self.propagate_internal(cmpnd, wavelength)?
             .intersect_detector_array(detarr, detpos)
     }
 
@@ -477,36 +480,36 @@ impl Ray {
     ///
     /// # Arguments
     ///  * `wavelength` - the wavelength of the light ray
-    ///  * `prism` - the compound prism specification
+    ///  * `cmpnd` - the compound prism specification
     ///  * `detarr` - detector array specification
     ///  * `detpos` - the position and orientation of the detector array
     fn trace<'s>(
         self,
         wavelength: f64,
-        prism: &'s CompoundPrism<'s>,
+        cmpnd: &'s CompoundPrism<'s>,
         detarr: &'s DetectorArray<'s>,
         detpos: DetectorArrayPositioning,
     ) -> impl Iterator<Item = Result<Pair, RayTraceError>> + 's {
         let mut ray = self;
         let mut n1 = 1_f64;
-        let mut prisms = prism.prisms.iter().fuse();
+        let mut prisms = cmpnd.prisms.iter().fuse();
         let mut internal = true;
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<Pair>, RayTraceError> {
             match prisms.next() {
                 Some((glass, plane)) => {
                     let n2 = glass.calc_n(wavelength);
-                    ray = ray.intersect_plane_interface(plane, n1, n2, prism.height)?;
+                    ray = ray.intersect_plane_interface(plane, n1, n2, cmpnd.height)?;
                     n1 = n2;
                     Ok(Some(ray.origin))
                 }
                 None if !done && internal => {
                     internal = false;
                     let n2 = 1_f64;
-                    ray = ray.intersect_curved_interface(&prism.lens, n1, n2)?;
+                    ray = ray.intersect_curved_interface(&cmpnd.lens, n1, n2)?;
                     Ok(Some(ray.origin))
                 }
-                None if !done && !internal=> {
+                None if !done && !internal => {
                     done = true;
                     let (pos, _, _) = ray.intersect_detector_array(detarr, detpos)?;
                     Ok(Some(pos))
@@ -518,50 +521,6 @@ impl Ray {
         std::iter::once(Ok(self.origin))
             .chain(std::iter::from_fn(move || propagation_fn().transpose()).fuse())
     }
-
-    /*
-    /// Propagate a ray of `wavelength` through the compound prism and
-    /// intersect the detector array. Returning a generator of the ray's traced path
-    /// at all of the intersection positions and the final spectrometer position.
-    ///
-    /// # Arguments
-    ///  * `wavelength` - the wavelength of the light ray
-    ///  * `prism` - the compound prism specification
-    ///  * `detarr` - detector array specification
-    ///  * `detpos` - the position and orientation of the detector array
-    fn trace_gen<'s>(
-        self,
-        wavelength: f64,
-        prism: &'s CompoundPrism<'s>,
-        detarr: &'s DetectorArray<'s>,
-        detpos: DetectorArrayPositioning,
-    ) -> impl std::ops::Generator<Yield = Ray, Return = Result<(Pair, f64, f64), RayTraceError>> + 's {
-        || {
-            yield self;
-            let mut midpts = prism.midpts();
-            let (ray, n1) = prism
-                .glasses
-                .iter()
-                .zip(prism.angles.iter().copied())
-                .zip(&mut midpts)
-                .try_fold((self, 1_f64), |(ray, n1), ((glass, angle), midpt)| {
-                    let n2 = glass.calc_n(wavelength);
-                    let normal = rotate(angle, (-1_f64, 0_f64).into());
-                    let ray = ray.intersect_plane_interface(midpt, normal, n1, n2, prism.height)?;
-                    yield ray;
-                    Ok((ray, n2))
-                })?;
-            let midpt = midpts.next().unwrap();
-            let angle = prism.angles[prism.angles.len() - 1];
-            let n2 = 1_f64;
-            let normal = rotate(angle, (-1_f64, 0_f64).into());
-            let ray =
-                ray.intersect_curved_interface(midpt, normal, prism.curvature, n1, n2, prism.height)?;
-            yield ray;
-            ray.intersect_detector_array(detarr, detpos)
-        }
-    }
-    */
 }
 
 /// Find the position and orientation of the detector array,
@@ -569,18 +528,18 @@ impl Ray {
 /// and its angle from the normal.
 ///
 /// # Arguments
-///  * `prism` - the compound prism specification
+///  * `cmpnd` - the compound prism specification
 ///  * `detarr` - detector array specification
-///  * `detarr` - input gaussian beam specification
+///  * `beam` - input gaussian beam specification
 pub fn detector_array_positioning(
-    prism: &CompoundPrism,
+    cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
 ) -> Result<DetectorArrayPositioning, RayTraceError> {
     let ray = Ray::new_from_start(beam.y_mean);
     let (wmin, wmax) = beam.w_range;
-    let lower_ray = ray.propagate_internal(prism, wmin)?;
-    let upper_ray = ray.propagate_internal(prism, wmax)?;
+    let lower_ray = ray.propagate_internal(cmpnd, wmin)?;
+    let upper_ray = ray.propagate_internal(cmpnd, wmax)?;
     if lower_ray.average_transmittance() <= (1e-3) || upper_ray.average_transmittance() <= (1e-3) {
         return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
     }
@@ -647,33 +606,33 @@ impl Welford {
 ///
 /// # Arguments
 ///  * `wavelength` - given wavelength
-///  * `prism` - the compound prism specification
+///  * `cmpnd` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 ///  * `detpos` - the position and orientation of the detector array
 pub fn p_dets_l_wavelength(
     wavelength: f64,
-    prism: &CompoundPrism,
+    cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
 ) -> impl Iterator<Item = f64> {
     const MAX_N: usize = 1000;
     let mut p_dets_l_w_stats = vec![Welford::new(); detarr.bins.len()];
-    let p_z = erf(prism.width * FRAC_1_SQRT_2 / beam.width);
+    let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
     debug_assert!(0. <= p_z && p_z <= 1.);
     let mut qrng = quasirandom::Qrng::new(1);
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
         let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
-        if y <= 0. || prism.height <= y {
+        if y <= 0. || cmpnd.height <= y {
             for stat in p_dets_l_w_stats.iter_mut() {
                 stat.next_sample(0.);
             }
             continue;
         }
         let ray = Ray::new_from_start(y);
-        if let Ok((_, pos, t)) = ray.propagate(wavelength, prism, detarr, detpos) {
+        if let Ok((_, pos, t)) = ray.propagate(wavelength, cmpnd, detarr, detpos) {
             debug_assert!(pos.is_finite());
             debug_assert!(0. <= pos && pos <= detarr.length);
             debug_assert!(t.is_finite());
@@ -722,7 +681,7 @@ pub fn p_dets_l_wavelength(
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
 fn mutual_information(
-    prism: &CompoundPrism,
+    cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
     detpos: DetectorArrayPositioning,
@@ -735,7 +694,7 @@ fn mutual_information(
     for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = wmin + u * (wmax - wmin);
-        let p_dets_l_w = p_dets_l_wavelength(w, prism, detarr, beam, detpos);
+        let p_dets_l_w = p_dets_l_wavelength(w, cmpnd, detarr, beam, detpos);
         for ((dstat, istat), p_det_l_w) in p_dets_stats
             .iter_mut()
             .zip(info_stats.iter_mut())
@@ -777,18 +736,18 @@ fn mutual_information(
 /// # Arguments
 ///  * `wavelength` - the wavelength of the light ray
 ///  * `init_y` - the inital y value of the ray
-///  * `prism` - the compound prism specification
+///  * `cmpnd` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `detpos` - the position and orientation of the detector array
 pub fn trace<'s>(
     wavelength: f64,
     init_y: f64,
-    prism: &'s CompoundPrism<'s>,
+    cmpnd: &'s CompoundPrism<'s>,
     detarr: &'s DetectorArray<'s>,
     detpos: DetectorArrayPositioning,
 ) -> impl Iterator<Item = Result<Pair, RayTraceError>> + 's {
     let ray = Ray::new_from_start(init_y);
-    ray.trace(wavelength, prism, detarr, detpos)
+    ray.trace(wavelength, cmpnd, detarr, detpos)
 }
 
 /// Return the fitness of the spectrometer design to be minimized by an optimizer.
@@ -802,16 +761,16 @@ pub fn trace<'s>(
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 pub fn fitness(
-    prism: &CompoundPrism,
+    cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
 ) -> Result<[f64; 3], RayTraceError> {
-    let detpos = detector_array_positioning(prism, detarr, beam)?;
+    let detpos = detector_array_positioning(cmpnd, detarr, beam)?;
     let deviation_vector =
         detpos.position + detpos.direction * detarr.length * 0.5 - (0., beam.y_mean).into();
     let size = deviation_vector.norm();
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
-    let info = mutual_information(prism, detarr, beam, detpos);
+    let info = mutual_information(cmpnd, detarr, beam, detpos);
     Ok([size, info, deviation])
 }
 

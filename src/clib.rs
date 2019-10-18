@@ -7,7 +7,7 @@ pub struct FFiStr {
     str_ptr: *const u8,
 }
 
-impl From<&str> for FFiStr {
+impl From<&'static str> for FFiStr {
     fn from(s: &str) -> Self {
         Self {
             str_len: s.len(),
@@ -22,7 +22,7 @@ pub struct FfiResult {
     err_str: FFiStr,
 }
 
-impl<'s, E: Into<&'s str>> From<Result<(), E>> for FfiResult {
+impl<E: Into<&'static str>> From<Result<(), E>> for FfiResult {
     fn from(r: Result<(), E>) -> Self {
         match r {
             Err(e) => Self {
@@ -116,12 +116,7 @@ pub unsafe extern "C" fn create_compound_prism(
     let angles = core::slice::from_raw_parts(angles, 1 + prism_count);
     let lengths = core::slice::from_raw_parts(lengths, prism_count);
     Box::into_raw(Box::new(CompoundPrism::new(
-        glasses,
-        angles,
-        lengths,
-        curvature,
-        height,
-        width,
+        glasses, angles, lengths, curvature, height, width,
     )))
 }
 

@@ -23,8 +23,6 @@ impl Into<&'static str> for CatalogError {
     }
 }
 
-impl std::error::Error for CatalogError {}
-
 /// Glass parametrization structure based off empirical glass dispersion formulae
 /// The variant name is which glass dispersion formula it's parameterized by
 /// The field of each variant is the array of coefficients that parameterize the glass

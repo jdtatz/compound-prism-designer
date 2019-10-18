@@ -3,6 +3,7 @@
 extern crate derive_more;
 
 mod clib;
+mod erf;
 mod glasscat;
 mod ray;
 pub use crate::glasscat::*;
