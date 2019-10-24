@@ -89,7 +89,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
     let lengths = [0_f64; 3];
     let prism = CompoundPrism::new(
-        glasses.as_ref().into(),
+        glasses.iter().copied(),
         angles.as_ref().into(),
         lengths.as_ref().into(),
         0.21,

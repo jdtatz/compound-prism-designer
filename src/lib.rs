@@ -2,9 +2,14 @@
 #[macro_use]
 extern crate derive_more;
 
-mod clib;
+pub mod optimizer;
 mod erf;
 mod glasscat;
 mod ray;
+mod utils;
+#[cfg(not(feature="pyext"))]
+mod clib;
+#[cfg(feature="pyext")]
+mod pylib;
 pub use crate::glasscat::*;
 pub use crate::ray::*;

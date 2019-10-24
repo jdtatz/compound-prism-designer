@@ -1,4 +1,5 @@
 use arrayvec::ArrayVec;
+use once_cell::sync::Lazy;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -281,3 +282,11 @@ impl<'s> Iterator for CatalogIter<'s> {
 pub fn new_catalog(file: &str) -> impl Iterator<Item = Result<(&str, Glass), CatalogError>> {
     CatalogIter::new(file)
 }
+
+pub const BUNDLED_CATALOG_FILE: &'static str = include_str!("../catalog.agf");
+
+pub const BUNDLED_CATALOG: Lazy<Box<[(&'static str, Glass)]>> = Lazy::new(|| {
+    new_catalog(BUNDLED_CATALOG_FILE)
+        .collect::<Result<_, _>>()
+        .unwrap()
+});
