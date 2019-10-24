@@ -59,7 +59,6 @@ impl Pair {
 /// rotate `vector` by `angle` CCW
 #[inline(always)]
 fn rotate(angle: f64, vector: Pair) -> Pair {
-    debug_assert!(vector.is_unit());
     let (s, c) = sincos(angle);
     Pair {
         x: c * vector.x - s * vector.y,
@@ -114,9 +113,9 @@ pub struct GaussianBeam {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Surface {
-    normal: Pair,
-    midpt: Pair,
+pub struct Surface {
+    pub normal: Pair,
+    pub midpt: Pair,
 }
 
 impl Surface {
@@ -145,19 +144,50 @@ impl Surface {
             midpt: self.midpt + (sep_dist, 0.).into(),
         }
     }
+
+    pub fn end_points(&self, height: f64) -> (Pair, Pair) {
+        // self.normal = R(theta) * (-1, 0) = (-cos(theta), -sin(theta))
+        // parallel = R(-PI/2) * self.normal = (self.normal.y, -self.normal.x)
+        //   = (-sin(theta), cos(theta)) = R(theta) * (0, 1)
+        // length = height / cos(theta) = height / parallel.y
+        let parallel: Pair = (self.normal.y, -self.normal.x).into();
+        let length = height / parallel.y;
+        let u = self.midpt + parallel * length * 0.5;
+        let l = self.midpt - parallel * length * 0.5;
+        debug_assert!((u.y - height).abs() < 1e-4, "{:?} {}", u, height);
+        debug_assert!(l.y.abs() < 1e-4, "{:?}", l);
+        let dx = self.normal.y / self.normal.x * height * 0.5;
+        let ux = self.midpt.x - dx;
+        let lx = self.midpt.x + dx;
+        assert!(
+            (u.x - ux).abs() < 1e-4 || (u.x - ux).abs() / ux < 1e-4,
+            "{} {}",
+            u.x,
+            ux
+        );
+        assert!(
+            (l.x - lx).abs() < 1e-4 || (l.x - lx).abs() / lx < 1e-4,
+            "{} {}",
+            l.x,
+            lx
+        );
+        ((ux, height).into(), (lx, 0.).into())
+    }
 }
 
 /// A Curved Surface, parameterized as a circular segment
 #[derive(Debug, Clone, Copy)]
-struct CurvedSurface {
+pub struct CurvedSurface {
+    /// The chord of the circular segment
+    pub chord: Surface,
     /// The midpt of the Curved Surface / circular segment
-    midpt: Pair,
+    pub midpt: Pair,
     /// The center of the circle
-    center: Pair,
+    pub center: Pair,
     /// The radius of the circle
-    radius: f64,
+    pub radius: f64,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
-    max_dist_sq: f64,
+    pub max_dist_sq: f64,
 }
 
 impl CurvedSurface {
@@ -169,6 +199,7 @@ impl CurvedSurface {
         let center = chord.midpt + chord.normal * apothem;
         let midpt = chord.midpt - chord.normal * sagitta;
         Self {
+            chord,
             midpt,
             center,
             radius,
@@ -181,6 +212,18 @@ impl CurvedSurface {
         debug_assert!((pt - self.center).norm() > self.radius * 0.99);
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
+
+    fn end_points(&self, height: f64) -> (Pair, Pair, f64) {
+        let theta_2 = 2. * (self.max_dist_sq.sqrt() / (2. * self.radius)).asin();
+        let (u, l) = self.chord.end_points(height);
+        /*let r = self.midpt - self.center;
+        let u = self.center + rotate(theta_2, r);
+        let l = self.center + rotate(-theta_2, r);
+        debug_assert!((u.y - height).abs() < 1e-4, "{:?} {}", u, height);
+        debug_assert!(l.y.abs() < 1e-4, "{:?}", l);
+        ((u.x, height).into(), (l.x, 0.).into(), 2. * theta_2)*/
+        (u, l, 2. * theta_2)
+    }
 }
 
 /// Compound Prism Specification
@@ -188,11 +231,11 @@ impl CurvedSurface {
 pub struct CompoundPrism<'a> {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
-    prisms: Vec<(&'a Glass, Surface)>,
+    pub prisms: Vec<(&'a Glass, Surface)>,
     /// The curved lens-like last inter-media boundary surface of the compound prism
-    lens: CurvedSurface,
+    pub lens: CurvedSurface,
     /// Height of compound prism
-    height: f64,
+    pub height: f64,
     /// Width of compound prism
     width: f64,
 }
@@ -207,22 +250,26 @@ impl<'a> CompoundPrism<'a> {
     ///  * `curvature` - Lens Curvature of last surface of compound prism
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
-    pub fn new(
-        glasses: &[&'a Glass],
+    pub fn new<I: IntoIterator<Item = &'a Glass>>(
+        glasses: I,
         angles: &[f64],
         lengths: &[f64],
         curvature: f64,
         height: f64,
         width: f64,
-    ) -> Self {
-        debug_assert!(!glasses.is_empty());
+    ) -> Self
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        let glasses = glasses.into_iter();
+        debug_assert!(glasses.len() > 0);
         debug_assert!(angles.len() - 1 == glasses.len());
         debug_assert!(lengths.len() == glasses.len());
         let mut prisms = Vec::with_capacity(glasses.len());
         let mut last_surface = Surface::first_surface(angles[0], height);
-        for ((g, a), l) in glasses.iter().zip(&angles[1..]).zip(lengths) {
+        for ((g, a), l) in glasses.zip(&angles[1..]).zip(lengths) {
             let next = last_surface.next_surface(height, *a, *l);
-            prisms.push((*g, last_surface));
+            prisms.push((g, last_surface));
             last_surface = next;
         }
         let lens = CurvedSurface::new(curvature, height, last_surface);
@@ -232,6 +279,19 @@ impl<'a> CompoundPrism<'a> {
             height,
             width,
         }
+    }
+
+    pub fn polygons(&self) -> (Vec<[Pair; 4]>, [Pair; 4], f64, f64) {
+        let mut poly = Vec::with_capacity(self.prisms.len());
+        let (mut u0, mut l0) = self.prisms[0].1.end_points(self.height);
+        for (_, s) in self.prisms[1..].iter() {
+            let (u1, l1) = s.end_points(self.height);
+            poly.push([l0, u0, u1, l1]);
+            u0 = u1;
+            l0 = l1;
+        }
+        let (u1, l1, theta) = self.lens.end_points(self.height);
+        (poly, [l0, u0, u1, l1], theta, self.lens.radius)
     }
 }
 
@@ -243,11 +303,11 @@ pub struct DetectorArray<'a> {
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     min_ci: f64,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
-    angle: f64,
+    pub(crate) angle: f64,
     /// The normal of the array's surface, normal = Rot(θ) @ (-1, 0)
     normal: Pair,
     /// Length of the array
-    length: f64,
+    pub length: f64,
 }
 
 impl<'a> DetectorArray<'a> {
@@ -259,6 +319,10 @@ impl<'a> DetectorArray<'a> {
             normal: rotate(angle, (-1_f64, 0_f64).into()),
             length,
         }
+    }
+
+    pub fn end_points(&self, pos: &DetectorArrayPositioning) -> (Pair, Pair) {
+        (pos.position, pos.position + pos.direction * self.length)
     }
 }
 
@@ -750,6 +814,14 @@ pub fn trace<'s>(
     ray.trace(wavelength, cmpnd, detarr, detpos)
 }
 
+#[repr(C)]
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub struct DesignFitness {
+    pub size: f64,
+    pub info: f64,
+    pub deviation: f64,
+}
+
 /// Return the fitness of the spectrometer design to be minimized by an optimizer.
 /// The fitness objectives are
 /// * size = the distance from the mean starting position of the beam to the center of detector array
@@ -764,14 +836,18 @@ pub fn fitness(
     cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
-) -> Result<[f64; 3], RayTraceError> {
+) -> Result<DesignFitness, RayTraceError> {
     let detpos = detector_array_positioning(cmpnd, detarr, beam)?;
     let deviation_vector =
         detpos.position + detpos.direction * detarr.length * 0.5 - (0., beam.y_mean).into();
     let size = deviation_vector.norm();
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
     let info = mutual_information(cmpnd, detarr, beam, detpos);
-    Ok([size, info, deviation])
+    Ok(DesignFitness {
+        size,
+        info,
+        deviation,
+    })
 }
 
 #[cfg(test)]
@@ -835,7 +911,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let curvature = rng.gen_range(0., 1.);
             let prism = CompoundPrism::new(
-                glasses.as_ref(),
+                glasses,
                 angles.as_ref(),
                 lengths.as_ref(),
                 curvature,
@@ -872,10 +948,10 @@ mod tests {
                     assert!(p.is_finite() && 0. <= p && p <= 1.);
                 }
             }
-            let [size, info, deviation] = fitness(&prism, &detarr, &beam).unwrap();
-            assert!(size > 0.);
-            assert!(0. <= info && info <= (NBIN as f64).log2());
-            assert!(0. <= deviation && deviation < FRAC_PI_2);
+            let v = fitness(&prism, &detarr, &beam).unwrap();
+            assert!(v.size > 0.);
+            assert!(0. <= v.info && v.info <= (NBIN as f64).log2());
+            assert!(0. <= v.deviation && v.deviation < FRAC_PI_2);
         }
     }
 
@@ -911,7 +987,7 @@ mod tests {
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
         let lengths = [0_f64; 3];
         let prism = CompoundPrism::new(
-            glasses.as_ref().into(),
+            glasses.iter().copied(),
             angles.as_ref(),
             lengths.as_ref(),
             0.21,
@@ -941,19 +1017,19 @@ mod tests {
 
         let v = fitness(&prism, &detarr, &beam).expect("Merit function failed");
         assert!(
-            approx_eq(v[0], 41.324065257329245, 1e-3),
+            approx_eq(v.size, 41.324065257329245, 1e-3),
             "Size is incorrect. {} ≉ 41.3",
-            v[0]
+            v.size
         );
         assert!(
-            approx_eq(v[1], 1.444212905142612, 5e-3),
+            approx_eq(v.info, 1.444212905142612, 5e-3),
             "Mutual information is incorrect. {} ≉ 1.44",
-            v[1]
+            v.info
         );
         assert!(
-            approx_eq(v[2], 0.37715870072898755, 1e-3),
+            approx_eq(v.deviation, 0.37715870072898755, 1e-3),
             "Deviation is incorrect. {} ≉ 0.377",
-            v[2]
+            v.deviation
         );
     }
 }

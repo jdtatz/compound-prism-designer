@@ -7,11 +7,11 @@ length-unit = "mm"
 [optimizer]
 # Number of times to evolve the optimization population (Optional, default=1000)
 iteration-count = 100
-# Number of threads to use (Optional), if not givent or < 1, then will use maximum
-thread-count = 8
 # For each thread, the number of candiatie solutions to be used / evolved
 # Must be > 5 and a multiple of 4, (Optional, default=20), will round up if conditions not met
-pop-size = 120
+pop-size = 256
+
+epsilons = [5.0, 0.05, 0.05]
 
 # Compound prism design specification
 [compound-prism]
@@ -27,9 +27,9 @@ width = 7
 # 1/e^2 beam width in [length-unit]
 width = 1.8
 # Minimum wavelength in [micrometers]
-wmin = 0.5
+wavelength-minimum = 0.5
 # Maximum wavelength in [micrometers]
-wmax = 0.82
+wavelength-maximum = 0.82
 
 # Detector array properties
 [detector-array]

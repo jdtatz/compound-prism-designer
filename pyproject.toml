@@ -1,0 +1,7 @@
+[build-system]
+requires = ["maturin", "numpy~= 1.17"]
+build-backend = "maturin"
+
+[tool.maturin]
+bindings = "pyo3"
+cargo-extra-args = "--features pyext"
