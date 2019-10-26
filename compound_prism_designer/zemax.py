@@ -1,54 +1,41 @@
 import numpy as np
 from itertools import count
-from compound_prism_designer import CompoundPrism, DetectorArray, GaussianBeam, detector_array_position
-from compound_prism_designer.utils import midpts_gen
+from .compound_prism_designer import CompoundPrism, DetectorArray, GaussianBeam
 
 
-def _thickness_fn(prism: CompoundPrism):
-    h = prism.height / 2
-    for last, angle, l in zip(prism.angles[:-1], prism.angles[1:], prism.lengths):
-        if (last >= 0) ^ (angle >= 0):
-            yield (np.tan(np.abs(last)) + np.tan(np.abs(angle))) * h + l
-        elif np.abs(last) > np.abs(angle):
-            yield (np.tan(np.abs(last)) - np.tan(np.abs(angle))) * h + l
-        else:
-            yield (np.tan(np.abs(angle)) - np.tan(np.abs(last))) * h + l
-
-
-def create_zmx(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam, detector_array_length: float):
-    det_arr_pos, det_arr_dir = detector_array_position(prism, detarr, beam)
-    midpt = list(midpts_gen(prism))[-1]
+def create_zmx(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam):
+    det_arr_pos = np.array(detarr.position)
+    det_arr_dir = np.array(detarr.direction)
+    detector_array_length = detarr.length
+    polys, lens_poly, center, lens_radius = prism.polygons()
+    midpt_xs = np.array([(l[0] + u[0]) / 2 for l, u, *_ in polys] + [(lens_poly[0, 0] + lens_poly[1, 0]) / 2, (lens_poly[2, 0] + lens_poly[3, 0]) / 2])
+    midpt = (midpt_xs[-1], prism.height / 2)
     detarr_offset = (det_arr_pos + det_arr_dir * detector_array_length / 2) - midpt
 
-    incrementer = count(1)
     wmin, wmax = beam.wavelength_range
 
     angles = prism.angles
     ytans = np.tan(angles)
-    thickness = list(_thickness_fn(prism))
+    thickness = midpt_xs[1:] - midpt_xs[:-1]
 
-    c, s = np.cos(prism.angles[-1]), np.sin(prism.angles[-1])
-    chord = prism.height / c
-    # curvature = R_max / R_lens
-    # R_max = chord / 2
-    # R_lens = chord / (2 curvature)
-    lens_radius = chord / (2 * prism.curvature)
+    chord = np.linalg.norm(lens_poly[2] - lens_poly[3])
 
     waves = np.linspace(wmin, wmax, 24)
     waves = "\n".join(f"WAVM {1 + i} {w} 1" for i, w in enumerate(waves))
     newline = "\n"
 
     zemax_design = f"""\
-    Zemax Rows with Aperture pupil diameter = {beam.width} & Wavelengths from {wmin} to {wmax}: 
-        Coord break: decenter y = {prism.height / 2 - beam.y_mean}
-        {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {prism.height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip((g.name for g in prism.glasses), ytans, thickness))}
-        Coord break: tilt about x = {-np.rad2deg(prism.angles[-1])}
-        Biconic: radius = {-lens_radius} semi-diameter = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
-        Coord break: tilt about x = {np.rad2deg(prism.angles[-1])}
-        Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
-        Coord break: tilt about x = {-np.rad2deg(detarr.angle)}
-        Image (Standard): semi-diameter = {detarr.length / 2}\
-    """
+Zemax Rows with Aperture pupil diameter = {beam.width} & Wavelengths from {wmin} to {wmax}: 
+    Coord break: decenter y = {prism.height / 2 - beam.y_mean}
+    {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {prism.height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip((g.name for g in prism.glasses), ytans, thickness))}
+    Coord break: tilt about x = {-np.rad2deg(prism.angles[-1])}
+    Biconic: radius = {-lens_radius} semi-diameter = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
+    Coord break: tilt about x = {np.rad2deg(prism.angles[-1])}
+    Coord break: thickness: {detarr_offset[0]} decenter y: {detarr_offset[1]}
+    Coord break: tilt about x = {-np.rad2deg(detarr.angle)}
+    Image (Standard): semi-diameter = {detarr.length / 2}"""
+
+    incrementer = count(1)
     zemax_file = f"""\
 VERS 181119 693 105780 L105780
 MODE SEQ

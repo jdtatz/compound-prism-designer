@@ -3,14 +3,16 @@ catalog-path = "catalog.agf"
 # The unit of legth, such as cm or in, (Optional, default="a.u.")
 length-unit = "mm"
 
-# Genetic algorithm(NSAGII) optimizer properties (Optional)
+# Genetic algorithm(AGEII) optimizer properties (Optional)
 [optimizer]
-# Number of times to evolve the optimization population (Optional, default=1000)
-iteration-count = 100
-# For each thread, the number of candiatie solutions to be used / evolved
-# Must be > 5 and a multiple of 4, (Optional, default=20), will round up if conditions not met
-pop-size = 256
 
+iteration-count = 5
+population-size = 32
+offspring-size = 16
+crossover-distribution-index = 20
+mutation-distribution-index = 20
+mutation-probability = 0.05
+seed = 12345
 epsilons = [5.0, 0.05, 0.05]
 
 # Compound prism design specification
@@ -26,10 +28,8 @@ width = 7
 [gaussian-beam]
 # 1/e^2 beam width in [length-unit]
 width = 1.8
-# Minimum wavelength in [micrometers]
-wavelength-minimum = 0.5
-# Maximum wavelength in [micrometers]
-wavelength-maximum = 0.82
+# Minimum & Maximum wavelength in [micrometers]
+wavelength-range = [0.5, 0.82]
 
 # Detector array properties
 [detector-array]

@@ -7,14 +7,14 @@ use rand_xoshiro::Xoshiro256Plus as PRng;
 
 #[derive(Debug, Clone)]
 pub struct Params<'s> {
-    prism_count: usize,
-    prism_height: f64,
-    glass_findices: &'s [f64],
-    angles: &'s [f64],
-    lengths: &'s [f64],
-    curvature: f64,
-    y_mean: f64,
-    detector_array_angle: f64,
+    pub prism_count: usize,
+    pub prism_height: f64,
+    pub glass_findices: &'s [f64],
+    pub angles: &'s [f64],
+    pub lengths: &'s [f64],
+    pub curvature: f64,
+    pub y_mean: f64,
+    pub detector_array_angle: f64,
 }
 
 impl<'s> Params<'s> {
@@ -43,7 +43,7 @@ impl<'s> Params<'s> {
         }
     }
 
-    fn glass_indices(&self) -> impl 's + ExactSizeIterator<Item=usize> {
+    pub fn glass_indices(&self) -> impl 's + ExactSizeIterator<Item=usize> {
         self.glass_findices
             .iter()
             .map(|f| f.floor() as usize)

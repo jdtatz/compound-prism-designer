@@ -28,7 +28,7 @@ impl Into<&'static str> for RayTraceError {
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, From, Neg, Add, Sub, Mul, Div)]
+#[derive(Debug, PartialEq, Clone, Copy, From, Into, Neg, Add, Sub, Mul, Div)]
 pub struct Pair {
     pub x: f64,
     pub y: f64,
@@ -146,31 +146,9 @@ impl Surface {
     }
 
     pub fn end_points(&self, height: f64) -> (Pair, Pair) {
-        // self.normal = R(theta) * (-1, 0) = (-cos(theta), -sin(theta))
-        // parallel = R(-PI/2) * self.normal = (self.normal.y, -self.normal.x)
-        //   = (-sin(theta), cos(theta)) = R(theta) * (0, 1)
-        // length = height / cos(theta) = height / parallel.y
-        let parallel: Pair = (self.normal.y, -self.normal.x).into();
-        let length = height / parallel.y;
-        let u = self.midpt + parallel * length * 0.5;
-        let l = self.midpt - parallel * length * 0.5;
-        debug_assert!((u.y - height).abs() < 1e-4, "{:?} {}", u, height);
-        debug_assert!(l.y.abs() < 1e-4, "{:?}", l);
         let dx = self.normal.y / self.normal.x * height * 0.5;
         let ux = self.midpt.x - dx;
         let lx = self.midpt.x + dx;
-        assert!(
-            (u.x - ux).abs() < 1e-4 || (u.x - ux).abs() / ux < 1e-4,
-            "{} {}",
-            u.x,
-            ux
-        );
-        assert!(
-            (l.x - lx).abs() < 1e-4 || (l.x - lx).abs() / lx < 1e-4,
-            "{} {}",
-            l.x,
-            lx
-        );
         ((ux, height).into(), (lx, 0.).into())
     }
 }
@@ -213,16 +191,16 @@ impl CurvedSurface {
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
 
-    fn end_points(&self, height: f64) -> (Pair, Pair, f64) {
+    fn end_points(&self, height: f64) -> (Pair, Pair) {
         let theta_2 = 2. * (self.max_dist_sq.sqrt() / (2. * self.radius)).asin();
-        let (u, l) = self.chord.end_points(height);
-        /*let r = self.midpt - self.center;
+        let r = self.midpt - self.center;
         let u = self.center + rotate(theta_2, r);
         let l = self.center + rotate(-theta_2, r);
         debug_assert!((u.y - height).abs() < 1e-4, "{:?} {}", u, height);
         debug_assert!(l.y.abs() < 1e-4, "{:?}", l);
-        ((u.x, height).into(), (l.x, 0.).into(), 2. * theta_2)*/
-        (u, l, 2. * theta_2)
+        debug_assert!(((u - r).norm_squared() - self.max_dist_sq).abs() / self.max_dist_sq < 1e-4);
+        debug_assert!(((l - r).norm_squared() - self.max_dist_sq).abs() / self.max_dist_sq < 1e-4);
+        ((u.x, height).into(), (l.x, 0.).into())
     }
 }
 
@@ -281,7 +259,7 @@ impl<'a> CompoundPrism<'a> {
         }
     }
 
-    pub fn polygons(&self) -> (Vec<[Pair; 4]>, [Pair; 4], f64, f64) {
+    pub fn polygons(&self) -> (Vec<[Pair; 4]>, [Pair; 4], Pair, f64) {
         let mut poly = Vec::with_capacity(self.prisms.len());
         let (mut u0, mut l0) = self.prisms[0].1.end_points(self.height);
         for (_, s) in self.prisms[1..].iter() {
@@ -290,8 +268,8 @@ impl<'a> CompoundPrism<'a> {
             u0 = u1;
             l0 = l1;
         }
-        let (u1, l1, theta) = self.lens.end_points(self.height);
-        (poly, [l0, u0, u1, l1], theta, self.lens.radius)
+        let (u1, l1) = self.lens.end_points(self.height);
+        (poly, [l0, u0, u1, l1], self.lens.center, self.lens.radius)
     }
 }
 
@@ -477,7 +455,7 @@ impl Ray {
     fn intersect_detector_array(
         self,
         detarr: &DetectorArray,
-        detpos: DetectorArrayPositioning,
+        detpos: &DetectorArrayPositioning,
     ) -> Result<(Pair, f64, f64), RayTraceError> {
         let ci = -self.direction.dot(detarr.normal);
         if ci <= detarr.min_ci {
@@ -532,7 +510,7 @@ impl Ray {
         wavelength: f64,
         cmpnd: &CompoundPrism,
         detarr: &DetectorArray,
-        detpos: DetectorArrayPositioning,
+        detpos: &DetectorArrayPositioning,
     ) -> Result<(Pair, f64, f64), RayTraceError> {
         self.propagate_internal(cmpnd, wavelength)?
             .intersect_detector_array(detarr, detpos)
@@ -552,7 +530,7 @@ impl Ray {
         wavelength: f64,
         cmpnd: &'s CompoundPrism<'s>,
         detarr: &'s DetectorArray<'s>,
-        detpos: DetectorArrayPositioning,
+        detpos: &'s DetectorArrayPositioning,
     ) -> impl Iterator<Item = Result<Pair, RayTraceError>> + 's {
         let mut ray = self;
         let mut n1 = 1_f64;
@@ -679,7 +657,7 @@ pub fn p_dets_l_wavelength(
     cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
-    detpos: DetectorArrayPositioning,
+    detpos: &DetectorArrayPositioning,
 ) -> impl Iterator<Item = f64> {
     const MAX_N: usize = 1000;
     let mut p_dets_l_w_stats = vec![Welford::new(); detarr.bins.len()];
@@ -748,7 +726,7 @@ fn mutual_information(
     cmpnd: &CompoundPrism,
     detarr: &DetectorArray,
     beam: &GaussianBeam,
-    detpos: DetectorArrayPositioning,
+    detpos: &DetectorArrayPositioning,
 ) -> f64 {
     const MAX_N: usize = 1000;
     let (wmin, wmax) = beam.w_range;
@@ -808,7 +786,7 @@ pub fn trace<'s>(
     init_y: f64,
     cmpnd: &'s CompoundPrism<'s>,
     detarr: &'s DetectorArray<'s>,
-    detpos: DetectorArrayPositioning,
+    detpos: &'s DetectorArrayPositioning,
 ) -> impl Iterator<Item = Result<Pair, RayTraceError>> + 's {
     let ray = Ray::new_from_start(init_y);
     ray.trace(wavelength, cmpnd, detarr, detpos)
@@ -842,7 +820,7 @@ pub fn fitness(
         detpos.position + detpos.direction * detarr.length * 0.5 - (0., beam.y_mean).into();
     let size = deviation_vector.norm();
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
-    let info = mutual_information(cmpnd, detarr, beam, detpos);
+    let info = mutual_information(cmpnd, detarr, beam, &detpos);
     Ok(DesignFitness {
         size,
         info,
@@ -943,7 +921,7 @@ mod tests {
             for i in 0..nwlen {
                 let w = wavelegth_range.0
                     + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
-                let ps = p_dets_l_wavelength(w, &prism, &detarr, &beam, detpos);
+                let ps = p_dets_l_wavelength(w, &prism, &detarr, &beam, &detpos);
                 for p in ps {
                     assert!(p.is_finite() && 0. <= p && p <= 1.);
                 }

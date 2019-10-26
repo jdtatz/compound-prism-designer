@@ -223,7 +223,7 @@ pub unsafe extern "C" fn p_dets_l_wavelength(
     state_ptr: *mut ProbabilitiesState,
 ) {
     for p in
-        crate::ray::p_dets_l_wavelength(wavelength, prism, detector_array, gaussian_beam, *detpos)
+        crate::ray::p_dets_l_wavelength(wavelength, prism, detector_array, gaussian_beam, detpos)
     {
         append_next_detector_probability(state_ptr, p)
     }
@@ -244,7 +244,7 @@ pub unsafe extern "C" fn trace(
     append_next_ray_position: fn(*mut TracedRayState, Pair),
     state_ptr: *mut TracedRayState,
 ) -> FfiResult {
-    crate::ray::trace(wavelength, inital_y, prism, detector_array, *detpos)
+    crate::ray::trace(wavelength, inital_y, prism, detector_array, detpos)
         .try_for_each(|r| r.map(|p| append_next_ray_position(state_ptr, p)))
         .into()
 }
@@ -344,9 +344,6 @@ pub unsafe extern "C" fn optimize(
     for _ in 0..spec.optimizer.iteration_count {
         optimizer.iterate();
     }
-    let designs = optimizer.archive.iter().map(|soln| {
-
-    })
 
     optimizer.archive.len()
 }
@@ -364,7 +361,7 @@ pub unsafe extern "C" fn trace_wavelength(
     append_next_ray_position: fn(*mut TracedRayState, Pair),
     state_ptr: *mut TracedRayState,
 ) -> FfiResult {
-    crate::ray::trace(wavelength, inital_y, &design.compound_prism, &design.detector_array, design.detector_array_position)
+    crate::ray::trace(wavelength, inital_y, &design.compound_prism, &design.detector_array, &design.detector_array_position)
         .try_for_each(|r| r.map(|p| append_next_ray_position(state_ptr, p)))
         .into()
 }
@@ -377,7 +374,7 @@ pub unsafe extern "C" fn transmission_probability(
     state_ptr: *mut ProbabilitiesState,
 ) {
     for p in
-        crate::ray::p_dets_l_wavelength(wavelength, &design.compound_prism, &design.detector_array, &design.gaussian_beam, design.detector_array_position)
+        crate::ray::p_dets_l_wavelength(wavelength, &design.compound_prism, &design.detector_array, &design.gaussian_beam, &design.detector_array_position)
         {
             append_next_detector_probability(state_ptr, p)
         }
