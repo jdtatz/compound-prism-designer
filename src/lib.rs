@@ -6,7 +6,6 @@ pub mod optimizer;
 mod erf;
 mod glasscat;
 mod ray;
-mod utils;
 #[cfg(not(feature="pyext"))]
 mod clib;
 #[cfg(feature="pyext")]
