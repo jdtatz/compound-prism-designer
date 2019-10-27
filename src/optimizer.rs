@@ -151,18 +151,18 @@ fn min2_approx_quality<'a>(
     ps: impl Iterator<Item = (usize, &'a DesignFitness)>,
 ) -> [(usize, f64); 2] {
     // Steps 13 - 16
-    let sh = ps.size_hint();
-    let count = sh.1.unwrap_or(sh.0);
-    let mut approx_heap =
-        BinaryHeap::with_capacity_by(count, |(_, a): &(usize, f64), (_, p): &(usize, f64)| {
-            p.partial_cmp(a).unwrap()
-        });
+    let mut min1: Option<(usize, f64)> = None;
+    let mut min2: Option<(usize, f64)> = None;
     for (i, p) in ps {
-        approx_heap.push((i, approx_quality(a, p)));
+        let alpha = approx_quality(a, p);
+        if min1.map_or(true, |(_, a)| alpha < a) {
+            std::mem::swap(&mut min1, &mut min2);
+            std::mem::replace(&mut min1, Some((i, alpha)));
+        } else if min2.map_or(true, |(_, a)| alpha < a) {
+            std::mem::replace(&mut min2, Some((i, alpha)));
+        }
     }
-    let min1 = approx_heap.pop().unwrap();
-    let min2 = approx_heap.pop().unwrap();
-    [min1, min2]
+    [min1.unwrap(), min2.unwrap()]
 }
 
 /// Simulated Binary Crossover Operator
