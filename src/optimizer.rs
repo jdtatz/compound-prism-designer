@@ -1,6 +1,6 @@
 use crate::glasscat::Glass;
 use crate::ray::*;
-use binary_heap_plus::BinaryHeap;
+use ordered_float::NotNan;
 use rand::prelude::*;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256Plus as PRng;
@@ -28,9 +28,7 @@ impl<'s> Params<'s> {
         let (&curvature, s) = s.split_first().unwrap();
         let (&normalized_y_mean, s) = s.split_first().unwrap();
         let (&detector_array_angle, _) = s.split_first().unwrap();
-        let prism_count = (prism_count as usize)
-            .max(1)
-            .min(max_prism_count);
+        let prism_count = (prism_count as usize).max(1).min(max_prism_count);
         Self {
             prism_count,
             prism_height,
@@ -43,10 +41,8 @@ impl<'s> Params<'s> {
         }
     }
 
-    pub fn glass_indices(&self) -> impl 's + ExactSizeIterator<Item=usize> {
-        self.glass_findices
-            .iter()
-            .map(|f| f.floor() as usize)
+    pub fn glass_indices(&self) -> impl 's + ExactSizeIterator<Item = usize> {
+        self.glass_findices.iter().map(|f| f.floor() as usize)
     }
 }
 
@@ -151,23 +147,23 @@ fn min2_approx_quality<'a>(
     ps: impl Iterator<Item = (usize, &'a DesignFitness)>,
 ) -> [(usize, f64); 2] {
     // Steps 13 - 16
-    let mut min1: Option<(usize, f64)> = None;
-    let mut min2: Option<(usize, f64)> = None;
+    let mut min1 = (0, std::f64::INFINITY);
+    let mut min2 = (0, std::f64::INFINITY);
     for (i, p) in ps {
         let alpha = approx_quality(a, p);
-        if min1.map_or(true, |(_, a)| alpha < a) {
-            std::mem::swap(&mut min1, &mut min2);
-            std::mem::replace(&mut min1, Some((i, alpha)));
-        } else if min2.map_or(true, |(_, a)| alpha < a) {
-            std::mem::replace(&mut min2, Some((i, alpha)));
+        if alpha < min1.1 {
+            min2 = min1;
+            min1 = (i, alpha);
+        } else if alpha < min2.1 {
+            min2 = (i, alpha);
         }
     }
-    [min1.unwrap(), min2.unwrap()]
+    [min1, min2]
 }
 
 /// Simulated Binary Crossover Operator
 #[derive(Debug)]
-pub struct SBX {
+struct SBX {
     pub distribution_index: f64,
 }
 
@@ -187,7 +183,7 @@ impl SBX {
 
 /// Polynomial Mutation
 #[derive(Debug)]
-pub struct PM {
+struct PM {
     pub probability: f64,
     pub distribution_index: f64,
 }
@@ -243,8 +239,9 @@ impl<'c> AGE<'c> {
         offspring_size: usize,
         seed: u64,
         epsilons: [f64; 3],
-        sbx: SBX,
-        pm: PM,
+        crossover_distribution_index: f64,
+        mutation_distribution_index: f64,
+        mutation_probability: f64,
     ) -> Self {
         let mut rng = PRng::seed_from_u64(seed);
         let bounds = problem.param_bounds();
@@ -268,8 +265,13 @@ impl<'c> AGE<'c> {
             population,
             rng,
             epsilons,
-            sbx,
-            pm,
+            sbx: SBX {
+                distribution_index: crossover_distribution_index,
+            },
+            pm: PM {
+                distribution_index: mutation_distribution_index,
+                probability: mutation_probability,
+            },
         }
     }
 
@@ -368,24 +370,21 @@ impl<'c> AGE<'c> {
             })
             .collect();
         // Steps 12 - 23
-        let mut betas = BinaryHeap::with_capacity_by(
-            self.archive.len(),
-            |(_, kl): &(usize, f64), (_, kr): &(usize, f64)| kl.partial_cmp(&kr).unwrap(),
-        );
+        let mut betas = std::collections::BinaryHeap::new();
         for (i, _) in self.population.iter().enumerate() {
             if let Some(a2) = p1a1p2a2
                 .iter()
                 .filter_map(|[(p1, _), (_, a2)]| if p1 == &i { Some(*a2) } else { None })
                 .max_by(|a2l, a2r| a2l.partial_cmp(a2r).unwrap())
             {
-                betas.push((i, a2))
+                betas.push((NotNan::new(a2).unwrap(), i));
             }
         }
         // Steps 12 - 23
         let mut removed_indices = vec![false; self.population.len()];
         let mut plen = self.population.len();
         while plen > self.population_size {
-            let (p_star, _) = betas.pop().unwrap();
+            let (_, p_star) = betas.pop().unwrap();
             if !removed_indices[p_star] {
                 removed_indices[p_star] = true;
                 plen -= 1;
@@ -400,7 +399,8 @@ impl<'c> AGE<'c> {
                                 .filter(|(i, _)| !removed_indices[*i])
                                 .map(|(i, p)| (i, &p.fitness)),
                         );
-                        betas.push(((new[0]).0, (new[1]).1));
+                        let [(p1, _), (_, a2)] = new;
+                        betas.push((NotNan::new(a2).unwrap(), p1));
                         p1a1p2a2[i] = new;
                     }
                 }
