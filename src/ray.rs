@@ -157,15 +157,15 @@ impl Surface {
 #[derive(Debug, Clone, Copy)]
 pub struct CurvedSurface {
     /// The chord of the circular segment
-    pub chord: Surface,
+    chord: Surface,
     /// The midpt of the Curved Surface / circular segment
-    pub midpt: Pair,
+    midpt: Pair,
     /// The center of the circle
-    pub center: Pair,
+    center: Pair,
     /// The radius of the circle
-    pub radius: f64,
+    radius: f64,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
-    pub max_dist_sq: f64,
+    max_dist_sq: f64,
 }
 
 impl CurvedSurface {
@@ -209,11 +209,11 @@ impl CurvedSurface {
 pub struct CompoundPrism<'a> {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
-    pub prisms: Vec<(&'a Glass, Surface)>,
+    prisms: Vec<(&'a Glass, Surface)>,
     /// The curved lens-like last inter-media boundary surface of the compound prism
-    pub lens: CurvedSurface,
+    lens: CurvedSurface,
     /// Height of compound prism
-    pub height: f64,
+    height: f64,
     /// Width of compound prism
     width: f64,
 }
@@ -281,11 +281,11 @@ pub struct DetectorArray<'a> {
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     min_ci: f64,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
-    pub(crate) angle: f64,
+    angle: f64,
     /// The normal of the array's surface, normal = Rot(θ) @ (-1, 0)
     normal: Pair,
     /// Length of the array
-    pub length: f64,
+    length: f64,
 }
 
 impl<'a> DetectorArray<'a> {
