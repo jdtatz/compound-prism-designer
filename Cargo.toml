@@ -28,7 +28,7 @@ criterion = "0.3"
 cpuprofiler = "0.0.3"
 
 [features]
-default = []
+default = ["pyext"]
 pyext = ["pyo3", "numpy", "ndarray"]
 
 [[bench]]
@@ -44,3 +44,4 @@ debug = true
 
 [package.metadata.maturin]
 requires-dist = ["numpy~=1.17", "matplotlib~=3.0"]
+requires-python = ">=3.7"

@@ -156,8 +156,6 @@ impl Surface {
 /// A Curved Surface, parameterized as a circular segment
 #[derive(Debug, Clone, Copy)]
 pub struct CurvedSurface {
-    /// The chord of the circular segment
-    chord: Surface,
     /// The midpt of the Curved Surface / circular segment
     midpt: Pair,
     /// The center of the circle
@@ -177,7 +175,6 @@ impl CurvedSurface {
         let center = chord.midpt + chord.normal * apothem;
         let midpt = chord.midpt - chord.normal * sagitta;
         Self {
-            chord,
             midpt,
             center,
             radius,
@@ -792,7 +789,6 @@ pub fn trace<'s>(
     ray.trace(wavelength, cmpnd, detarr, detpos)
 }
 
-#[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub struct DesignFitness {
     pub size: f64,

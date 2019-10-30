@@ -1,9 +1,6 @@
 use crate::glasscat::*;
-use crate::optimizer::{Config, Params, AGE};
-use crate::ray::{
-    detector_array_positioning, p_dets_l_wavelength, trace, CompoundPrism, DesignFitness,
-    DetectorArray, DetectorArrayPositioning, GaussianBeam,
-};
+use crate::optimizer::*;
+use crate::ray::{p_dets_l_wavelength, trace, CompoundPrism, DesignFitness, DetectorArray, DetectorArrayPositioning, GaussianBeam};
 use ndarray::prelude::{array, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::create_exception;
@@ -87,6 +84,23 @@ impl<'s> Into<CompoundPrism<'s>> for &'s PyCompoundPrism {
     }
 }
 
+impl From<CompoundPrismDesign> for PyCompoundPrism {
+    fn from(design: CompoundPrismDesign) -> Self {
+        PyCompoundPrism {
+            glasses: design.glasses
+                .into_vec()
+                .into_iter()
+                .map(|(name, glass)| PyGlass { name, glass })
+                .collect(),
+            angles: design.angles.into_vec(),
+            lengths: design.lengths.into_vec(),
+            curvature: design.curvature,
+            height: design.height,
+            width: design.width,
+        }
+    }
+}
+
 #[pymethods]
 impl PyCompoundPrism {
     fn polygons<'p>(
@@ -125,7 +139,7 @@ pub struct PyDetectorArray {
     #[pyo3(get)]
     length: f64,
     #[pyo3(get)]
-    min_ci: f64,
+    max_incident_angle: f64,
     #[pyo3(get)]
     angle: f64,
 }
@@ -134,7 +148,7 @@ impl<'s> Into<DetectorArray<'s>> for &'s PyDetectorArray {
     fn into(self) -> DetectorArray<'s> {
         DetectorArray::new(
             self.bins.as_slice().into(),
-            self.min_ci,
+            self.max_incident_angle.to_radians().cos(),
             self.angle,
             self.length,
         )
@@ -149,6 +163,20 @@ impl Into<DetectorArrayPositioning> for &PyDetectorArray {
         }
     }
 }
+
+impl From<DetectorArrayDesign> for PyDetectorArray {
+    fn from(design: DetectorArrayDesign) -> Self {
+        PyDetectorArray {
+            bins: design.bins.to_vec(),
+            position: design.position.into(),
+            direction: design.direction.into(),
+            length: design.length,
+            max_incident_angle: design.max_incident_angle,
+            angle: design.angle,
+        }
+    }
+}
+
 
 #[pyclass(name=GaussianBeam)]
 #[derive(Clone)]
@@ -171,137 +199,91 @@ impl Into<GaussianBeam> for &PyGaussianBeam {
     }
 }
 
-#[pyclass]
-struct OptimizerSpecification {
-    #[pyo3(get, set)]
-    iteration_count: usize,
-    #[pyo3(get, set)]
-    population_size: usize,
-    #[pyo3(get, set)]
-    offspring_size: usize,
-    #[pyo3(get, set)]
-    crossover_distribution_index: f64,
-    #[pyo3(get, set)]
-    mutation_distribution_index: f64,
-    #[pyo3(get, set)]
-    mutation_probability: f64,
-    #[pyo3(get, set)]
-    seed: u64,
-    epsilons: [f64; 3],
-}
-
-#[pymethods]
-impl OptimizerSpecification {
-    #[new]
-    fn new(
-        obj: &PyRawObject,
-        iteration_count: usize,
-        population_size: usize,
-        offspring_size: usize,
-        crossover_distribution_index: f64,
-        mutation_distribution_index: f64,
-        mutation_probability: f64,
-        seed: u64,
-        epsilons: (f64, f64, f64),
-    ) {
-        obj.init(OptimizerSpecification {
-            iteration_count,
-            population_size,
-            offspring_size,
-            crossover_distribution_index,
-            mutation_distribution_index,
-            mutation_probability,
-            seed,
-            epsilons: [epsilons.0, epsilons.1, epsilons.2],
-        });
+impl From<GaussianBeamDesign> for PyGaussianBeam {
+    fn from(design: GaussianBeamDesign) -> Self {
+        PyGaussianBeam {
+            wavelength_range: design.wavelength_range,
+            width: design.width,
+            y_mean: design.y_mean,
+        }
     }
 }
 
-#[pyclass]
-struct CompoundPrismSpecification {
-    #[pyo3(get, set)]
-    max_count: usize,
-    #[pyo3(get, set)]
-    max_height: f64,
-    #[pyo3(get, set)]
-    width: f64,
+fn get<'p, O: ObjectProtocol, T: FromPyObject<'p>>(obj: &'p O, name: &'static str) -> PyResult<T> {
+    if obj.hasattr(name)? {
+        obj.getattr(name)?
+    } else {
+        obj.get_item(name)?
+    }.extract()
 }
 
-#[pymethods]
-impl CompoundPrismSpecification {
-    #[new]
-    fn new(obj: &PyRawObject, max_count: usize, max_height: f64, width: f64) {
-        obj.init(CompoundPrismSpecification {
-            max_count,
-            max_height,
-            width,
-        });
+impl<'source> FromPyObject<'source> for OptimizationConfig {
+    fn extract(obj: &'source PyAny) -> Result<Self, PyErr> {
+        let eps: (f64, f64, f64) = get(obj, "epsilons")?;
+        Ok(Self {
+            iteration_count: get(obj, "iteration_count")?,
+            population_size: get(obj, "population_size")?,
+            offspring_size: get(obj, "offspring_size")?,
+            crossover_distribution_index: get(obj, "crossover_distribution_index")?,
+            mutation_distribution_index: get(obj, "mutation_distribution_index")?,
+            mutation_probability: get(obj, "mutation_probability")?,
+            seed: get(obj, "seed")?,
+            epsilons: [eps.0, eps.1, eps.2],
+        })
     }
 }
 
-#[pyclass]
-struct GaussianBeamSpecification {
-    #[pyo3(get, set)]
-    width: f64,
-    #[pyo3(get, set)]
-    wavelength_range: (f64, f64),
-}
-
-#[pymethods]
-impl GaussianBeamSpecification {
-    #[new]
-    fn new(obj: &PyRawObject, width: f64, wavelength_range: (f64, f64)) {
-        obj.init(GaussianBeamSpecification {
-            width,
-            wavelength_range,
-        });
+impl<'source> FromPyObject<'source> for CompoundPrismConfig {
+    fn extract(obj: &'source PyAny) -> Result<Self, PyErr> {
+        Ok(Self {
+            max_count: get(obj, "max_count")?,
+            max_height: get(obj, "max_height")?,
+            width: get(obj, "width")?,
+        })
     }
 }
 
-#[pyclass]
-struct DetectorArraySpecification {
-    #[pyo3(get, set)]
-    length: f64,
-    #[pyo3(get, set)]
-    max_incident_angle: f64,
-    bounds: Box<[[f64; 2]]>,
-}
-
-#[pymethods]
-impl DetectorArraySpecification {
-    #[new]
-    fn new(
-        obj: &PyRawObject,
-        length: f64,
-        max_incident_angle: f64,
-        bounds: &PyAny,
-    ) -> PyResult<()> {
-        obj.init(DetectorArraySpecification {
-            length,
-            max_incident_angle,
-            bounds: bounds
-                .iter()?
-                .map(|p| {
-                    let b = p?;
-                    let lb: f64 = b.get_item(0)?.extract()?;
-                    let ub: f64 = b.get_item(1)?.extract()?;
-                    Ok([lb, ub])
-                })
-                .collect::<PyResult<_>>()?,
-        });
-        Ok(())
+impl<'source> FromPyObject<'source> for GaussianBeamConfig {
+    fn extract(obj: &'source PyAny) -> Result<Self, PyErr> {
+        Ok(Self {
+            width: get(obj, "width")?,
+            wavelength_range: get(obj, "wavelength_range")?,
+        })
     }
 }
+
+impl<'source> FromPyObject<'source> for DetectorArrayConfig {
+    fn extract(obj: &'source PyAny) -> Result<Self, PyErr> {
+        let bins: &PyArray2<f64> = get(obj, "bin_bounds")?;
+        if bins.dims()[1] != 2 {
+            return Err(pyo3::exceptions::TypeError::py_err("bin_bounds must have a shape of [_, 2]"));
+        };
+        Ok(Self {
+            length: get(obj, "length")?,
+            max_incident_angle: get(obj, "max_incident_angle")?,
+            bin_bounds: bins.as_array().genrows().into_iter().map(|r| [r[0], r[1]]).collect(),
+        })
+    }
+}
+
+impl<'source> FromPyObject<'source> for DesignConfig {
+    fn extract(obj: &'source PyAny) -> Result<Self, PyErr> {
+        Ok(Self {
+            optimizer: get(obj, "optimizer")?,
+            compound_prism: get(obj, "compound_prism")?,
+            detector_array: get(obj, "detector_array")?,
+            gaussian_beam: get(obj, "gaussian_beam")?,
+        })
+    }
+}
+
 
 #[pyfunction]
 fn optimize(
     py: Python,
     catalog: Option<&PyAny>,
-    opt: &OptimizerSpecification,
-    compound_prism: &CompoundPrismSpecification,
-    gaussian_beam: &GaussianBeamSpecification,
-    detector_array: &DetectorArraySpecification,
-) -> PyResult<Vec<Design>> {
+    design_config: DesignConfig,
+) -> PyResult<Vec<PyDesign>> {
     let glass_catalog = if let Some(catalog) = catalog {
         catalog
             .iter()?
@@ -316,76 +298,10 @@ fn optimize(
             .map(|(s, g)| (s.to_string(), g.clone()))
             .collect()
     };
-    let config = Config {
-        max_prism_count: compound_prism.max_count,
-        wavelength_range: gaussian_beam.wavelength_range,
-        beam_width: gaussian_beam.width,
-        max_prism_height: compound_prism.max_height,
-        prism_width: compound_prism.width,
-        detector_array_length: detector_array.length,
-        detector_array_min_ci: detector_array.max_incident_angle.to_radians().cos(),
-        detector_array_bin_bounds: detector_array.bounds.clone().to_vec().into(),
-        glass_catalog,
-    };
-    let mut optimizer = AGE::new(
-        &config,
-        opt.population_size,
-        opt.offspring_size,
-        opt.seed,
-        opt.epsilons,
-        opt.crossover_distribution_index,
-        opt.mutation_distribution_index,
-        opt.mutation_probability,
-    );
-    let iter_count = opt.iteration_count;
-    py.allow_threads(|| {
-        for _ in 0..iter_count {
-            optimizer.iterate()
-        }
+    let designs = py.allow_threads(|| {
+        design_config.optimize(glass_catalog)
     });
-    let designs = optimizer
-        .archive
-        .into_iter()
-        .map(|soln| {
-            let params = Params::from_slice(&soln.params, config.max_prism_count);
-            let (c, _, d, g) = config.array_to_params(&soln.params);
-            let detpos = detector_array_positioning(&c, &d, &g).unwrap();
-            Design {
-                compound_prism: PyCompoundPrism {
-                    glasses: params
-                        .glass_indices()
-                        .map(|i| {
-                            let g = &config.glass_catalog[i];
-                            PyGlass {
-                                name: g.0.clone(),
-                                glass: g.1.clone(),
-                            }
-                        })
-                        .collect(),
-                    angles: params.angles.to_vec(),
-                    lengths: params.lengths.to_vec(),
-                    curvature: params.curvature,
-                    height: params.prism_height,
-                    width: config.prism_width,
-                },
-                detector_array: PyDetectorArray {
-                    bins: config.detector_array_bin_bounds.to_vec(),
-                    position: detpos.position.into(),
-                    direction: detpos.direction.into(),
-                    length: config.detector_array_length,
-                    min_ci: config.detector_array_min_ci,
-                    angle: params.detector_array_angle,
-                },
-                gaussian_beam: PyGaussianBeam {
-                    wavelength_range: config.wavelength_range,
-                    width: config.beam_width,
-                    y_mean: params.y_mean,
-                },
-                fitness: soln.fitness.into(),
-            }
-        })
-        .collect();
-    Ok(designs)
+    Ok(designs.into_vec().into_iter().map(|d| d.into()).collect())
 }
 
 #[pyclass(name=DesignFitness)]
@@ -409,8 +325,8 @@ impl From<DesignFitness> for PyDesignFitness {
     }
 }
 
-#[pyclass]
-pub struct Design {
+#[pyclass(name=Design)]
+pub struct PyDesign {
     #[pyo3(get)]
     compound_prism: PyCompoundPrism,
     #[pyo3(get)]
@@ -421,8 +337,20 @@ pub struct Design {
     fitness: PyDesignFitness,
 }
 
+impl From<Design> for PyDesign {
+    fn from(design: Design) -> Self {
+        PyDesign {
+            compound_prism: design.compound_prism.into(),
+            detector_array: design.detector_array.into(),
+            gaussian_beam: design.gaussian_beam.into(),
+            fitness: design.fitness.into()
+        }
+    }
+}
+
+
 #[pymethods]
-impl Design {
+impl PyDesign {
     pub fn transmission_probability<'p>(
         &self,
         wavelengths: &PyArray1<f64>,
@@ -472,12 +400,8 @@ fn compound_prism_designer(_: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyCompoundPrism>()?;
     m.add_class::<PyDetectorArray>()?;
     m.add_class::<PyGaussianBeam>()?;
-    m.add_class::<OptimizerSpecification>()?;
-    m.add_class::<CompoundPrismSpecification>()?;
-    m.add_class::<GaussianBeamSpecification>()?;
-    m.add_class::<DetectorArraySpecification>()?;
     m.add_class::<PyDesignFitness>()?;
-    m.add_class::<Design>()?;
+    m.add_class::<PyDesign>()?;
     m.add_wrapped(wrap_pyfunction!(create_glass_catalog))?;
     m.add_wrapped(wrap_pyfunction!(optimize))?;
     Ok(())
