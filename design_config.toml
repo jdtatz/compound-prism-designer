@@ -6,9 +6,9 @@ length-unit = "mm"
 # Genetic algorithm(AGEII) optimizer properties (Optional)
 [optimizer]
 
-iteration-count = 5
-population-size = 32
-offspring-size = 16
+iteration-count = 150
+population-size = 512
+offspring-size = 128
 crossover-distribution-index = 20
 mutation-distribution-index = 20
 mutation-probability = 0.05

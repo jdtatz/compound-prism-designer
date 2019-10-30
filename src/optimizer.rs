@@ -5,20 +5,166 @@ use rand::prelude::*;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256Plus as PRng;
 
-#[derive(Debug, Clone)]
-pub struct Params<'s> {
-    pub prism_count: usize,
-    pub prism_height: f64,
-    pub glass_findices: &'s [f64],
-    pub angles: &'s [f64],
-    pub lengths: &'s [f64],
+#[derive(Constructor, Debug, Clone)]
+pub struct OptimizationConfig {
+    pub iteration_count: usize,
+    pub population_size: usize,
+    pub offspring_size: usize,
+    pub crossover_distribution_index: f64,
+    pub mutation_distribution_index: f64,
+    pub mutation_probability: f64,
+    pub seed: u64,
+    pub epsilons: [f64; 3],
+}
+
+#[derive(Constructor, Debug, Clone)]
+pub struct CompoundPrismConfig {
+    pub max_count: usize,
+    pub max_height: f64,
+    pub width: f64,
+}
+
+#[derive(Constructor, Debug, Clone)]
+pub struct GaussianBeamConfig {
+    pub width: f64,
+    pub wavelength_range: (f64, f64),
+}
+
+#[derive(Constructor, Debug, Clone)]
+pub struct DetectorArrayConfig {
+    pub length: f64,
+    pub max_incident_angle: f64,
+    pub bin_bounds: Box<[[f64; 2]]>,
+}
+
+/// Specification structure for the configuration of the Spectrometer Designer
+#[derive(Constructor, Debug, Clone)]
+pub struct DesignConfig {
+    pub optimizer: OptimizationConfig,
+    pub compound_prism: CompoundPrismConfig,
+    pub detector_array: DetectorArrayConfig,
+    pub gaussian_beam: GaussianBeamConfig,
+}
+
+impl DesignConfig {
+    pub fn optimize(&self, glass_catalog: Box<[(String, Glass)]>) -> Box<[Design]> {
+        let config = Config {
+            max_prism_count: self.compound_prism.max_count,
+            wavelength_range: self.gaussian_beam.wavelength_range,
+            beam_width: self.gaussian_beam.width,
+            max_prism_height: self.compound_prism.max_height,
+            prism_width: self.compound_prism.width,
+            detector_array_length: self.detector_array.length,
+            detector_array_min_ci: self.detector_array.max_incident_angle.to_radians().cos(),
+            detector_array_bin_bounds: self.detector_array.bin_bounds.clone().to_vec().into(),
+            glass_catalog,
+        };
+        let mut optimizer = AGE::new(
+            &config,
+            self.optimizer.population_size,
+            self.optimizer.offspring_size,
+            self.optimizer.seed,
+            self.optimizer.epsilons,
+            self.optimizer.crossover_distribution_index,
+            self.optimizer.mutation_distribution_index,
+            self.optimizer.mutation_probability,
+        );
+        for _ in 0..self.optimizer.iteration_count {
+            optimizer.iterate()
+        }
+        optimizer.archive.into_iter()
+            .map(|s| {
+                let params = Params::from_slice(&s.params, self.compound_prism.max_count);
+                let (g, _, d, b) = config.array_to_params(&s.params);
+                let detpos = detector_array_positioning(&g, &d, &b)
+                    .expect("Only valid designs should result from optimization");
+                let compound_prism = CompoundPrismDesign {
+                    glasses: params
+                        .glass_indices()
+                        .map(|i| config.glass_catalog[i].clone())
+                        .collect(),
+                    angles: params.angles.to_owned().into_boxed_slice(),
+                    lengths: params.lengths.to_owned().into_boxed_slice(),
+                    curvature: params.curvature,
+                    height: params.prism_height,
+                    width: self.compound_prism.width,
+                };
+                let detector_array = DetectorArrayDesign {
+                    bins: self.detector_array.bin_bounds.clone(),
+                    position: detpos.position,
+                    direction: detpos.direction,
+                    length: self.detector_array.length,
+                    max_incident_angle: self.detector_array.max_incident_angle,
+                    angle: params.detector_array_angle,
+                };
+                let gaussian_beam = GaussianBeamDesign {
+                    wavelength_range: self.gaussian_beam.wavelength_range,
+                    width: self.gaussian_beam.width,
+                    y_mean: params.y_mean,
+                };
+                Design {
+                    compound_prism,
+                    detector_array,
+                    gaussian_beam,
+                    fitness: s.fitness
+                }
+            })
+            .collect()
+    }
+}
+
+#[derive(Constructor, Debug, Clone)]
+pub struct CompoundPrismDesign {
+    pub glasses: Box<[(String, Glass)]>,
+    pub angles: Box<[f64]>,
+    pub lengths: Box<[f64]>,
     pub curvature: f64,
+    pub height: f64,
+    pub width: f64,
+}
+
+#[derive(Constructor, Debug, Clone)]
+pub struct DetectorArrayDesign {
+    pub bins: Box<[[f64; 2]]>,
+    pub position: Pair,
+    pub direction: Pair,
+    pub length: f64,
+    pub max_incident_angle: f64,
+    pub angle: f64,
+}
+
+#[derive(Constructor, Debug, Clone)]
+pub struct GaussianBeamDesign {
+    pub wavelength_range: (f64, f64),
+    pub width: f64,
     pub y_mean: f64,
-    pub detector_array_angle: f64,
+}
+
+
+#[derive(Constructor, Debug, Clone)]
+pub struct Design {
+    pub compound_prism: CompoundPrismDesign,
+    pub detector_array: DetectorArrayDesign,
+    pub gaussian_beam: GaussianBeamDesign,
+    pub fitness: DesignFitness,
+}
+
+
+
+#[derive(Debug, Clone)]
+struct Params<'s> {
+    prism_count: usize,
+    prism_height: f64,
+    glass_findices: &'s [f64],
+    angles: &'s [f64],
+    lengths: &'s [f64],
+    curvature: f64,
+    y_mean: f64,
+    detector_array_angle: f64,
 }
 
 impl<'s> Params<'s> {
-    pub fn from_slice(s: &'s [f64], max_prism_count: usize) -> Self {
+    fn from_slice(s: &'s [f64], max_prism_count: usize) -> Self {
         assert_eq!(s.len(), 3 * max_prism_count + 6);
         let (&prism_count, s) = s.split_first().unwrap();
         let (&prism_height, s) = s.split_first().unwrap();
@@ -41,23 +187,23 @@ impl<'s> Params<'s> {
         }
     }
 
-    pub fn glass_indices(&self) -> impl 's + ExactSizeIterator<Item = usize> {
+    fn glass_indices(&self) -> impl 's + ExactSizeIterator<Item = usize> {
         self.glass_findices.iter().map(|f| f.floor() as usize)
     }
 }
 
 /// Specification structure for the configuration of the Spectrometer Designer
 #[derive(Constructor, Debug, Clone)]
-pub struct Config {
-    pub max_prism_count: usize,
-    pub wavelength_range: (f64, f64),
-    pub beam_width: f64,
-    pub max_prism_height: f64,
-    pub prism_width: f64,
-    pub detector_array_length: f64,
-    pub detector_array_min_ci: f64,
-    pub detector_array_bin_bounds: Box<[[f64; 2]]>,
-    pub glass_catalog: Box<[(String, Glass)]>,
+struct Config {
+    max_prism_count: usize,
+    wavelength_range: (f64, f64),
+    beam_width: f64,
+    max_prism_height: f64,
+    prism_width: f64,
+    detector_array_length: f64,
+    detector_array_min_ci: f64,
+    detector_array_bin_bounds: Box<[[f64; 2]]>,
+    glass_catalog: Box<[(String, Glass)]>,
 }
 
 impl Config {
@@ -93,7 +239,7 @@ impl Config {
         bounds.into_boxed_slice()
     }
 
-    pub fn array_to_params<'p, 's: 'p>(
+    fn array_to_params<'p, 's: 'p>(
         &'s self,
         params: &'p [f64],
     ) -> (
@@ -164,11 +310,11 @@ fn min2_approx_quality<'a>(
 /// Simulated Binary Crossover Operator
 #[derive(Debug)]
 struct SBX {
-    pub distribution_index: f64,
+    distribution_index: f64,
 }
 
 impl SBX {
-    pub fn crossover(&self, x1: f64, x2: f64, lb: f64, ub: f64, rng: &mut PRng) -> f64 {
+    fn crossover(&self, x1: f64, x2: f64, lb: f64, ub: f64, rng: &mut PRng) -> f64 {
         let u: f64 = rng.gen_range(0., 1.);
         let beta = if u <= 0.5 {
             (2. * u).powf(1. / (self.distribution_index + 1.))
@@ -184,12 +330,12 @@ impl SBX {
 /// Polynomial Mutation
 #[derive(Debug)]
 struct PM {
-    pub probability: f64,
-    pub distribution_index: f64,
+    probability: f64,
+    distribution_index: f64,
 }
 
 impl PM {
-    pub fn mutate(&self, x: f64, lb: f64, ub: f64, rng: &mut PRng) -> f64 {
+    fn mutate(&self, x: f64, lb: f64, ub: f64, rng: &mut PRng) -> f64 {
         let u: f64 = rng.gen_range(0., 1.);
         if u < self.probability {
             let u: f64 = rng.gen_range(0., 1.);
@@ -211,20 +357,21 @@ impl PM {
 }
 
 #[derive(Clone, Debug)]
-pub struct Soln {
-    pub params: Box<[f64]>,
-    pub fitness: DesignFitness,
+struct Soln {
+    params: Box<[f64]>,
+    fitness: DesignFitness,
 }
 
 /// Approximation-Guided Evolutionary Multi-Objective Optimizer
 /// https://www.ijcai.org/Proceedings/11/Papers/204.pdf
+/// https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf
 #[derive(Debug)]
-pub struct AGE<'c> {
+struct AGE<'c> {
     population_size: usize,
     offspring_size: usize,
     problem: &'c Config,
     param_bounds: Box<[(f64, f64)]>,
-    pub archive: Vec<Soln>,
+    archive: Vec<Soln>,
     population: Vec<Soln>,
     rng: PRng,
     epsilons: [f64; 3],
@@ -233,7 +380,7 @@ pub struct AGE<'c> {
 }
 
 impl<'c> AGE<'c> {
-    pub fn new(
+    fn new(
         problem: &'c Config,
         population_size: usize,
         offspring_size: usize,
@@ -326,7 +473,7 @@ impl<'c> AGE<'c> {
         }
     }
 
-    pub fn iterate(&mut self) {
+    fn iterate(&mut self) {
         // Steps 4 to 8
         let mut offspring = Vec::with_capacity(self.offspring_size);
         while offspring.len() < self.offspring_size {
