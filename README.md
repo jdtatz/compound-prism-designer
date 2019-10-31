@@ -1,11 +1,13 @@
 # Compound Prism Spectrometer Designer
-Designer for an ultra-fast high-efficiency broad-spectrum low-resolution spectrometer with a [compound prism](https://en.wikipedia.org/wiki/Compound_prism) 
-as the dispersive element. The optimization and design of a spectrometer has multiple conflicting goals; the size 
-of the spectrometer and the light's deviation should be minimized, and the amount of 
-[information](https://en.wikipedia.org/wiki/Quantities_of_information) should be maximised. 
+Designer for an ultra-fast high-efficiency broad-spectrum low-resolution spectrometer with a [compound 
+prism](https://en.wikipedia.org/wiki/Compound_prism) as the dispersive element. The optimization and design 
+of a spectrometer has multiple conflicting goals; the size of the spectrometer and the light's deviation should be 
+minimized, and the amount of [information](https://en.wikipedia.org/wiki/Quantities_of_information) should be maximised. 
 Normal optimization methods that give one best result, can't be used with these goals, so multi-objective-optimization 
 algorithms are used to generate a [Pareto Set](https://en.wikipedia.org/wiki/Pareto_efficiency#Pareto_frontier) 
 of results. The results are then shown interactively to allow the user to choose which design they want.
+The optimization algorithm used is [Approximation-Guided Evolutionary Multi-Objective 
+Optimization II](https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf).
 
 ## Design Assumptions
 * Incoming light is [collimanted](https://en.wikipedia.org/wiki/Collimated_beam)
@@ -26,8 +28,12 @@ of results. The results are then shown interactively to allow the user to choose
 
 ## How to run
 1. Install rust using [rustup](https://rustup.rs/), the rust installation manager
-  * Use the default stable toolchain
-  * Need rust version >= 1.35.0
+  * Use the non-default nightly toolchain
+    - ``rustup toolchain install nightly``
+    - And either
+      * ``rustup override set nightly`` in the project directory
+      * or ``rustup default nightly``
+  * Need rust version >= 1.36.0
 2. Create and activate a python virtual environment, using either
   - Python3 venv
     * Create and activate python3 virtual environment. See [tutorial](https://docs.python.org/3/tutorial/venv.html).
@@ -36,33 +42,6 @@ of results. The results are then shown interactively to allow the user to choose
     * Install [Anaconda](https://docs.anaconda.com/anaconda/install/) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html)
         for python virtual environment package environment.
     * Create and activate a conda virtual environment using [environment.yml](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file) 
-3. Build the library and add it to your using virtual environment with ``pip install -e .``
+3. Build the library and add it to your using virtual environment with ``maturin develop --release --rustc-extra-args="-C target-feature=+fma -C target-cpu=native" --cargo-extra-args="--features pyext"``
 4. Configure design specifications in ``design_config.toml``
-5. Run the designer ``optimizer.py``
-
-## Design
-```
-h ≡ prism height
-l_z ≡ prism width
-l_a ≡ detector array length
-w_beam ≡ 1 / e^2 beam width
-T(λ, y) ≡ transmittance probability of a wavelength from an inital y, to the intersection with the detector array
-S(λ, y) ≡ intersection position on the plane of the detector array, of a wavelength from an inital y
-D ≡ { d ∈ detectors with [lb_d, ub_d) ⊆ [0, l_a] }
-Λ ≡ [λ_min, λ_max]
-Y ≡ (0, h)
-Z ≡ (-l_z / 2, l_z / 2)
-f(y, z) ≡ Exp[-2(y^2 + z^2)/w_beam^2] * 2 / (π * w_beam^2)
-p(D=d|Λ=λ ∩ Y=y) ≡ T(λ, y) if lb_d <= ((S(λ, y) - det_arr_pos) • det_arr_dir) < ub_d else 0
-p(Λ=λ) ≡ 1 / (λ_max - λ_min)
----
-p(D=d|Λ=λ) = Integrate[p(D=d|Λ=λ ∩ Y=y) * Integrate[f(y - y_mean, z), z ∈ Z], y ∈ Y]
-p(D=d) = Integrate[p(Λ=λ) p(D=d|Λ=λ), λ ∈ Λ]
-dev_vector = det_arr_pos + det_arr_dir * l_a / 2 - (0, y_mean)
-H(D) = -Sum[p(D=d) Log[p(D=d)], d ∈ D]
-H(D|Λ) = -Sum[Integrate[p(Λ=λ) p(D=d|Λ=λ) Log[p(D=d|Λ=λ)], λ ∈ Λ], d ∈ D]
----
-size = ||dev_vector||
-dev = | dev_vector • (0, 1) | / ||dev_vector||
-info = I(Λ; D) ≡ H(D) - H(D|Λ)
-```
+5. Run the designer app with ``python3 -m compound_prism_designer``

@@ -93,5 +93,4 @@ class DesignConfig:
         )
 
     def optimize(self) -> Design:
-        print(self)
         return _optimize(None, self)

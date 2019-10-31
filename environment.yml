@@ -1,0 +1,11 @@
+name: compound_prism_designer_venv
+channels:
+  - conda-forge
+dependencies:
+  - python ~= 3.7
+  - numpy ~= 1.17
+  - matplotlib ~= 3.0
+  - PySide2 ~= 5.13
+  - toml ~= 0.10
+  - pip:
+      - maturin ~= 0.7
