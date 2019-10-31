@@ -1,19 +1,19 @@
-# Path to glass catalog file
-catalog-path = "catalog.agf"
-# The unit of legth, such as cm or in, (Optional, default="a.u.")
+# The unit of legth, such as cm or in, (Optional, default="mm")
 length-unit = "mm"
 
-# Genetic algorithm(AGEII) optimizer properties (Optional)
+# Genetic algorithm(AGEII) optimizer properties
+# See links for details
+# https://www.ijcai.org/Proceedings/11/Papers/204.pdf
+# https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf
 [optimizer]
-
 iteration-count = 150
 population-size = 512
-offspring-size = 128
-crossover-distribution-index = 20
-mutation-distribution-index = 20
-mutation-probability = 0.05
+offspring-size = 512
+crossover-distribution-index = 2
+mutation-distribution-index = 0.5
+mutation-probability = 0.25
 seed = 12345
-epsilons = [5.0, 0.05, 0.05]
+epsilons = [5.0, 0.01, 0.05]
 
 # Compound prism design specification
 [compound-prism]
@@ -35,7 +35,7 @@ wavelength-range = [0.5, 0.82]
 [detector-array]
 # Total length of array in [length-unit]
 length = 32
-# Maximum accepted incident angle in [degrees] (Optional, max / default=90)
+# Maximum accepted incident angle in [degrees] (max=90)
 max-incident-angle = 45
 # Boundries of the detector bins in the array, an Nx2 list, in [length-unit]
 bounds = [[ 0.1,  0.9],

@@ -3,8 +3,8 @@
 \usepackage{amsmath}
 \begin{document}
 
-\section{Givens}
-\subsection{Variables}
+\section{Givens}\label{sec:givens}
+\subsection{Variables}\label{subsec:variables}
 $h$ = prism height
 
 $l_z$  = prism width
@@ -15,22 +15,41 @@ $\vec{p}_a$ = detector array position vector
 
 $\vec{v}_a$ = detector array direction vector
 
+$\mu_b$ = mean beam position on y-axis
+
 $w_b  =  1 / e^2$ {beam width}
 
 $D  = \{ d = [lb_d, ub_d) \subseteq [0, l_a] \}$
 
-$\Lambda  =  [\lambda_{min}, \lambda_{max}] $
+$\Lambda  ~ \mathcal{U}(\lambda_{min}, \lambda_{max}) $
 
-$Y = (0, h) $
+$Y ~ \mathcal {N}(\mu=\mu_b, \sigma^2=w^2_b) \subseteq [0, h] $
 
-$Z = (-l_z / 2, l_z / 2)$
+$Z ~ \mathcal {N}(\mu=0, \sigma^2=w^2_b) \subseteq [-l_z / 2, l_z / 2]$
 
-\subsection{Functions}
+
+\subsection{Snell's Law}\label{subsec:snell's-law}
+$\vec{n}$ = inter-media surface normal vector towards current media
+
+$\vec{l}$ = light ray direction vector
+
+$n_1$ = index of refraction of current media
+
+$n_2$ = index of refraction of next media
+
+$r = n_1 / n_2$
+
+$c = -\vec{n} \cdot{} \vec{l}$
+
+$\vec{v}_{refract} = r \vec{l} + (r c - \sqrt{1 - r^2 (1 - c^2)}) \vec{n}$
+
+
+\subsection{Functions}\label{subsec:functions}
 $T(\lambda, y)$ = transmittance probability of a wavelength, $\lambda$, from an inital y, to the intersection with the detector array
 
 $\vec{S}(\lambda, y)$  = position vector of the intersection of the detector array, and of a wavelength, $\lambda$, from an inital y
 
-$f(y, z) = \frac{2}{\pi  w_b^2}exp[-2(y^2 + z^2)/w_b^2]$
+$f(y, z) = \frac{2}{\pi w_b^2}exp[-2(y^2 + z^2)/w_b^2]$
 
 $$p(D=d|\Lambda=\lambda \cap Y=y) = \begin{cases}
 T(\lambda, y) & lb_d <= ((\vec{S}(\lambda, y) - \vec{p}_a) \cdot \vec{v}_a) < ub_d \\
@@ -40,7 +59,7 @@ $p(\Lambda=\lambda) = 1 / (\lambda_{max} - \lambda_{min})$
 
 
 
-\section{Derivations}
+\section{Derivations}\label{sec:derivations}
 
 $p(D=d|\Lambda=\lambda) = \int_Y\int_Z p(D=d|\Lambda=\lambda \cap Y=y)f(y - y_{mean}, z)dz dy$
 
@@ -52,11 +71,11 @@ $H(D) = -\sum_{d \in D}p(D=d) log_2[p(D=d)]$
 
 $H(D|\Lambda) = -\sum_{d \in D}\int_{\Lambda}p(\Lambda=\lambda) p(D=d|\Lambda=\lambda) log_2[p(D=d|\Lambda=\lambda)] d\lambda$
 
-\section{Optimization Objectives}
+\section{Optimization Objectives}\label{sec:optimization-objectives}
 
 spectromter size = $||\vec{dev}||$
 
-spectromter ray deviation = $| \vec{dev} \cdot (0, 1) | / ||\vec{dev}||$
+spectromter ray deviation = $| \vec{dev} \cdot (0, 1) | / ||\vec{dev}|| = | \sin(\theta_{deviation}) | $
 
 mutual information = $I(\Lambda; D) = H(D) - H(D|\Lambda)$
 
