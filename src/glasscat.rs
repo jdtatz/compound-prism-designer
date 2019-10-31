@@ -283,7 +283,7 @@ pub fn new_catalog(file: &str) -> impl Iterator<Item = Result<(&str, Glass), Cat
     CatalogIter::new(file)
 }
 
-pub const BUNDLED_CATALOG_FILE: &str = include_str!("../catalog.agf");
+pub const BUNDLED_CATALOG_FILE: &str = include_str!("catalog.agf");
 
 pub static BUNDLED_CATALOG: Lazy<Box<[(&'static str, Glass)]>> = Lazy::new(|| {
     new_catalog(BUNDLED_CATALOG_FILE)

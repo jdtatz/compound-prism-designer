@@ -3,7 +3,7 @@ name = "compound_prism_designer"
 version = "0.0.4"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
-include = ["src/**/*", "Cargo.toml", "pyproject.toml", "compound_prism_designer/*.py"]
+include = ["/src/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/design_config.toml", "/README.md"]
 
 [lib]
 name = "compound_prism_designer"
