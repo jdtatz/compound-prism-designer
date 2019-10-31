@@ -828,6 +828,7 @@ pub fn fitness(
 mod tests {
     use super::*;
     use rand::prelude::*;
+    use std::ops::Deref;
 
     fn approx_eq(lhs: f64, rhs: f64, epsilon: f64) -> bool {
         let diff = f64::abs(lhs - rhs);
@@ -850,10 +851,7 @@ mod tests {
 
     #[test]
     fn test_many() {
-        let catalog_contents = include_str!("../catalog.agf");
-        let catalog = crate::glasscat::new_catalog(catalog_contents)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let catalog = crate::glasscat::BUNDLED_CATALOG.deref();
         let nglass = catalog.len();
         let seed = 123456;
         let mut rng = rand_xoshiro::Xoshiro256StarStar::seed_from_u64(seed);
