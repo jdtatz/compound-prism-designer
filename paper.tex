@@ -3,35 +3,53 @@
 \usepackage{amsmath}
 \begin{document}
 
-\section{Givens}\label{sec:givens}
-\subsection{Variables}\label{subsec:variables}
+\section{System Parametrization}\label{sec:system-parametrization}
+$N$ = prism count
+
+$\hat{n}_i = R(\theta_i) \cdot -\hat{x}$ = normal unit vector for planar inter-media surface $i$
+
+$\vec{p}_{0, i}$ = mid-point vector for planar inter-media surface $i$
+
+$\hat{n}_c = R(\theta_c) \cdot -\hat{x}$ = normal unit vector for the chord of the lens inter-media surface
+
+$\vec{p}_{0, c}$ = mid-point vector for the chord of the lens inter-media surface
+
 $h$ = prism height
 
-$l_z$  = prism width
+$\ell_z$  = prism width
 
-$l_a$  = detector array length
+$\ell_a$  = detector array length
 
 $\vec{p}_a$ = detector array position vector
 
-$\vec{v}_a$ = detector array direction vector
+$\hat{v}_a$ = detector array direction unit vector
+
+$\hat{n}_a$ = detector array normal unit vector
 
 $\mu_b$ = mean beam position on y-axis
 
-$w_b  =  1 / e^2$ {beam width}
+$w_b = 1 / e^2$ {beam width}
 
-$D  = \{ d = [lb_d, ub_d) \subseteq [0, l_a] \}$
+$\vec{\delta} = \vec{p}_a + \frac{1}{2} \ell_a \hat{v}_a - \mu_b \hat{y}$ = spectromter footprint vector
 
-$\Lambda  ~ \mathcal{U}(\lambda_{min}, \lambda_{max}) $
+$D$ = set of detection bins composing the detector array
 
-$Y ~ \mathcal {N}(\mu=\mu_b, \sigma^2=w^2_b) \subseteq [0, h] $
+$\forall d \in D, [lb_d, ub_d) \equiv$ bounds of the detection bin, $d$
 
-$Z ~ \mathcal {N}(\mu=0, \sigma^2=w^2_b) \subseteq [-l_z / 2, l_z / 2]$
+$0 \leq lb_1 < ub_1 \leq lb_2 < ... < ub_{|D|} \leq \ell_a $
+
+$\Lambda \sim \mathcal{U}(\lambda_{min}, \lambda_{max}) $
+
+$Y \sim \mathcal {N}(\mu=\mu_b, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [0, h] $
+
+$Z \sim \mathcal {N}(\mu=0, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [-\ell_z / 2, \ell_z / 2]$
 
 
-\subsection{Snell's Law}\label{subsec:snell's-law}
-$\vec{n}$ = inter-media surface normal vector towards current media
+\section{Ray Propagation}\label{sec:ray-propagation}
+\subsection{Refraction}\label{subsec:refraction}
+$\hat{n}$ = inter-media surface normal vector towards current media
 
-$\vec{l}$ = light ray direction vector
+$\hat{l}$ = light ray direction unit vector
 
 $n_1$ = index of refraction of current media
 
@@ -39,33 +57,128 @@ $n_2$ = index of refraction of next media
 
 $r = n_1 / n_2$
 
-$c = -\vec{n} \cdot{} \vec{l}$
+$c_i = -\hat{n} \cdot{} \hat{l} = \cos{\theta_i}$
 
-$\vec{v}_{refract} = r \vec{l} + (r c - \sqrt{1 - r^2 (1 - c^2)}) \vec{n}$
+if $r^2 (1 - c_i^2) > 1 \to$ fail to refract due to total internal reflection
+
+$c_t = \sqrt{1 - r^2 (1 - c_i^2)} = \cos{\theta_t}$
+
+$\hat{v}_{\text{refract}} = r \hat{l} + (r c_i - c_t) \hat{n}$
+
+$T_{s} = 1 - | \frac{n_1 c_i - n_2 c_t}{n_1 c_i + n_2 c_t} |^2$
+
+$T_{p} = 1 - | \frac{n_1 c_t - n_2 c_i}{n_1 c_t + n_2 c_i} |^2$
 
 
-\subsection{Functions}\label{subsec:functions}
-$T(\lambda, y)$ = transmittance probability of a wavelength, $\lambda$, from an inital y, to the intersection with the detector array
+\subsection{Ray-Plane Intersection}\label{subsec:ray-plane-intersection}
+$\hat{l}$ = light ray direction unit vector
 
-$\vec{S}(\lambda, y)$  = position vector of the intersection of the detector array, and of a wavelength, $\lambda$, from an inital y
+$\vec{o}$ = origin of the light ray
 
-$f(y, z) = \frac{2}{\pi w_b^2}exp[-2(y^2 + z^2)/w_b^2]$
+$\hat{n}$ = normal unit vector of the plane towards $\vec{o}$
+
+$\vec{p}_0$ = point on the plane
+
+if $\hat{l} \cdot \hat{n} = 0 \to $ No intersection between the ray and plane
+
+$d = \frac{(\vec{p}_0 - \vec{o}) \cdot \hat{n}}{\hat{l} \cdot \hat{n}}$ = distance between the ray's origin and the point of intersection
+
+$\vec{p} = \vec{o} + d\hat{l}$ = point of intersection
+
+
+\subsection{Ray-Arc Intersection}\label{subsec:ray-arc-intersection}
+\subsubsection{Circular Arc Parametrization}
+k = normalized curvature
+
+$\vec{p}_0$ = mid-point of the chord
+
+$\hat{n}$ = normal unit vector of the chord towards the center
+
+$\ell_c$ = chord length
+
+$\kappa = k / (\frac{1}{2} \ell_c)$ = curvature
+
+$r = \frac{1}{\kappa}$ = radius
+
+$a = \sqrt{r^2 - (\frac{1}{2}\ell_c)^2}$ = apothem
+
+$s = r - a$ = sagitta
+
+$\vec{c} = \vec{p}_0 + a \hat{n}$ = center
+
+$\vec{p}_1 = \vec{p}_0 - s \hat{n}$ = mid-point of the arc
+
+
+\subsubsection{Ray Intersection}
+$\hat{l}$ = light ray direction unit vector
+
+$\vec{o}$ = origin of the light ray
+
+if $((\vec{l} \cdot (\vec{o} - \vec{c}))^2 - (||\vec{o} - \vec{c}||^2 - r^2)) \leq 0 \to $ No intersection between the ray and circle
+
+$d = -(\vec{l} \cdot (\vec{o} - \vec{c})) + \sqrt{(\vec{l} \cdot (\vec{o} - \vec{c}))^2 - (||\vec{o} - \vec{c}||^2 - r^2)}$
+= distance between the ray's origin and the furthermost point of intersection on the circle
+
+$\vec{p} = \vec{o} + d\hat{l}$ = point of intersection
+
+if $||\vec{p} - \vec{p}_1||^2 > (s^2 + (\frac{1}{2}\ell_c)^2) \to $ No intersection between the ray and arc
+
+\subsection{Parametrization \& Propagation details}
+$\hat{l}_0 = \hat{x}$ = incoming light ray direction unit vector
+
+$y_0$ = initial y-axis position of the incoming light ray
+
+$\vec{o}_0 = y_0\hat{y}$ = origin of the incoming light ray
+
+$n_0 = n_f = 1$ = index of refraction of air outside the compound prism
+
+\[\hat{v}_{\text{refract}, i} = \begin{cases}
+  f_{\text{refract}}(\hat{l}=\hat{l}_i, \hat{n}=\hat{n}_{i+1}, n_1=n_i, n_2=n_{i+1}) & 0 \le i < N \\
+  f_{\text{refract}}(\hat{l}=\hat{l}_i, \hat{n}=\frac{\vec{c} - \vec{p}_i}{||\vec{c} - \vec{p}_i||}, n_1=n_i, n_2=n_f) & i = N \\
+\end{cases}\]
+
+$\hat{l}_i = \hat{v}_{\text{refract}, i - 1}$
+
+\[\vec{p}_i = \begin{cases}
+f_{\text{ray-plane intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_{i+1}, \vec{p}_0=\vec{p}_{0, i+1}) & 0 \le i < N \\
+f_{\text{ray-arc intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_c, \vec{p}_0=\vec{p}_{0, c}, \ell_c=h/\cos{\theta_{c}}) & i = N \\
+f_{\text{ray-plane intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_{a}, \vec{p}_0=\vec{p}_a) & i = N + 1 \\
+\end{cases}\]
+
+if $\exists \vec{p}_{i \le N}, \neg (0 \le \vec{p}_i \cdot \hat{y} \le h) \to$ fail due to the ray leaving the prism
+
+$\vec{o}_i = \vec{p}_{i - 1}$
+
+$\hat{v}_f = \hat{v}_{\text{refract}, N}$
+
+$\vec{p}_f = \vec{p}_{N + 1}$
+
+if $-\hat{v}_f \cdot \hat{n}_a \le \cos{\theta_{\text{max}}} \to$ fail to detect becuase the spectrometer angular response is too weak
+
+$T_s = \prod_{i=0}^{N + 1} T_{s,i}$
+
+$T_p = \prod_{i=0}^{N + 1} T_{p,i}$
+
+$T = \frac{1}{2} (T_s + T_p)$
+
+if the ray propagation fails at any step $\to T = 0$
+
+
+\subsection{Propagation results}
+$T(\lambda, y)$ = transmittance probability of a wavelength, $\lambda$, from an initial y, to the intersection with the detector array
+
+$\vec{S}(\lambda, y)$ = position vector of the intersection of the detector array($\vec{p}_f$), and of a wavelength, $\lambda$, from an initial y
 
 $$p(D=d|\Lambda=\lambda \cap Y=y) = \begin{cases}
-T(\lambda, y) & lb_d <= ((\vec{S}(\lambda, y) - \vec{p}_a) \cdot \vec{v}_a) < ub_d \\
+T(\lambda, y) & lb_d <= ((\vec{S}(\lambda, y) - \vec{p}_a) \cdot \hat{v}_a) < ub_d \\
 0 & else \end{cases}$$
-
-$p(\Lambda=\lambda) = 1 / (\lambda_{max} - \lambda_{min})$
-
 
 
 \section{Derivations}\label{sec:derivations}
 
-$p(D=d|\Lambda=\lambda) = \int_Y\int_Z p(D=d|\Lambda=\lambda \cap Y=y)f(y - y_{mean}, z)dz dy$
+$p(D=d|\Lambda=\lambda) = \int_Y\int_Z p(D=d|\Lambda=\lambda \cap Y=y)f(y, z)dz dy$
 
 $p(D=d) = \int_\Lambda p(\Lambda=\lambda) p(D=d|\Lambda=\lambda)d\lambda$
-
-$\vec{dev} = \vec{p}_a + \vec{v}_a * l_a / 2 - (0, y_{mean})$
 
 $H(D) = -\sum_{d \in D}p(D=d) log_2[p(D=d)]$
 
@@ -73,9 +186,9 @@ $H(D|\Lambda) = -\sum_{d \in D}\int_{\Lambda}p(\Lambda=\lambda) p(D=d|\Lambda=\l
 
 \section{Optimization Objectives}\label{sec:optimization-objectives}
 
-spectromter size = $||\vec{dev}||$
+spectromter size = $||\vec{\delta}||$
 
-spectromter ray deviation = $| \vec{dev} \cdot (0, 1) | / ||\vec{dev}|| = | \sin(\theta_{deviation}) | $
+spectromter ray deviation = $| \vec{\delta} \cdot \hat{y} | / ||\vec{\delta}|| = | \sin(\theta_{deviation}) | $
 
 mutual information = $I(\Lambda; D) = H(D) - H(D|\Lambda)$
 
