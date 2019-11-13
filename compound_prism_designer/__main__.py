@@ -111,7 +111,10 @@ class Interactive:
 
     def export_zemax(self, filename):
         path = pathlib.Path(filename)
-        if self.selected_design is not None and not path.is_dir():
+        if path.is_dir():
+            print(f"Warning: given '{path}' is not a file, using default")
+            path = pathlib.Path.cwd().joinpath("default.zmx")
+        if self.selected_design is not None:
             zemax_design, zemax_file = create_zmx(
                 self.selected_design.compound_prism,
                 self.selected_design.detector_array,
@@ -127,7 +130,9 @@ manager = plt.get_current_fig_manager()
 manager.set_window_title("Compound Prism Spectrometer Designer")
 spec_file = pathlib.Path(QFileDialog.getOpenFileName(
     caption="Select design specification", filter="Configuration files (*.toml);;All files (*)")[0])
-assert spec_file.is_file()
+if not spec_file.is_file():
+    print(f"Warning: given '{spec_file}' is not a file, using default")
+    spec_file = pathlib.Path.cwd().joinpath("design_config.toml")
 spec = DesignConfig.from_dict(toml.load(spec_file))
 
 interactive = Interactive(fig, spec)
