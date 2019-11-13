@@ -1,9 +1,9 @@
 use crate::glasscat::Glass;
 use crate::ray::*;
 use ordered_float::NotNan;
-use rand::prelude::*;
-use rand::seq::SliceRandom;
+use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
+use crate::BUNDLED_CATALOG;
 
 #[derive(Constructor, Debug, Clone)]
 pub struct OptimizationConfig {
@@ -47,41 +47,62 @@ pub struct DesignConfig {
 }
 
 impl DesignConfig {
-    pub fn optimize(&self, glass_catalog: Box<[(String, Glass)]>) -> Box<[Design]> {
-        let config = Config {
-            max_prism_count: self.compound_prism.max_count,
-            wavelength_range: self.gaussian_beam.wavelength_range,
-            beam_width: self.gaussian_beam.width,
-            max_prism_height: self.compound_prism.max_height,
-            prism_width: self.compound_prism.width,
-            detector_array_length: self.detector_array.length,
-            detector_array_min_ci: self.detector_array.max_incident_angle.to_radians().cos(),
-            detector_array_bin_bounds: self.detector_array.bin_bounds.clone().to_vec().into(),
-            glass_catalog,
+    fn parameter_count(&self) -> usize {
+        3 * self.compound_prism.max_count + 6
+    }
+
+    fn array_to_params(&self, params: &[f64]) -> (CompoundPrism, DetectorArray, GaussianBeam) {
+        let params = Params::from_slice(params, self.compound_prism.max_count);
+        let cmpnd = CompoundPrism::new(
+            params.glass_indices().map(|i| &BUNDLED_CATALOG[i].1),
+            &params.angles,
+            &params.lengths,
+            params.curvature,
+            params.prism_height,
+            self.compound_prism.width,
+        );
+        let detarr = DetectorArray::new(
+            self.detector_array.bin_bounds.as_ref().into(),
+            self.detector_array.max_incident_angle.to_radians().cos(),
+            params.detector_array_angle,
+            self.detector_array.length,
+        );
+        let beam = GaussianBeam {
+            width: self.gaussian_beam.width,
+            y_mean: params.y_mean,
+            w_range: self.gaussian_beam.wavelength_range,
         };
-        let mut optimizer = AGE::new(
-            &config,
+        (cmpnd, detarr, beam)
+    }
+
+    pub fn optimize(&self, _glass_catalog: Option<Box<[(String, Glass)]>>) -> Box<[Design]> {
+        if let Some(ref _c) = _glass_catalog {
+            unimplemented!("Custom glass catalogs have not been implemented yet")
+        }
+        let mutation_probability = 1_f64 / (self.parameter_count() as f64);
+        let archive = optimize(
+            self,
+            self.optimizer.iteration_count,
             self.optimizer.population_size,
             self.optimizer.offspring_size,
             self.optimizer.seed,
-            self.optimizer.epsilons,
             self.optimizer.crossover_distribution_index,
             self.optimizer.mutation_distribution_index,
-            self.optimizer.mutation_probability,
+            mutation_probability,
         );
-        for _ in 0..self.optimizer.iteration_count {
-            optimizer.iterate()
-        }
-        optimizer.archive.into_iter()
+        archive.into_iter()
             .map(|s| {
-                let params = Params::from_slice(&s.params, self.compound_prism.max_count);
-                let (g, _, d, b) = config.array_to_params(&s.params);
-                let detpos = detector_array_positioning(&g, &d, &b)
+                let (cmpnd, detarr, beam) = self.array_to_params(&s.params);
+                let detpos = detector_array_positioning(&cmpnd, &detarr, &beam)
                     .expect("Only valid designs should result from optimization");
+                let params = Params::from_slice(&s.params, self.compound_prism.max_count);
                 let compound_prism = CompoundPrismDesign {
                     glasses: params
                         .glass_indices()
-                        .map(|i| config.glass_catalog[i].clone())
+                        .map(|i| {
+                            let (n, g) = &BUNDLED_CATALOG[i];
+                            (*n, g.clone())
+                        })
                         .collect(),
                     angles: params.angles.to_owned().into_boxed_slice(),
                     lengths: params.lengths.to_owned().into_boxed_slice(),
@@ -115,7 +136,7 @@ impl DesignConfig {
 
 #[derive(Constructor, Debug, Clone)]
 pub struct CompoundPrismDesign {
-    pub glasses: Box<[(String, Glass)]>,
+    pub glasses: Box<[(&'static str, Glass)]>,
     pub angles: Box<[f64]>,
     pub lengths: Box<[f64]>,
     pub curvature: f64,
@@ -192,121 +213,6 @@ impl<'s> Params<'s> {
     }
 }
 
-/// Specification structure for the configuration of the Spectrometer Designer
-#[derive(Constructor, Debug, Clone)]
-struct Config {
-    max_prism_count: usize,
-    wavelength_range: (f64, f64),
-    beam_width: f64,
-    max_prism_height: f64,
-    prism_width: f64,
-    detector_array_length: f64,
-    detector_array_min_ci: f64,
-    detector_array_bin_bounds: Box<[[f64; 2]]>,
-    glass_catalog: Box<[(String, Glass)]>,
-}
-
-impl Config {
-    fn params_count(&self) -> usize {
-        3 * self.max_prism_count + 6
-    }
-
-    fn param_bounds(&self) -> Box<[(f64, f64)]> {
-        let prism_count_bounds = (1., (1 + self.max_prism_count) as f64);
-        let prism_height_bounds = (0.001, self.max_prism_height);
-        let glass_bounds = (0., (self.glass_catalog.len() - 1) as f64);
-        let angle_bounds = (-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
-        let length_bounds = (0., self.max_prism_height);
-        let curvature_bounds = (0.001, 1.0);
-        let normalized_y_mean_bounds = (0., 1.0);
-        let det_arr_angle_bounds = (-std::f64::consts::PI, std::f64::consts::PI);
-
-        let mut bounds = Vec::with_capacity(self.params_count());
-        bounds.push(prism_count_bounds);
-        bounds.push(prism_height_bounds);
-        for _ in 0..self.max_prism_count {
-            bounds.push(glass_bounds)
-        }
-        for _ in 0..self.max_prism_count + 1 {
-            bounds.push(angle_bounds)
-        }
-        for _ in 0..self.max_prism_count {
-            bounds.push(length_bounds)
-        }
-        bounds.push(curvature_bounds);
-        bounds.push(normalized_y_mean_bounds);
-        bounds.push(det_arr_angle_bounds);
-        bounds.into_boxed_slice()
-    }
-
-    fn array_to_params<'p, 's: 'p>(
-        &'s self,
-        params: &'p [f64],
-    ) -> (
-        CompoundPrism,
-        impl 'p + Iterator<Item = &'s str>,
-        DetectorArray,
-        GaussianBeam,
-    ) {
-        assert_eq!(self.params_count(), params.len());
-        let params = Params::from_slice(params, self.max_prism_count);
-        let cmpnd = CompoundPrism::new(
-            params.glass_indices().map(|i| &self.glass_catalog[i].1),
-            &params.angles,
-            &params.lengths,
-            params.curvature,
-            params.prism_height,
-            self.prism_width,
-        );
-        let cat = &self.glass_catalog;
-        let glass_names = params.glass_indices().map(move |i| cat[i].0.as_str());
-        let detarr = DetectorArray::new(
-            self.detector_array_bin_bounds.as_ref().into(),
-            self.detector_array_min_ci,
-            params.detector_array_angle,
-            self.detector_array_length,
-        );
-        let beam = GaussianBeam {
-            width: self.beam_width,
-            y_mean: params.y_mean,
-            w_range: self.wavelength_range,
-        };
-        (cmpnd, glass_names, detarr, beam)
-    }
-
-    fn evaluate(&self, params: &[f64]) -> Option<DesignFitness> {
-        let (c, _, d, g) = self.array_to_params(params);
-        fitness(&c, &d, &g)
-            .ok()
-            .filter(|f| f.size <= 30. * self.max_prism_height && f.info >= 0.1)
-    }
-}
-
-fn approx_quality(a: &DesignFitness, p: &DesignFitness) -> f64 {
-    (a.size - p.size)
-        .max(p.info - a.info)
-        .max(a.deviation - p.deviation)
-}
-
-fn min2_approx_quality<'a>(
-    a: &DesignFitness,
-    ps: impl Iterator<Item = (usize, &'a DesignFitness)>,
-) -> [(usize, f64); 2] {
-    // Steps 13 - 16
-    let mut min1 = (0, std::f64::INFINITY);
-    let mut min2 = (0, std::f64::INFINITY);
-    for (i, p) in ps {
-        let alpha = approx_quality(a, p);
-        if alpha < min1.1 {
-            min2 = min1;
-            min1 = (i, alpha);
-        } else if alpha < min2.1 {
-            min2 = (i, alpha);
-        }
-    }
-    [min1, min2]
-}
-
 /// Simulated Binary Crossover Operator
 #[derive(Debug)]
 struct SBX {
@@ -357,72 +263,113 @@ impl PM {
 }
 
 #[derive(Clone, Debug)]
-struct Soln {
+struct Soln<F> {
     params: Box<[f64]>,
-    fitness: DesignFitness,
+    fitness: F,
 }
 
-/// Approximation-Guided Evolutionary Multi-Objective Optimizer
-/// https://www.ijcai.org/Proceedings/11/Papers/204.pdf
-/// https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf
-#[derive(Debug)]
-struct AGE<'c> {
+trait MultiObjectiveProblem: Send + Sync {
+    type Fitness: Clone + Send + Sync;
+
+    fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool>;
+    fn parameter_bounds(&self) -> Box<[(f64, f64)]>;
+    fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness>;
+}
+
+fn add_to_archive<P: MultiObjectiveProblem>(
+    problem: &P,
+    archive: &mut Vec<Soln<P::Fitness>>,
+    child: &Soln<P::Fitness>)
+{
+    let mut dominated = false;
+    archive.retain(
+        |a| match problem.epsilon_dominance(&a.fitness, &child.fitness) {
+            Some(true) => {
+                dominated = true;
+                true
+            }
+            Some(false) => false,
+            None => true,
+        },
+    );
+    if !dominated {
+        archive.push(child.clone());
+    }
+}
+
+fn optimize<P: MultiObjectiveProblem>(
+    problem: &P,
+    iteration_count: usize,
     population_size: usize,
     offspring_size: usize,
-    problem: &'c Config,
-    param_bounds: Box<[(f64, f64)]>,
-    archive: Vec<Soln>,
-    population: Vec<Soln>,
-    rng: PRng,
-    epsilons: [f64; 3],
-    sbx: SBX,
-    pm: PM,
-}
-
-impl<'c> AGE<'c> {
-    fn new(
-        problem: &'c Config,
-        population_size: usize,
-        offspring_size: usize,
-        seed: u64,
-        epsilons: [f64; 3],
-        crossover_distribution_index: f64,
-        mutation_distribution_index: f64,
-        mutation_probability: f64,
-    ) -> Self {
-        let mut rng = PRng::seed_from_u64(seed);
-        let bounds = problem.param_bounds();
-        let mut population = Vec::with_capacity(population_size);
-        while population.len() < population_size {
-            let params = bounds
-                .iter()
-                .map(|(l, u)| rng.gen_range(l, u))
-                .collect::<Box<_>>();
-            if let Some(fitness) = problem.evaluate(&params) {
-                population.push(Soln { params, fitness });
-            }
-        }
-        let archive = population.clone();
-        Self {
-            problem,
-            population_size,
-            offspring_size,
-            param_bounds: bounds,
-            archive,
-            population,
-            rng,
-            epsilons,
-            sbx: SBX {
-                distribution_index: crossover_distribution_index,
-            },
-            pm: PM {
-                distribution_index: mutation_distribution_index,
-                probability: mutation_probability,
-            },
+    seed: u64,
+    crossover_distribution_index: f64,
+    mutation_distribution_index: f64,
+    mutation_probability: f64
+) -> Vec<Soln<P::Fitness>>
+{
+    let mut rng = PRng::seed_from_u64(seed);
+    let variator = SBX {
+        distribution_index: crossover_distribution_index,
+    };
+    let mutator = PM {
+        distribution_index: mutation_distribution_index,
+        probability: mutation_probability,
+    };
+    let bounds = problem.parameter_bounds();
+    let mut population = Vec::with_capacity(population_size);
+    while population.len() < population_size {
+        let params = bounds
+            .iter()
+            .map(|(l, u)| rng.gen_range(l, u))
+            .collect::<Box<_>>();
+        if let Some(fitness) = problem.evaluate(&params) {
+            population.push(Soln { params, fitness });
         }
     }
+    let mut archive = Vec::with_capacity(population_size);
+    for p in population.iter() {
+        add_to_archive(problem, &mut archive, p);
+    }
 
-    fn epsilon_dominance(eps: &[f64; 3], lhs: &DesignFitness, rhs: &DesignFitness) -> Option<bool> {
+    for _ in 0..iteration_count {
+        let mut offspring = Vec::with_capacity(offspring_size);
+        while offspring.len() < offspring_size {
+            // TODO: Selector should be tournament based off crowding distance
+            let len = archive.len();
+            let i = rng.gen_range(0, len);
+            let j = (i + rng.gen_range(0, len - 1)) % len;
+            let p1 = &archive[i];
+            let p2 = &archive[j];
+
+            let params: Box<_> = p1
+                .params
+                .iter()
+                .zip(p2.params.iter())
+                .zip(bounds.iter())
+                .map(|((&x1, &x2), &(lb, ub))| {
+                    let xnew = variator.crossover(x1, x2, lb, ub, &mut rng);
+                    mutator.mutate(xnew, lb, ub, &mut rng)
+                })
+                .collect();
+            if let Some(fitness) = problem.evaluate(&params) {
+                offspring.push(Soln { params, fitness });
+            }
+        }
+        // Steps 9 to 11
+        for o in offspring.iter() {
+            add_to_archive(problem, &mut archive, o);
+        }
+    }
+    archive
+}
+
+
+impl MultiObjectiveProblem for DesignConfig {
+    type Fitness = DesignFitness;
+
+    fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool> {
+        let eps = &self.optimizer.epsilons;
         let box_id = |f: &DesignFitness| {
             [
                 (f.size / eps[0]).floor(),
@@ -455,108 +402,38 @@ impl<'c> AGE<'c> {
         }
     }
 
-    fn add_to_archive(&mut self, child: &Soln) {
-        let mut dominated = false;
-        let eps = &self.epsilons;
-        self.archive.retain(
-            |a| match AGE::epsilon_dominance(eps, &a.fitness, &child.fitness) {
-                Some(true) => {
-                    dominated = true;
-                    true
-                }
-                Some(false) => false,
-                None => true,
-            },
-        );
-        if !dominated {
-            self.archive.push(child.clone());
+    fn parameter_bounds(&self) -> Box<[(f64, f64)]> {
+        let prism_count_bounds = (1., (1 + self.compound_prism.max_count) as f64);
+        let prism_height_bounds = (0.001, self.compound_prism.max_height);
+        let glass_bounds = (0., (BUNDLED_CATALOG.len() - 1) as f64);
+        let angle_bounds = (-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
+        let length_bounds = (0., self.compound_prism.max_height);
+        let curvature_bounds = (0.001, 1.0);
+        let normalized_y_mean_bounds = (0., 1.0);
+        let det_arr_angle_bounds = (-std::f64::consts::PI, std::f64::consts::PI);
+
+        let mut bounds = Vec::with_capacity(self.parameter_count());
+        bounds.push(prism_count_bounds);
+        bounds.push(prism_height_bounds);
+        for _ in 0..self.compound_prism.max_count {
+            bounds.push(glass_bounds)
         }
+        for _ in 0..self.compound_prism.max_count + 1 {
+            bounds.push(angle_bounds)
+        }
+        for _ in 0..self.compound_prism.max_count {
+            bounds.push(length_bounds)
+        }
+        bounds.push(curvature_bounds);
+        bounds.push(normalized_y_mean_bounds);
+        bounds.push(det_arr_angle_bounds);
+        bounds.into_boxed_slice()
     }
 
-    fn iterate(&mut self) {
-        // Steps 4 to 8
-        let mut offspring = Vec::with_capacity(self.offspring_size);
-        while offspring.len() < self.offspring_size {
-            // TODO: Selector should be tournament based off crowding distance
-            let mut parents = self.population.choose_multiple(&mut self.rng, 2);
-            let p1 = parents.next().unwrap();
-            let p2 = parents.next().unwrap();
-
-            let bounds = &self.param_bounds;
-            let rng = &mut self.rng;
-            let sbx = &self.sbx;
-            let pm = &self.pm;
-            let params: Box<_> = p1
-                .params
-                .iter()
-                .zip(p2.params.iter())
-                .zip(bounds.iter())
-                .map(|((&x1, &x2), &(lb, ub))| {
-                    let xnew = sbx.crossover(x1, x2, lb, ub, rng);
-                    pm.mutate(xnew, lb, ub, rng)
-                })
-                .collect();
-            if let Some(fitness) = self.problem.evaluate(&params) {
-                offspring.push(Soln { params, fitness });
-            }
-        }
-        // Steps 9 to 11
-        for o in offspring.iter() {
-            self.add_to_archive(o);
-        }
-        self.population.append(&mut offspring);
-        // Steps 12 - 16
-        let mut p1a1p2a2: Box<_> = self
-            .archive
-            .iter()
-            .map(|a| {
-                (min2_approx_quality(
-                    &a.fitness,
-                    self.population.iter().map(|s| &s.fitness).enumerate(),
-                ))
-            })
-            .collect();
-        // Steps 12 - 23
-        let mut betas = std::collections::BinaryHeap::new();
-        for (i, _) in self.population.iter().enumerate() {
-            if let Some(a2) = p1a1p2a2
-                .iter()
-                .filter_map(|[(p1, _), (_, a2)]| if p1 == &i { Some(*a2) } else { None })
-                .max_by(|a2l, a2r| a2l.partial_cmp(a2r).unwrap())
-            {
-                betas.push((NotNan::new(a2).unwrap(), i));
-            }
-        }
-        // Steps 12 - 23
-        let mut removed_indices = vec![false; self.population.len()];
-        let mut plen = self.population.len();
-        while plen > self.population_size {
-            let (_, p_star) = betas.pop().unwrap();
-            if !removed_indices[p_star] {
-                removed_indices[p_star] = true;
-                plen -= 1;
-                for (i, a) in self.archive.iter().enumerate() {
-                    let [(p1, _), _] = p1a1p2a2[i];
-                    if p1 == p_star {
-                        let new = min2_approx_quality(
-                            &a.fitness,
-                            self.population
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| !removed_indices[*i])
-                                .map(|(i, p)| (i, &p.fitness)),
-                        );
-                        let [(p1, _), (_, a2)] = new;
-                        betas.push((NotNan::new(a2).unwrap(), p1));
-                        p1a1p2a2[i] = new;
-                    }
-                }
-            }
-        }
-        for (i, b) in removed_indices.into_iter().enumerate().rev() {
-            if b {
-                self.population.swap_remove(i);
-            }
-        }
+    fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
+        let (cmpnd, detarr, beam) = self.array_to_params(params);
+        fitness(&cmpnd, &detarr, &beam)
+            .ok()
+            .filter(|f| f.size <= 30. * self.compound_prism.max_height)
     }
 }

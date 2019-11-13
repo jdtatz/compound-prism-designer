@@ -1,8 +1,9 @@
 [build-system]
-requires = ["maturin", "numpy~= 1.17"]
+requires = ["maturin"]
 build-backend = "maturin"
 
 [tool.maturin]
 bindings = "pyo3"
 cargo-extra-args = "--features pyext"
-rustc-extra-args = "-C target-feature=+fma"
+rustc-extra-args = "-C target-feature=+fma -C target-cpu=native"
+manylinux = "off"

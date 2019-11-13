@@ -90,7 +90,7 @@ impl From<CompoundPrismDesign> for PyCompoundPrism {
             glasses: design.glasses
                 .into_vec()
                 .into_iter()
-                .map(|(name, glass)| PyGlass { name, glass })
+                .map(|(name, glass)| PyGlass { name: name.to_string(), glass })
                 .collect(),
             angles: design.angles.into_vec(),
             lengths: design.lengths.into_vec(),
@@ -284,20 +284,18 @@ fn optimize(
     catalog: Option<&PyAny>,
     design_config: DesignConfig,
 ) -> PyResult<Vec<PyDesign>> {
-    let glass_catalog = if let Some(catalog) = catalog {
+    if let Some(ref _c) = catalog {
+        return Err(pyo3::exceptions::NotImplementedError::py_err("Custom glass catalogs have not been implemented yet"))
+    }
+    let glass_catalog = catalog.map(|catalog| {
         catalog
             .iter()?
             .map(|p| {
                 let pg = p?.downcast_ref::<PyGlass>()?;
                 Ok((pg.name.clone(), pg.glass.clone()))
             })
-            .collect::<PyResult<_>>()?
-    } else {
-        BUNDLED_CATALOG
-            .iter()
-            .map(|(s, g)| (s.to_string(), g.clone()))
-            .collect()
-    };
+            .collect::<PyResult<_>>()
+    }).transpose()?;
     let designs = py.allow_threads(|| {
         design_config.optimize(glass_catalog)
     });

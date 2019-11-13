@@ -6,28 +6,28 @@ length-unit = "mm"
 # https://www.ijcai.org/Proceedings/11/Papers/204.pdf
 # https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf
 [optimizer]
-iteration-count = 150
-population-size = 512
+iteration-count = 1024
+population-size = 10000
 offspring-size = 512
-crossover-distribution-index = 2
-mutation-distribution-index = 0.5
-mutation-probability = 0.25
-seed = 12345
-epsilons = [5.0, 0.01, 0.05]
+crossover-distribution-index = 8
+mutation-distribution-index = 2
+mutation-probability = 0.2
+seed = 8094235
+epsilons = [2.5, 0.005, 0.05]
 
 # Compound prism design specification
 [compound-prism]
 # Max number of prisms to use in design
 max-count = 6
 # Max height of the prisms in [length-unit]
-max-height = 30
+max-height = 20
 # Width of the prisms in [length-unit]
 width = 7
 
 # Incoming gaussian beam properties
 [gaussian-beam]
 # 1/e^2 beam width in [length-unit]
-width = 1.8
+width = 3.2
 # Minimum & Maximum wavelength in [micrometers]
 wavelength-range = [0.5, 0.82]
 
