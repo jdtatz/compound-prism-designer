@@ -3,6 +3,7 @@
 extern crate derive_more;
 
 mod erf;
+mod qrng;
 mod glasscat;
 pub mod optimizer;
 #[cfg(feature = "pyext")]

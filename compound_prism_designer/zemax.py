@@ -27,7 +27,7 @@ def create_zmx(prism: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam):
     zemax_design = f"""\
 Zemax Rows with Aperture pupil diameter = {beam.width} & Wavelengths from {wmin} to {wmax}: 
     Coord break: decenter y = {prism.height / 2 - beam.y_mean}
-    {f"{newline}        ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {prism.height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip((g.name for g in prism.glasses), ytans, thickness))}
+    {f"{newline}    ".join(f"Tilted: thickness = {t} material = {g} semi-diameter = {prism.height / 2} x tan = 0 y tan = {-y}" for g, y, t in zip((g.name for g in prism.glasses), ytans, thickness))}
     Coord break: tilt about x = {-np.rad2deg(prism.angles[-1])}
     Biconic: radius = {-lens_radius} semi-diameter = {chord / 2} conic = 0 x_radius = 0 x_conic = 0
     Coord break: tilt about x = {np.rad2deg(prism.angles[-1])}

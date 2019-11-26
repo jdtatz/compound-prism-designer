@@ -3,16 +3,19 @@
 \usepackage{amsmath}
 \begin{document}
 
+\section{Why A CompoundPrism Spectrometer}\label{sec:why-a-compoundprism-spectrometer}
+waverlnegth dependent n => good dispersion
+good transmiission for both s & p polarizastion
+good for stright line optics / can minimize deviation
+
 \section{System Parametrization}\label{sec:system-parametrization}
 $N$ = prism count
 
-$\hat{n}_i = R(\theta_i) \cdot -\hat{x}$ = normal unit vector for planar inter-media surface $i$
+${\theta_1, \dots \theta_N }$ =  angle of deviation from x-axis for each inter-media planar prism surface
 
-$\vec{p}_{0, i}$ = mid-point vector for planar inter-media surface $i$
+$\theta_c$ =  angle of deviation from x-axis for the chord of the lens-like inter-media prism surface
 
-$\hat{n}_c = R(\theta_c) \cdot -\hat{x}$ = normal unit vector for the chord of the lens inter-media surface
-
-$\vec{p}_{0, c}$ = mid-point vector for the chord of the lens inter-media surface
+${\ell_1, \dots \ell_N }$ = extension length for each prism
 
 $h$ = prism height
 
@@ -30,8 +33,6 @@ $\mu_b$ = mean beam position on y-axis
 
 $w_b = 1 / e^2$ {beam width}
 
-$\vec{\delta} = \vec{p}_a + \frac{1}{2} \ell_a \hat{v}_a - \mu_b \hat{y}$ = spectromter footprint vector
-
 $D$ = set of detection bins composing the detector array
 
 $\forall d \in D, [lb_d, ub_d) \equiv$ bounds of the detection bin, $d$
@@ -44,8 +45,16 @@ $Y \sim \mathcal {N}(\mu=\mu_b, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [0, h] $
 
 $Z \sim \mathcal {N}(\mu=0, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [-\ell_z / 2, \ell_z / 2]$
 
-
 \section{Ray Propagation}\label{sec:ray-propagation}
+$\hat{n}_i = R(\theta_i) \cdot -\hat{x}$ = normal unit vector for planar inter-media surface $i$
+
+$\vec{p}_{0, i}$ = mid-point vector for planar inter-media surface $i$
+
+$\hat{n}_c = R(\theta_c) \cdot -\hat{x}$ = normal unit vector for the chord of the lens inter-media surface
+
+$\vec{p}_{0, c}$ = mid-point vector for the chord of the lens inter-media surface
+
+
 \subsection{Refraction}\label{subsec:refraction}
 $\hat{n}$ = inter-media surface normal vector towards current media
 
@@ -69,7 +78,6 @@ $T_{s} = 1 - | \frac{n_1 c_i - n_2 c_t}{n_1 c_i + n_2 c_t} |^2$
 
 $T_{p} = 1 - | \frac{n_1 c_t - n_2 c_i}{n_1 c_t + n_2 c_i} |^2$
 
-
 \subsection{Ray-Plane Intersection}\label{subsec:ray-plane-intersection}
 $\hat{l}$ = light ray direction unit vector
 
@@ -84,7 +92,6 @@ if $\hat{l} \cdot \hat{n} = 0 \to $ No intersection between the ray and plane
 $d = \frac{(\vec{p}_0 - \vec{o}) \cdot \hat{n}}{\hat{l} \cdot \hat{n}}$ = distance between the ray's origin and the point of intersection
 
 $\vec{p} = \vec{o} + d\hat{l}$ = point of intersection
-
 
 \subsection{Ray-Arc Intersection}\label{subsec:ray-arc-intersection}
 \subsubsection{Circular Arc Parametrization}
@@ -108,7 +115,6 @@ $\vec{c} = \vec{p}_0 + a \hat{n}$ = center
 
 $\vec{p}_1 = \vec{p}_0 - s \hat{n}$ = mid-point of the arc
 
-
 \subsubsection{Ray Intersection}
 $\hat{l}$ = light ray direction unit vector
 
@@ -123,7 +129,7 @@ $\vec{p} = \vec{o} + d\hat{l}$ = point of intersection
 
 if $||\vec{p} - \vec{p}_1||^2 > (s^2 + (\frac{1}{2}\ell_c)^2) \to $ No intersection between the ray and arc
 
-\subsection{Parametrization \& Propagation details}
+\subsection{Parametrization \& Propagation details}\label{subsec:parametrization&propagation-details}
 $\hat{l}_0 = \hat{x}$ = incoming light ray direction unit vector
 
 $y_0$ = initial y-axis position of the incoming light ray
@@ -133,17 +139,17 @@ $\vec{o}_0 = y_0\hat{y}$ = origin of the incoming light ray
 $n_0 = n_f = 1$ = index of refraction of air outside the compound prism
 
 \[\hat{v}_{\text{refract}, i} = \begin{cases}
-  f_{\text{refract}}(\hat{l}=\hat{l}_i, \hat{n}=\hat{n}_{i+1}, n_1=n_i, n_2=n_{i+1}) & 0 \le i < N \\
-  f_{\text{refract}}(\hat{l}=\hat{l}_i, \hat{n}=\frac{\vec{c} - \vec{p}_i}{||\vec{c} - \vec{p}_i||}, n_1=n_i, n_2=n_f) & i = N \\
-\end{cases}\]
+		f_{\text{refract}}(\hat{l}=\hat{l}_i, \hat{n}=\hat{n}_{i+1}, n_1=n_i, n_2=n_{i+1})                                   & 0 \le i < N \\
+		f_{\text{refract}}(\hat{l}=\hat{l}_i, \hat{n}=\frac{\vec{c} - \vec{p}_i}{||\vec{c} - \vec{p}_i||}, n_1=n_i, n_2=n_f) & i = N       \\
+	\end{cases}\]
 
 $\hat{l}_i = \hat{v}_{\text{refract}, i - 1}$
 
 \[\vec{p}_i = \begin{cases}
-f_{\text{ray-plane intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_{i+1}, \vec{p}_0=\vec{p}_{0, i+1}) & 0 \le i < N \\
-f_{\text{ray-arc intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_c, \vec{p}_0=\vec{p}_{0, c}, \ell_c=h/\cos{\theta_{c}}) & i = N \\
-f_{\text{ray-plane intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_{a}, \vec{p}_0=\vec{p}_a) & i = N + 1 \\
-\end{cases}\]
+		f_{\text{ray-plane intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_{i+1}, \vec{p}_0=\vec{p}_{0, i+1})                    & 0 \le i < N \\
+		f_{\text{ray-arc intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_c, \vec{p}_0=\vec{p}_{0, c}, \ell_c=h/\cos{\theta_{c}}) & i = N       \\
+		f_{\text{ray-plane intersection}}(\hat{l}=\hat{l}_i, \vec{o}=\vec{o}_i, \hat{n}=\hat{n}_{a}, \vec{p}_0=\vec{p}_a)                             & i = N + 1   \\
+	\end{cases}\]
 
 if $\exists \vec{p}_{i \le N}, \neg (0 \le \vec{p}_i \cdot \hat{y} \le h) \to$ fail due to the ray leaving the prism
 
@@ -163,18 +169,19 @@ $T = \frac{1}{2} (T_s + T_p)$
 
 if the ray propagation fails at any step $\to T = 0$
 
-
-\subsection{Propagation results}
+\subsection{Propagation results}\label{subsec:propagation-results}
 $T(\lambda, y)$ = transmittance probability of a wavelength, $\lambda$, from an initial y, to the intersection with the detector array
 
 $\vec{S}(\lambda, y)$ = position vector of the intersection of the detector array($\vec{p}_f$), and of a wavelength, $\lambda$, from an initial y
 
-$$p(D=d|\Lambda=\lambda \cap Y=y) = \begin{cases}
-T(\lambda, y) & lb_d <= ((\vec{S}(\lambda, y) - \vec{p}_a) \cdot \hat{v}_a) < ub_d \\
-0 & else \end{cases}$$
-
+\[p(D=d|\Lambda=\lambda \cap Y=y) = \begin{cases}
+		T(\lambda, y) & lb_d <= ((\vec{S}(\lambda, y) - \vec{p}_a) \cdot \hat{v}_a) < ub_d \\
+		0             & else
+	\end{cases}\]
 
 \section{Derivations}\label{sec:derivations}
+
+$\vec{\delta} = \vec{p}_a + \frac{1}{2} \ell_a \hat{v}_a - \mu_b \hat{y}$ = spectromter footprint vector
 
 $p(D=d|\Lambda=\lambda) = \int_Y\int_Z p(D=d|\Lambda=\lambda \cap Y=y)f(y, z)dz dy$
 

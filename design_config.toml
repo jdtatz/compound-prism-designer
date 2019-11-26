@@ -1,19 +1,16 @@
 # The unit of legth, such as cm or in, (Optional, default="mm")
 length-unit = "mm"
 
-# Genetic algorithm(AGEII) optimizer properties
-# See links for details
-# https://www.ijcai.org/Proceedings/11/Papers/204.pdf
-# https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf
+# Genetic algorithm optimization properties
 [optimizer]
-iteration-count = 1024
-population-size = 10000
-offspring-size = 512
+iteration-count = 100
+population-size = 256
+offspring-size = 128
 crossover-distribution-index = 8
-mutation-distribution-index = 2
-mutation-probability = 0.2
-seed = 8094235
-epsilons = [2.5, 0.005, 0.05]
+mutation-distribution-index = 20
+mutation-probability = 0.05
+seed = 4068897654
+epsilons = [2.5, 0.02, 0.05]
 
 # Compound prism design specification
 [compound-prism]
