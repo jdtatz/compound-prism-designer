@@ -1,6 +1,5 @@
 use crate::glasscat::Glass;
 use crate::ray::*;
-use ordered_float::NotNan;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
 use crate::BUNDLED_CATALOG;
@@ -73,6 +72,10 @@ impl DesignConfig {
             w_range: self.gaussian_beam.wavelength_range,
         };
         (cmpnd, detarr, beam)
+    }
+
+    pub fn maximum_detector_information(&self) -> f64 {
+        (self.detector_array.bin_bounds.len() as f64).log2()
     }
 
     pub fn optimize(&self, _glass_catalog: Option<Box<[(String, Glass)]>>) -> Box<[Design]> {
@@ -268,19 +271,20 @@ struct Soln<F> {
     fitness: F,
 }
 
-trait MultiObjectiveProblem: Send + Sync {
-    type Fitness: Clone + Send + Sync;
+trait MultiObjectiveMinimizationProblem: Send + Sync {
+    type Fitness: Clone + PartialEq + Send + Sync;
 
+    fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64;
     fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool>;
     fn parameter_bounds(&self) -> Box<[(f64, f64)]>;
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness>;
 }
 
-fn add_to_archive<P: MultiObjectiveProblem>(
+fn add_to_archive<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     archive: &mut Vec<Soln<P::Fitness>>,
-    child: &Soln<P::Fitness>)
-{
+    child: &Soln<P::Fitness>
+) -> bool {
     let mut dominated = false;
     archive.retain(
         |a| match problem.epsilon_dominance(&a.fitness, &child.fitness) {
@@ -295,9 +299,10 @@ fn add_to_archive<P: MultiObjectiveProblem>(
     if !dominated {
         archive.push(child.clone());
     }
+    !dominated
 }
 
-fn optimize<P: MultiObjectiveProblem>(
+fn optimize<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     iteration_count: usize,
     population_size: usize,
@@ -356,7 +361,6 @@ fn optimize<P: MultiObjectiveProblem>(
                 offspring.push(Soln { params, fitness });
             }
         }
-        // Steps 9 to 11
         for o in offspring.iter() {
             add_to_archive(problem, &mut archive, o);
         }
@@ -365,22 +369,168 @@ fn optimize<P: MultiObjectiveProblem>(
 }
 
 
-impl MultiObjectiveProblem for DesignConfig {
+fn optimize_apaes11<P: MultiObjectiveMinimizationProblem>(
+    problem: &P,
+    iteration_count: usize,
+    population_size: usize,
+    offspring_size: usize,
+    seed: u64,
+    _crossover_distribution_index: f64,
+    mutation_distribution_index: f64,
+    mutation_probability: f64
+) -> Vec<Soln<P::Fitness>>
+{
+    let mut rng = PRng::seed_from_u64(seed);
+    let mutator = PM {
+        distribution_index: mutation_distribution_index,
+        probability: mutation_probability,
+    };
+    let bounds = problem.parameter_bounds();
+
+    let mut optimal = loop {
+        let params = bounds
+            .iter()
+            .map(|(l, u)| rng.gen_range(l, u))
+            .collect::<Box<_>>();
+        if let Some(fitness) = problem.evaluate(&params) {
+            break Soln { params, fitness };
+        }
+    };
+    let mut archive = Vec::with_capacity(population_size);
+    archive.push(optimal.clone());
+    let mut failures = 0;
+    const MAX_FAILURES: usize = 50;
+
+    // temporary
+    let iteration_count = iteration_count * offspring_size + population_size;
+    let mut t0 = std::time::Instant::now();
+    let mut fg = 0;
+    let mut f = 0;
+    let mut s = 0;
+    let mut so = 0;
+    let mut sc = 0;
+    for i in 0..iteration_count {
+        if failures >= MAX_FAILURES {
+            failures = 0;
+            optimal = loop {
+                let params = bounds
+                    .iter()
+                    .map(|(l, u)| rng.gen_range(l, u))
+                    .collect::<Box<_>>();
+                if let Some(fitness) = problem.evaluate(&params) {
+                    let test_soln = Soln { params, fitness };
+                    if add_to_archive(problem, &mut archive, &test_soln) {
+                        break test_soln;
+                    }
+                }
+                println!("Failure to generate new optimal");
+                fg += 1;
+            };
+        };
+        let params: Box<_> = optimal
+            .params
+            .iter()
+            .zip(bounds.iter())
+            .map(|(&x, &(lb, ub))| mutator.mutate(x, lb, ub, &mut rng))
+            .collect();
+        let child = if let Some(fitness) = problem.evaluate(&params) {
+            Soln { params, fitness }
+        } else {
+            failures += 1;
+            continue;
+        };
+        match problem.epsilon_dominance(&optimal.fitness, &child.fitness) {
+            Some(true) => {
+                println!("Failure");
+                failures += 1;
+                f += 1;
+            },
+            Some(false) => {
+                println!("Success");
+                failures = 0;
+                optimal = child;
+                add_to_archive(problem, &mut archive, &optimal);
+                s += 1;
+            },
+            None => {
+                // TODO temp
+                add_to_archive(problem, &mut archive, &child);
+                //if add_to_archive(problem, &mut archive, &child) {
+                failures = 0;
+                // TODO: choose new optimal using crowding distance metric
+                // temp => choose random
+                let mut dist1 = std::f64::INFINITY;
+                let mut dist2 = std::f64::INFINITY;
+                for a in archive.iter() {
+                    if a.fitness != optimal.fitness || a.fitness != child.fitness {
+                        dist1 = dist1.min(problem.grid_distance(&a.fitness, &optimal.fitness));
+                        dist2 = dist1.min(problem.grid_distance(&a.fitness, &child.fitness));
+                    }
+                }
+                if dist1 <= dist2 {
+                    optimal = child;
+                    println!("Success: child is new optimal");
+                    sc += 1;
+                } else {
+                    println!("Success: keeping optimal");
+                    so += 1;
+                }
+                //}
+            },
+        }
+        println!("Iteration {}, {:.4}ms", i+1, t0.elapsed().as_secs_f64() * 1e3_f64);
+        t0 = std::time::Instant::now();
+    }
+    println!("gen failures: {}", fg);
+    println!("failures: {}", f);
+    println!("successes: {}", s);
+    println!("successes w/ change: {}", sc);
+    println!("successes w/ keep: {}", so);
+    /*
+    gen failures: 43420
+    failures: 6608
+    successes: 430
+    successes w/ change: 844
+    successes w/ keep: 175
+
+    gen failures: 137840
+failures: 6927
+successes: 455
+successes w/ change: 804
+successes w/ keep: 177
+
+    */
+    archive
+}
+
+
+
+impl MultiObjectiveMinimizationProblem for DesignConfig {
     type Fitness = DesignFitness;
+
+    fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64 {
+        let eps = &self.optimizer.epsilons;
+        let square = |x: f64| x * x;
+        (
+            square((lhs.size - rhs.size) / eps[0])
+            + square((rhs.info - lhs.info) / eps[1])
+            + square((lhs.deviation - rhs.deviation) / eps[2])
+        ).sqrt()
+    }
 
     fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool> {
         let eps = &self.optimizer.epsilons;
         let box_id = |f: &DesignFitness| {
             [
                 (f.size / eps[0]).floor(),
-                (f.info / eps[1]).ceil(),
+                (-f.info / eps[1]).floor(),
                 (f.deviation / eps[2]).floor(),
             ]
         };
         let square = |x: f64| x * x;
         let box_dist = |f: &DesignFitness, bid: &[f64; 3]| {
             square(f.size - bid[0] * eps[0])
-                + square(bid[1] * eps[1] - f.info)
+                + square(f.info - bid[1] * eps[1])
                 + square(f.deviation - bid[2] * eps[2])
         };
         let l_box = box_id(lhs);
@@ -393,9 +543,9 @@ impl MultiObjectiveProblem for DesignConfig {
             } else {
                 Some(false)
             }
-        } else if l_box[0] <= r_box[0] && l_box[1] >= r_box[1] && l_box[2] <= r_box[2] {
+        } else if l_box[0] <= r_box[0] && l_box[1] <= r_box[1] && l_box[2] <= r_box[2] {
             Some(true)
-        } else if l_box[0] >= r_box[0] && l_box[1] <= r_box[1] && l_box[2] >= r_box[2] {
+        } else if l_box[0] >= r_box[0] && l_box[1] >= r_box[1] && l_box[2] >= r_box[2] {
             Some(false)
         } else {
             None
@@ -434,6 +584,6 @@ impl MultiObjectiveProblem for DesignConfig {
         let (cmpnd, detarr, beam) = self.array_to_params(params);
         fitness(&cmpnd, &detarr, &beam)
             .ok()
-            .filter(|f| f.size <= 30. * self.compound_prism.max_height)
+            .filter(|f| f.size <= 30. * self.compound_prism.max_height && f.info > 0.2)
     }
 }

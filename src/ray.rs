@@ -1,7 +1,6 @@
 use crate::erf::{erf, erfc_inv};
 use crate::glasscat::Glass;
 use libm::{log2, sincos};
-use std::borrow::Cow;
 use std::f64::consts::*;
 // Can't use libm::sqrt till https://github.com/rust-lang/libm/pull/222 is merged
 
@@ -274,7 +273,7 @@ impl<'a> CompoundPrism<'a> {
 #[derive(Debug, Clone)]
 pub struct DetectorArray<'a> {
     /// Boundaries of detection bins
-    bins: Cow<'a, [[f64; 2]]>,
+    bins: &'a [[f64; 2]],
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     min_ci: f64,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
@@ -286,7 +285,7 @@ pub struct DetectorArray<'a> {
 }
 
 impl<'a> DetectorArray<'a> {
-    pub fn new(bins: Cow<'a, [[f64; 2]]>, min_ci: f64, angle: f64, length: f64) -> Self {
+    pub fn new(bins: &'a [[f64; 2]], min_ci: f64, angle: f64, length: f64) -> Self {
         Self {
             bins,
             min_ci,
