@@ -4,9 +4,9 @@
 \begin{document}
 
 \section{Why A CompoundPrism Spectrometer}\label{sec:why-a-compoundprism-spectrometer}
-waverlnegth dependent n => good dispersion
-good transmiission for both s & p polarizastion
-good for stright line optics / can minimize deviation
+wavelength dependent n => good dispersion and linearity
+good transmission for both s and p polarization
+good for straight line optics / can minimize deviation
 
 \section{System Parametrization}\label{sec:system-parametrization}
 $N$ = prism count
@@ -159,7 +159,7 @@ $\hat{v}_f = \hat{v}_{\text{refract}, N}$
 
 $\vec{p}_f = \vec{p}_{N + 1}$
 
-if $-\hat{v}_f \cdot \hat{n}_a \le \cos{\theta_{\text{max}}} \to$ fail to detect becuase the spectrometer angular response is too weak
+if $-\hat{v}_f \cdot \hat{n}_a \le \cos{\theta_{\text{max}}} \to$ fail to detect because the spectrometer angular response is too weak
 
 $T_s = \prod_{i=0}^{N + 1} T_{s,i}$
 
@@ -181,7 +181,7 @@ $\vec{S}(\lambda, y)$ = position vector of the intersection of the detector arra
 
 \section{Derivations}\label{sec:derivations}
 
-$\vec{\delta} = \vec{p}_a + \frac{1}{2} \ell_a \hat{v}_a - \mu_b \hat{y}$ = spectromter footprint vector
+$\vec{\delta} = \vec{p}_a + \frac{1}{2} \ell_a \hat{v}_a - \mu_b \hat{y}$ = spectrometer footprint vector
 
 $p(D=d|\Lambda=\lambda) = \int_Y\int_Z p(D=d|\Lambda=\lambda \cap Y=y)f(y, z)dz dy$
 
@@ -193,9 +193,9 @@ $H(D|\Lambda) = -\sum_{d \in D}\int_{\Lambda}p(\Lambda=\lambda) p(D=d|\Lambda=\l
 
 \section{Optimization Objectives}\label{sec:optimization-objectives}
 
-spectromter size = $||\vec{\delta}||$
+spectrometer size = $||\vec{\delta}||$
 
-spectromter ray deviation = $| \vec{\delta} \cdot \hat{y} | / ||\vec{\delta}|| = | \sin(\theta_{deviation}) | $
+spectrometer ray deviation = $| \vec{\delta} \cdot \hat{y} | / ||\vec{\delta}|| = | \sin(\theta_{deviation}) | $
 
 mutual information = $I(\Lambda; D) = H(D) - H(D|\Lambda)$
 
