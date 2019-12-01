@@ -2,9 +2,11 @@ use crate::glasscat::Glass;
 use crate::ray::*;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
-use crate::BUNDLED_CATALOG;
+use serde::{Serialize, Deserialize};
+use crate::glasscat::BUNDLED_CATALOG;
+use crate::qrng::DynamicQrng;
 
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationConfig {
     pub iteration_count: usize,
     pub population_size: usize,
@@ -16,20 +18,20 @@ pub struct OptimizationConfig {
     pub epsilons: [f64; 3],
 }
 
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct CompoundPrismConfig {
     pub max_count: usize,
     pub max_height: f64,
     pub width: f64,
 }
 
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct GaussianBeamConfig {
     pub width: f64,
     pub wavelength_range: (f64, f64),
 }
 
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorArrayConfig {
     pub length: f64,
     pub max_incident_angle: f64,
@@ -37,7 +39,7 @@ pub struct DetectorArrayConfig {
 }
 
 /// Specification structure for the configuration of the Spectrometer Designer
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct DesignConfig {
     pub optimizer: OptimizationConfig,
     pub compound_prism: CompoundPrismConfig,
@@ -137,7 +139,7 @@ impl DesignConfig {
     }
 }
 
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize)]
 pub struct CompoundPrismDesign {
     pub glasses: Box<[(&'static str, Glass)]>,
     pub angles: Box<[f64]>,
@@ -147,7 +149,20 @@ pub struct CompoundPrismDesign {
     pub width: f64,
 }
 
-#[derive(Constructor, Debug, Clone)]
+impl<'s> Into<CompoundPrism<'s>> for &'s CompoundPrismDesign {
+    fn into(self) -> CompoundPrism<'s> {
+        CompoundPrism::new(
+            self.glasses.iter().map(|(_, g)| g),
+            &self.angles,
+            &self.lengths,
+            self.curvature,
+            self.height,
+            self.width
+        )
+    }
+}
+
+#[derive(Constructor, Debug, Clone, Serialize)]
 pub struct DetectorArrayDesign {
     pub bins: Box<[[f64; 2]]>,
     pub position: Pair,
@@ -157,15 +172,44 @@ pub struct DetectorArrayDesign {
     pub angle: f64,
 }
 
-#[derive(Constructor, Debug, Clone)]
+impl<'s> Into<DetectorArray<'s>> for &'s DetectorArrayDesign {
+    fn into(self) -> DetectorArray<'s> {
+        DetectorArray::new(
+            &self.bins,
+                        self.max_incident_angle.to_radians().cos(),
+            self.angle,
+            self.length,
+        )
+    }
+}
+
+impl Into<DetectorArrayPositioning> for &DetectorArrayDesign {
+    fn into(self) -> DetectorArrayPositioning {
+        DetectorArrayPositioning {
+            position: self.position,
+            direction: self.direction
+        }
+    }
+}
+
+#[derive(Constructor, Debug, Clone, Serialize)]
 pub struct GaussianBeamDesign {
     pub wavelength_range: (f64, f64),
     pub width: f64,
     pub y_mean: f64,
 }
 
+impl Into<GaussianBeam> for &GaussianBeamDesign {
+    fn into(self) -> GaussianBeam {
+        GaussianBeam {
+            width: self.width,
+            y_mean: self.y_mean,
+            w_range: self.wavelength_range
+        }
+    }
+}
 
-#[derive(Constructor, Debug, Clone)]
+#[derive(Constructor, Debug, Clone, Serialize)]
 pub struct Design {
     pub compound_prism: CompoundPrismDesign,
     pub detector_array: DetectorArrayDesign,
@@ -322,20 +366,23 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
         probability: mutation_probability,
     };
     let bounds = problem.parameter_bounds();
+    let mut qrng = DynamicQrng::new(1., bounds.len());
     let mut population = Vec::with_capacity(population_size);
     while population.len() < population_size {
         let params = bounds
             .iter()
-            .map(|(l, u)| rng.gen_range(l, u))
+            .zip(qrng.next())
+            .map(|((l, u), r)| l + (u - l) * r)
             .collect::<Box<_>>();
         if let Some(fitness) = problem.evaluate(&params) {
             population.push(Soln { params, fitness });
         }
     }
-    let mut archive = Vec::with_capacity(population_size);
+    /*let mut archive = Vec::with_capacity(population_size);
     for p in population.iter() {
         add_to_archive(problem, &mut archive, p);
-    }
+    }*/
+    let mut archive = population;
 
     for _ in 0..iteration_count {
         let mut offspring = Vec::with_capacity(offspring_size);
@@ -369,7 +416,7 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
 }
 
 
-fn optimize_apaes11<P: MultiObjectiveMinimizationProblem>(
+fn _optimize<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     iteration_count: usize,
     population_size: usize,
@@ -386,11 +433,13 @@ fn optimize_apaes11<P: MultiObjectiveMinimizationProblem>(
         probability: mutation_probability,
     };
     let bounds = problem.parameter_bounds();
+    let mut qrng = DynamicQrng::new(1., bounds.len());
 
     let mut optimal = loop {
         let params = bounds
             .iter()
-            .map(|(l, u)| rng.gen_range(l, u))
+            .zip(qrng.next())
+            .map(|((l, u), r)| l + (u - l) * r)
             .collect::<Box<_>>();
         if let Some(fitness) = problem.evaluate(&params) {
             break Soln { params, fitness };
@@ -415,11 +464,12 @@ fn optimize_apaes11<P: MultiObjectiveMinimizationProblem>(
             optimal = loop {
                 let params = bounds
                     .iter()
-                    .map(|(l, u)| rng.gen_range(l, u))
+                    .zip(qrng.next())
+                    .map(|((l, u), r)| l + (u - l) * r)
                     .collect::<Box<_>>();
                 if let Some(fitness) = problem.evaluate(&params) {
                     let test_soln = Soln { params, fitness };
-                    if add_to_archive(problem, &mut archive, &test_soln) {
+                    /*if add_to_archive(problem, &mut archive, &test_soln)*/ {
                         break test_soln;
                     }
                 }
@@ -427,11 +477,16 @@ fn optimize_apaes11<P: MultiObjectiveMinimizationProblem>(
                 fg += 1;
             };
         };
+        const R: f64 = 0.5;
+        let x: Vec<_> = (&mut rng).sample_iter(rand::distributions::StandardNormal).take(bounds.len() + 2).collect();
+        let r = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
+        let x = x.into_iter().map(|xi| xi * R / r);
         let params: Box<_> = optimal
             .params
             .iter()
+            .zip(x)
             .zip(bounds.iter())
-            .map(|(&x, &(lb, ub))| mutator.mutate(x, lb, ub, &mut rng))
+            .map(|((&x, xi), &(lb, ub))| (x+xi).min(ub).max(lb))
             .collect();
         let child = if let Some(fitness) = problem.evaluate(&params) {
             Soln { params, fitness }
@@ -486,20 +541,6 @@ fn optimize_apaes11<P: MultiObjectiveMinimizationProblem>(
     println!("successes: {}", s);
     println!("successes w/ change: {}", sc);
     println!("successes w/ keep: {}", so);
-    /*
-    gen failures: 43420
-    failures: 6608
-    successes: 430
-    successes w/ change: 844
-    successes w/ keep: 175
-
-    gen failures: 137840
-failures: 6927
-successes: 455
-successes w/ change: 804
-successes w/ keep: 177
-
-    */
     archive
 }
 

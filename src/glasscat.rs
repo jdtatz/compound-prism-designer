@@ -1,5 +1,6 @@
 use arrayvec::ArrayVec;
 use once_cell::sync::Lazy;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -30,7 +31,7 @@ impl Into<&'static str> for CatalogError {
 ///
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Glass {
     Schott([f64; 6]),
     Sellmeier1([f64; 6]),
