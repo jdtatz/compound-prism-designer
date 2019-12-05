@@ -1,10 +1,10 @@
 use crate::glasscat::Glass;
+use crate::glasscat::BUNDLED_CATALOG;
+use crate::qrng::DynamicQrng;
 use crate::ray::*;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
-use serde::{Serialize, Deserialize};
-use crate::glasscat::BUNDLED_CATALOG;
-use crate::qrng::DynamicQrng;
+use serde::{Deserialize, Serialize};
 
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationConfig {
@@ -95,7 +95,8 @@ impl DesignConfig {
             self.optimizer.mutation_distribution_index,
             mutation_probability,
         );
-        archive.into_iter()
+        archive
+            .into_iter()
             .map(|s| {
                 let (cmpnd, detarr, beam) = self.array_to_params(&s.params);
                 let detpos = detector_array_positioning(&cmpnd, &detarr, &beam)
@@ -132,7 +133,7 @@ impl DesignConfig {
                     compound_prism,
                     detector_array,
                     gaussian_beam,
-                    fitness: s.fitness
+                    fitness: s.fitness,
                 }
             })
             .collect()
@@ -157,7 +158,7 @@ impl<'s> Into<CompoundPrism<'s>> for &'s CompoundPrismDesign {
             &self.lengths,
             self.curvature,
             self.height,
-            self.width
+            self.width,
         )
     }
 }
@@ -176,7 +177,7 @@ impl<'s> Into<DetectorArray<'s>> for &'s DetectorArrayDesign {
     fn into(self) -> DetectorArray<'s> {
         DetectorArray::new(
             &self.bins,
-                        self.max_incident_angle.to_radians().cos(),
+            self.max_incident_angle.to_radians().cos(),
             self.angle,
             self.length,
         )
@@ -187,7 +188,7 @@ impl Into<DetectorArrayPositioning> for &DetectorArrayDesign {
     fn into(self) -> DetectorArrayPositioning {
         DetectorArrayPositioning {
             position: self.position,
-            direction: self.direction
+            direction: self.direction,
         }
     }
 }
@@ -204,7 +205,7 @@ impl Into<GaussianBeam> for &GaussianBeamDesign {
         GaussianBeam {
             width: self.width,
             y_mean: self.y_mean,
-            w_range: self.wavelength_range
+            w_range: self.wavelength_range,
         }
     }
 }
@@ -216,8 +217,6 @@ pub struct Design {
     pub gaussian_beam: GaussianBeamDesign,
     pub fitness: DesignFitness,
 }
-
-
 
 #[derive(Debug, Clone)]
 struct Params<'s> {
@@ -327,7 +326,7 @@ trait MultiObjectiveMinimizationProblem: Send + Sync {
 fn add_to_archive<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     archive: &mut Vec<Soln<P::Fitness>>,
-    child: &Soln<P::Fitness>
+    child: &Soln<P::Fitness>,
 ) -> bool {
     let mut dominated = false;
     archive.retain(
@@ -354,9 +353,8 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
     seed: u64,
     crossover_distribution_index: f64,
     mutation_distribution_index: f64,
-    mutation_probability: f64
-) -> Vec<Soln<P::Fitness>>
-{
+    mutation_probability: f64,
+) -> Vec<Soln<P::Fitness>> {
     let mut rng = PRng::seed_from_u64(seed);
     let variator = SBX {
         distribution_index: crossover_distribution_index,
@@ -415,7 +413,6 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
     archive
 }
 
-
 fn _optimize<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     iteration_count: usize,
@@ -424,9 +421,8 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
     seed: u64,
     _crossover_distribution_index: f64,
     mutation_distribution_index: f64,
-    mutation_probability: f64
-) -> Vec<Soln<P::Fitness>>
-{
+    mutation_probability: f64,
+) -> Vec<Soln<P::Fitness>> {
     let mut rng = PRng::seed_from_u64(seed);
     let mutator = PM {
         distribution_index: mutation_distribution_index,
@@ -469,7 +465,8 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
                     .collect::<Box<_>>();
                 if let Some(fitness) = problem.evaluate(&params) {
                     let test_soln = Soln { params, fitness };
-                    /*if add_to_archive(problem, &mut archive, &test_soln)*/ {
+                    /*if add_to_archive(problem, &mut archive, &test_soln)*/
+                    {
                         break test_soln;
                     }
                 }
@@ -478,7 +475,10 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
             };
         };
         const R: f64 = 0.5;
-        let x: Vec<_> = (&mut rng).sample_iter(rand::distributions::StandardNormal).take(bounds.len() + 2).collect();
+        let x: Vec<_> = (&mut rng)
+            .sample_iter(rand::distributions::StandardNormal)
+            .take(bounds.len() + 2)
+            .collect();
         let r = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
         let x = x.into_iter().map(|xi| xi * R / r);
         let params: Box<_> = optimal
@@ -486,7 +486,7 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
             .iter()
             .zip(x)
             .zip(bounds.iter())
-            .map(|((&x, xi), &(lb, ub))| (x+xi).min(ub).max(lb))
+            .map(|((&x, xi), &(lb, ub))| (x + xi).min(ub).max(lb))
             .collect();
         let child = if let Some(fitness) = problem.evaluate(&params) {
             Soln { params, fitness }
@@ -499,14 +499,14 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
                 println!("Failure");
                 failures += 1;
                 f += 1;
-            },
+            }
             Some(false) => {
                 println!("Success");
                 failures = 0;
                 optimal = child;
                 add_to_archive(problem, &mut archive, &optimal);
                 s += 1;
-            },
+            }
             None => {
                 // TODO temp
                 add_to_archive(problem, &mut archive, &child);
@@ -531,9 +531,13 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
                     so += 1;
                 }
                 //}
-            },
+            }
         }
-        println!("Iteration {}, {:.4}ms", i+1, t0.elapsed().as_secs_f64() * 1e3_f64);
+        println!(
+            "Iteration {}, {:.4}ms",
+            i + 1,
+            t0.elapsed().as_secs_f64() * 1e3_f64
+        );
         t0 = std::time::Instant::now();
     }
     println!("gen failures: {}", fg);
@@ -544,19 +548,16 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
     archive
 }
 
-
-
 impl MultiObjectiveMinimizationProblem for DesignConfig {
     type Fitness = DesignFitness;
 
     fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64 {
         let eps = &self.optimizer.epsilons;
         let square = |x: f64| x * x;
-        (
-            square((lhs.size - rhs.size) / eps[0])
+        (square((lhs.size - rhs.size) / eps[0])
             + square((rhs.info - lhs.info) / eps[1])
-            + square((lhs.deviation - rhs.deviation) / eps[2])
-        ).sqrt()
+            + square((lhs.deviation - rhs.deviation) / eps[2]))
+        .sqrt()
     }
 
     fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool> {

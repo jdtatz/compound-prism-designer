@@ -1,6 +1,9 @@
 use crate::glasscat::*;
 use crate::optimizer::*;
-use crate::ray::{p_dets_l_wavelength, trace, CompoundPrism, DesignFitness, DetectorArray, DetectorArrayPositioning, GaussianBeam};
+use crate::ray::{
+    p_dets_l_wavelength, trace, CompoundPrism, DesignFitness, DetectorArray,
+    DetectorArrayPositioning, GaussianBeam,
+};
 use ndarray::prelude::{array, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::create_exception;
@@ -87,10 +90,14 @@ impl<'s> Into<CompoundPrism<'s>> for &'s PyCompoundPrism {
 impl From<CompoundPrismDesign> for PyCompoundPrism {
     fn from(design: CompoundPrismDesign) -> Self {
         PyCompoundPrism {
-            glasses: design.glasses
+            glasses: design
+                .glasses
                 .into_vec()
                 .into_iter()
-                .map(|(name, glass)| PyGlass { name: name.to_string(), glass })
+                .map(|(name, glass)| PyGlass {
+                    name: name.to_string(),
+                    glass,
+                })
                 .collect(),
             angles: design.angles.into_vec(),
             lengths: design.lengths.into_vec(),
@@ -177,7 +184,6 @@ impl From<DetectorArrayDesign> for PyDetectorArray {
     }
 }
 
-
 #[pyclass(name=GaussianBeam)]
 #[derive(Clone)]
 pub struct PyGaussianBeam {
@@ -214,7 +220,8 @@ fn get<'p, O: ObjectProtocol, T: FromPyObject<'p>>(obj: &'p O, name: &'static st
         obj.getattr(name)?
     } else {
         obj.get_item(name)?
-    }.extract()
+    }
+    .extract()
 }
 
 impl<'source> FromPyObject<'source> for OptimizationConfig {
@@ -256,12 +263,19 @@ impl<'source> FromPyObject<'source> for DetectorArrayConfig {
     fn extract(obj: &'source PyAny) -> Result<Self, PyErr> {
         let bins: &PyArray2<f64> = get(obj, "bin_bounds")?;
         if bins.dims()[1] != 2 {
-            return Err(pyo3::exceptions::TypeError::py_err("bin_bounds must have a shape of [_, 2]"));
+            return Err(pyo3::exceptions::TypeError::py_err(
+                "bin_bounds must have a shape of [_, 2]",
+            ));
         };
         Ok(Self {
             length: get(obj, "length")?,
             max_incident_angle: get(obj, "max_incident_angle")?,
-            bin_bounds: bins.as_array().genrows().into_iter().map(|r| [r[0], r[1]]).collect(),
+            bin_bounds: bins
+                .as_array()
+                .genrows()
+                .into_iter()
+                .map(|r| [r[0], r[1]])
+                .collect(),
         })
     }
 }
@@ -277,7 +291,6 @@ impl<'source> FromPyObject<'source> for DesignConfig {
     }
 }
 
-
 #[pyfunction]
 fn optimize(
     py: Python,
@@ -285,20 +298,22 @@ fn optimize(
     design_config: DesignConfig,
 ) -> PyResult<Vec<PyDesign>> {
     if let Some(ref _c) = catalog {
-        return Err(pyo3::exceptions::NotImplementedError::py_err("Custom glass catalogs have not been implemented yet"))
+        return Err(pyo3::exceptions::NotImplementedError::py_err(
+            "Custom glass catalogs have not been implemented yet",
+        ));
     }
-    let glass_catalog = catalog.map(|catalog| {
-        catalog
-            .iter()?
-            .map(|p| {
-                let pg = p?.downcast_ref::<PyGlass>()?;
-                Ok((pg.name.clone(), pg.glass.clone()))
-            })
-            .collect::<PyResult<_>>()
-    }).transpose()?;
-    let designs = py.allow_threads(|| {
-        design_config.optimize(glass_catalog)
-    });
+    let glass_catalog = catalog
+        .map(|catalog| {
+            catalog
+                .iter()?
+                .map(|p| {
+                    let pg = p?.downcast_ref::<PyGlass>()?;
+                    Ok((pg.name.clone(), pg.glass.clone()))
+                })
+                .collect::<PyResult<_>>()
+        })
+        .transpose()?;
+    let designs = py.allow_threads(|| design_config.optimize(glass_catalog));
     Ok(designs.into_vec().into_iter().map(|d| d.into()).collect())
 }
 
@@ -341,11 +356,10 @@ impl From<Design> for PyDesign {
             compound_prism: design.compound_prism.into(),
             detector_array: design.detector_array.into(),
             gaussian_beam: design.gaussian_beam.into(),
-            fitness: design.fitness.into()
+            fitness: design.fitness.into(),
         }
     }
 }
-
 
 #[pymethods]
 impl PyDesign {

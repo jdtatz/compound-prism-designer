@@ -3,12 +3,12 @@ extern crate derive_more;
 
 mod erf;
 mod glasscat;
+mod optimizer;
 mod qrng;
 mod ray;
-mod optimizer;
 
-use crate::ray::*;
 use crate::optimizer::*;
+use crate::ray::*;
 
 #[derive(serde::Serialize)]
 struct TransmissionData {
@@ -22,7 +22,6 @@ struct DesignOutput {
     transmission_data: TransmissionData,
 }
 
-
 fn main() {
     let config = DesignConfig {
         optimizer: OptimizationConfig {
@@ -33,74 +32,85 @@ fn main() {
             mutation_distribution_index: 12.0,
             mutation_probability: 0.05,
             seed: 745093248298,
-            epsilons: [2.5, 0.02, 0.05]
+            epsilons: [2.5, 0.02, 0.05],
         },
         compound_prism: CompoundPrismConfig {
             max_count: 6,
             max_height: 20.0,
-            width: 7.0
+            width: 7.0,
         },
         detector_array: DetectorArrayConfig {
             length: 32.0,
             max_incident_angle: 45.0,
-            bin_bounds: vec![[ 0.1,  0.9],
-                              [ 1.1,  1.9],
-                              [ 2.1,  2.9],
-                              [ 3.1,  3.9],
-                              [ 4.1,  4.9],
-                              [ 5.1,  5.9],
-                              [ 6.1,  6.9],
-                              [ 7.1,  7.9],
-                              [ 8.1,  8.9],
-                              [ 9.1,  9.9],
-                              [10.1, 10.9],
-                              [11.1, 11.9],
-                              [12.1, 12.9],
-                              [13.1, 13.9],
-                              [14.1, 14.9],
-                              [15.1, 15.9],
-                              [16.1, 16.9],
-                              [17.1, 17.9],
-                              [18.1, 18.9],
-                              [19.1, 19.9],
-                              [20.1, 20.9],
-                              [21.1, 21.9],
-                              [22.1, 22.9],
-                              [23.1, 23.9],
-                              [24.1, 24.9],
-                              [25.1, 25.9],
-                              [26.1, 26.9],
-                              [27.1, 27.9],
-                              [28.1, 28.9],
-                              [29.1, 29.9],
-                              [30.1, 30.9],
-                              [31.1, 31.9]].into_boxed_slice()
+            bin_bounds: vec![
+                [0.1, 0.9],
+                [1.1, 1.9],
+                [2.1, 2.9],
+                [3.1, 3.9],
+                [4.1, 4.9],
+                [5.1, 5.9],
+                [6.1, 6.9],
+                [7.1, 7.9],
+                [8.1, 8.9],
+                [9.1, 9.9],
+                [10.1, 10.9],
+                [11.1, 11.9],
+                [12.1, 12.9],
+                [13.1, 13.9],
+                [14.1, 14.9],
+                [15.1, 15.9],
+                [16.1, 16.9],
+                [17.1, 17.9],
+                [18.1, 18.9],
+                [19.1, 19.9],
+                [20.1, 20.9],
+                [21.1, 21.9],
+                [22.1, 22.9],
+                [23.1, 23.9],
+                [24.1, 24.9],
+                [25.1, 25.9],
+                [26.1, 26.9],
+                [27.1, 27.9],
+                [28.1, 28.9],
+                [29.1, 29.9],
+                [30.1, 30.9],
+                [31.1, 31.9],
+            ]
+            .into_boxed_slice(),
         },
         gaussian_beam: GaussianBeamConfig {
             width: 3.2,
-            wavelength_range: (0.5, 0.82)
-        }
+            wavelength_range: (0.5, 0.82),
+        },
     };
     let designs = config.optimize(None);
 
     const N: usize = 100;
     let (l, u) = config.gaussian_beam.wavelength_range;
-    let wavelengths: Vec<_> = (0..N).map(|i| l + (u - l) * (i as f64) / ((N - 1) as f64)).collect();
+    let wavelengths: Vec<_> = (0..N)
+        .map(|i| l + (u - l) * (i as f64) / ((N - 1) as f64))
+        .collect();
 
-    let out: Vec<_> = designs.iter().map(|design| {
-        let cmpnd: CompoundPrism = (&design.compound_prism).into();
-        let detarr: DetectorArray = (&design.detector_array).into();
-        let detpos: DetectorArrayPositioning = (&design.detector_array).into();
-        let beam: GaussianBeam = (&design.gaussian_beam).into();
-        let data = wavelengths.iter().map(|w| p_dets_l_wavelength(*w, &cmpnd, &detarr, &beam, &detpos).collect()).collect();
-        DesignOutput {
-            design: design.clone(),
-            transmission_data: TransmissionData {
-                wavelengths: wavelengths.clone(),
-                data
+    let out: Vec<_> = designs
+        .iter()
+        .map(|design| {
+            let cmpnd: CompoundPrism = (&design.compound_prism).into();
+            let detarr: DetectorArray = (&design.detector_array).into();
+            let detpos: DetectorArrayPositioning = (&design.detector_array).into();
+            let beam: GaussianBeam = (&design.gaussian_beam).into();
+            let data = wavelengths
+                .iter()
+                .map(|w| p_dets_l_wavelength(*w, &cmpnd, &detarr, &beam, &detpos).collect())
+                .collect();
+            DesignOutput {
+                design: design.clone(),
+                transmission_data: TransmissionData {
+                    wavelengths: wavelengths.clone(),
+                    data,
+                },
             }
-        }
-    }).collect();
+        })
+        .collect();
 
     let file = std::fs::File::create("results.cbor").unwrap();
     serde_cbor::to_writer(file, &out).unwrap();

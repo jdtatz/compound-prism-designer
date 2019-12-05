@@ -1,9 +1,9 @@
 use crate::erf::{erf, erfc_inv};
 use crate::glasscat::Glass;
 use crate::qrng::Qrng;
+use core::f64::consts::*;
 use libm::{log2, sincos};
-use serde::{Serialize, Deserialize};
-use std::f64::consts::*;
+use serde::{Deserialize, Serialize};
 // Can't use libm::sqrt till https://github.com/rust-lang/libm/pull/222 is merged
 
 #[derive(Debug, Display, Clone, Copy)]
@@ -29,7 +29,9 @@ impl Into<&'static str> for RayTraceError {
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, From, Into, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Copy, From, Into, Neg, Add, Sub, Mul, Div, Serialize, Deserialize,
+)]
 pub struct Pair {
     pub x: f64,
     pub y: f64,
@@ -558,8 +560,8 @@ impl Ray {
                 _ => unreachable!(),
             }
         };
-        std::iter::once(Ok(self.origin))
-            .chain(std::iter::from_fn(move || propagation_fn().transpose()).fuse())
+        core::iter::once(Ok(self.origin))
+            .chain(core::iter::from_fn(move || propagation_fn().transpose()).fuse())
     }
 }
 
@@ -662,7 +664,7 @@ pub fn p_dets_l_wavelength(
     let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
     debug_assert!(0. <= p_z && p_z <= 1.);
     let mut qrng = Qrng::new(1);
-    for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+    for u in core::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
         let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
         if y <= 0. || cmpnd.height <= y {
@@ -731,7 +733,7 @@ fn mutual_information(
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
     let mut info_stats = vec![Welford::new(); detarr.bins.len()];
     let mut qrng = Qrng::new(1);
-    for u in std::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+    for u in core::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = wmin + u * (wmax - wmin);
         let p_dets_l_w = p_dets_l_wavelength(w, cmpnd, detarr, beam, detpos);

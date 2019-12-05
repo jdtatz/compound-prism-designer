@@ -1,9 +1,9 @@
 [package]
 name = "compound_prism_designer"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
-include = ["/src/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/design_config.toml", "/README.md"]
+include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/design_config.toml", "/README.md", "/requirements.txt"]
 
 [lib]
 name = "compound_prism_designer"
@@ -17,7 +17,6 @@ quasirandom = "0.2.1"
 libm = "0.1.4"
 rand = { version="0.7.2" }
 rand_xoshiro = "0.4.0"
-once_cell = { version="1.2.0", features=["parking_lot"] }
 serde = { version="1", features=["derive"] }
 serde_cbor = "0.10"
 pyo3 = { version="0.8.1", features = ["extension-module"], optional = true }
