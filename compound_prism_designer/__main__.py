@@ -6,8 +6,11 @@ import matplotlib as mpl
 mpl.rcParams["backend"] = "qt5agg"
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-QFileDialog = mpl.backends.qt_compat.QtWidgets.QFileDialog
-
+try:
+    from PySide2.QtWidgets import QFileDialog
+except ImportError:
+    from PyQt5.QtWidgets import QFileDialog
+plt.switch_backend("qt5agg")
 from .compound_prism_designer import create_glass_catalog, Glass, Design, RayTraceError
 from .utils import draw_spectrometer
 from .zemax import create_zmx
