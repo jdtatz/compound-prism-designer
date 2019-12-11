@@ -643,6 +643,41 @@ impl Welford {
     }
 }
 
+fn vector_quasi_monte_carlo_integration<Q, I, F>(
+    max_err: f64,
+    vec_len: usize,
+    vector_fn: F,
+) -> Vec<Welford>
+where
+    Q: quasirandom::Quasirandom,
+    I: Iterator<Item = f64>,
+    F: Fn(Q) -> Option<I>,
+{
+    const MAX_N: usize = 100000;
+    let max_err_squared = max_err * max_err;
+    let mut stats = vec![Welford::new(); vec_len];
+    let mut qrng = Qrng::new(1);
+    for u in core::iter::repeat_with(|| qrng.next::<Q>()).take(MAX_N) {
+        if let Some(vec) = vector_fn(u) {
+            for (v, w) in vec.zip(stats.iter_mut()) {
+                w.next_sample(v);
+            }
+        } else {
+            for w in stats.iter_mut() {
+                w.next_sample(0.);
+            }
+        }
+        if stats.iter().all(|stat| {
+            // err = sample_variance / sqrt(N)
+            let var = stat.sample_variance();
+            (var * var) < max_err_squared * stat.count
+        }) {
+            break;
+        }
+    }
+    stats
+}
+
 /// Conditional Probability of detection per detector given a wavelength
 /// { p(D=d|Λ=λ) : d in D }
 ///
@@ -659,19 +694,13 @@ pub fn p_dets_l_wavelength(
     beam: &GaussianBeam,
     detpos: &DetectorArrayPositioning,
 ) -> impl Iterator<Item = f64> {
-    const MAX_N: usize = 1000;
-    let mut p_dets_l_w_stats = vec![Welford::new(); detarr.bins.len()];
     let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
     debug_assert!(0. <= p_z && p_z <= 1.);
-    let mut qrng = Qrng::new(1);
-    for u in core::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+    vector_quasi_monte_carlo_integration(7.5e-3, detarr.bins.len(), move |u: f64| {
         // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
         let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
         if y <= 0. || cmpnd.height <= y {
-            for stat in p_dets_l_w_stats.iter_mut() {
-                stat.next_sample(0.);
-            }
-            continue;
+            return None;
         }
         let ray = Ray::new_from_start(y);
         if let Ok((_, pos, t)) = ray.propagate(wavelength, cmpnd, detarr, detpos) {
@@ -686,32 +715,18 @@ pub fn p_dets_l_wavelength(
             // the pdf(y) is cancelled, so.
             // pdf_t = p_z * t;
             let pdf_t = p_z * t;
-            for (stat, &[l, u]) in p_dets_l_w_stats.iter_mut().zip(detarr.bins.iter()) {
-                if l <= pos && pos < u {
-                    stat.next_sample(pdf_t);
-                } else {
-                    stat.next_sample(0.);
-                }
-            }
+            Some(
+                detarr
+                    .bins
+                    .iter()
+                    .map(move |&[l, u]| if l <= pos && pos < u { pdf_t } else { 0. }),
+            )
         } else {
-            for stat in p_dets_l_w_stats.iter_mut() {
-                stat.next_sample(0.);
-            }
+            None
         }
-        if p_dets_l_w_stats.iter().all(|stat| {
-            // err = sample_variance / sqrt(N)
-            let var = stat.sample_variance();
-            const MAX_ERR: f64 = 7.5e-3;
-            const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
-            (var * var) < MAX_ERR_SQ * stat.count
-        }) {
-            break;
-        }
-    }
-    debug_assert!(p_dets_l_w_stats
-        .iter()
-        .all(|s| 0. <= s.mean && s.mean <= 1.));
-    p_dets_l_w_stats.into_iter().map(|w| w.mean)
+    }).into_iter()
+        //.inspect(|w| {debug_assert!(0. <= w.mean && w.mean <= 1.); if w.count > 2. {println!("{}", w.count)}})
+        .map(|w| w.mean)
 }
 
 /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
@@ -728,6 +743,40 @@ fn mutual_information(
     beam: &GaussianBeam,
     detpos: &DetectorArrayPositioning,
 ) -> f64 {
+    /*let (wmin, wmax) = beam.w_range;
+    let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
+    debug_assert!(0. <= p_z && p_z <= 1.);
+    let p_det_test_stats = vector_quasi_monte_carlo_integration(5e-4, detarr.bins.len(), |(v, u): (f64, f64)| {
+        // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
+        let w = wmin + v * (wmax - wmin);
+        // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
+        let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
+        if y <= 0. || cmpnd.height <= y {
+            return None;
+        }
+        let ray = Ray::new_from_start(y);
+        if let Ok((_, pos, t)) = ray.propagate(w, cmpnd, detarr, detpos) {
+            debug_assert!(pos.is_finite());
+            debug_assert!(0. <= pos && pos <= detarr.length);
+            debug_assert!(t.is_finite());
+            debug_assert!(0. <= t && t <= 1.);
+            // What is actually being integrated is
+            // pdf_t = p_z * t * pdf(y);
+            // But because of importance sampling using the same distribution
+            // pdf_t /= pdf(y);
+            // the pdf(y) is cancelled, so.
+            // pdf_t = p_z * t;
+            let pdf_t = p_z * t;
+            Some(
+                detarr
+                    .bins
+                    .iter()
+                    .map(move |&[l, u]| if l <= pos && pos < u { pdf_t } else { 0. }),
+            )
+        } else {
+            None
+        }
+    });*/
     const MAX_N: usize = 1000;
     let (wmin, wmax) = beam.w_range;
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
@@ -761,6 +810,18 @@ fn mutual_information(
         }
     }
     let mut info: f64 = info_stats.into_iter().map(|s| s.mean).sum();
+    /*for (s1, s2) in p_dets_stats.iter().zip(p_det_test_stats.iter()) {
+        println!("{} v {}; {} v {}", s1.count, s2.count, s1.sample_variance(), s2.sample_variance());
+
+        Expected :0.005104141246649202
+Actual   :0.006270770708374839
+
+Expected :0.009488595065630243
+Actual   :0.006197148940200429
+
+
+        debug_assert_eq!(s1.mean, s2.mean);
+    }*/
     for stat in p_dets_stats {
         let p_det = stat.mean;
         debug_assert!(0. <= p_det && p_det <= 1.);
@@ -992,7 +1053,7 @@ mod tests {
 
         let v = fitness(&prism, &detarr, &beam).expect("Merit function failed");
         assert!(
-            approx_eq(v.size, 41.324065257329245, 1e-3),
+            approx_eq(v.size, 41.3241, 1e-3),
             "Size is incorrect. {} ≉ 41.3",
             v.size
         );
@@ -1002,7 +1063,7 @@ mod tests {
             v.info
         );
         assert!(
-            approx_eq(v.deviation, 0.37715870072898755, 1e-3),
+            approx_eq(v.deviation, 0.377159, 1e-3),
             "Deviation is incorrect. {} ≉ 0.377",
             v.deviation
         );
