@@ -283,9 +283,8 @@ pub fn new_catalog(file: &str) -> impl Iterator<Item = Result<(&str, Glass), Cat
     CatalogIter::new(file)
 }
 
-pub const BUNDLED_CATALOG_FILE: &str = include_str!("catalog.agf");
-
 #[rustfmt::skip]
+#[allow(clippy::unreadable_literal)]
 pub const BUNDLED_CATALOG: &[(&str, Glass)] = &[
     ("F2", Glass::Sellmeier1([1.34533359, 0.00997743871, 0.209073176, 0.0470450767, 0.937357162, 111.886764])),
     ("F5", Glass::Sellmeier1([1.3104463, 0.00958633048, 0.19603426, 0.0457627627, 0.96612977, 115.011883])),
@@ -395,6 +394,7 @@ pub const BUNDLED_CATALOG: &[(&str, Glass)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    const BUNDLED_CATALOG_FILE: &str = include_str!("catalog.agf");
 
     fn generate_bundled_catalog() {
         println!("pub const BUNDLED_CATALOG: &[(&str, Glass)] = &[");

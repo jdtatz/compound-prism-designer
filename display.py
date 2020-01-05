@@ -1,11 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import cbor2
-
+import json
+from compound_prism_designer import designs_from_json
 
 with open("results.cbor", "rb") as f:
     results = cbor2.load(f)
 
+designs = designs_from_json(json.dumps([result["design"] for result in results]))
+print(designs)
 print(results[0])
 ws = None
 for result in results:

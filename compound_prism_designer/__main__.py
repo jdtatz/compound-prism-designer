@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import pathlib
-import toml
+import gzip
 import numpy as np
 import matplotlib as mpl
 mpl.rcParams["backend"] = "qt5agg"
@@ -11,17 +11,17 @@ try:
 except ImportError:
     from PyQt5.QtWidgets import QFileDialog
 plt.switch_backend("qt5agg")
-from .compound_prism_designer import create_glass_catalog, Glass, Design, RayTraceError
+from .compound_prism_designer import create_glass_catalog, Glass, Design, DesignConfig, RayTraceError, \
+    serialize_results, deserialize_results, config_from_toml
 from .utils import draw_spectrometer
 from .zemax import create_zmx
-from .optimizer import DesignConfig
 
 
 class Interactive:
-    def __init__(self, fig: Figure, spec: DesignConfig):
+    def __init__(self, fig: Figure, spec: DesignConfig, designs: [Design]):
         self.fig = fig
         self.spec = spec
-        self.designs = spec.optimize()
+        self.designs = designs
         nrows, ncols = 2, 4
         gs = fig.add_gridspec(nrows, ncols)
         self.pareto_ax = fig.add_subplot(gs[:, 0])
@@ -34,7 +34,7 @@ class Interactive:
         sc = self.pareto_ax.scatter(x, y, c=c, cmap=cm.cmap.reversed(), norm=cm.norm, picker=True)
         clb = fig.colorbar(sc)
         clb.ax.set_ylabel("deviation (deg)")
-        self.pareto_ax.set_xlabel(f"size ({spec.units})")
+        self.pareto_ax.set_xlabel(f"size ({spec.length_unit})")
         self.pareto_ax.set_ylabel("mutual information (bits)")
 
         self.prism_ax = fig.add_subplot(gs[0, 1:3])
@@ -112,12 +112,24 @@ class Interactive:
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
 
-    def export_zemax(self, filename):
+    def save_designs(self):
+        filename, _ = QFileDialog.getSaveFileName(caption="Export saved designs", filter="Saved results (*.cbor.gz)")
         path = pathlib.Path(filename)
         if path.is_dir():
             print(f"Warning: given '{path}' is not a file, using default")
-            path = pathlib.Path.cwd().joinpath("default.zmx")
+            path = pathlib.Path.cwd().joinpath("results")
+
+        with open(path.with_suffix('.cbor.gz'), "wb") as f:
+            f.write(gzip.compress(serialize_results(self.spec, self.designs)))
+
+    def export_zemax(self):
+        filename, _ = QFileDialog.getSaveFileName(caption="Export zemax file", filter="Zemax Lens File (*.zmx)")
+        path = pathlib.Path(filename)
         if self.selected_design is not None:
+            if path.is_dir():
+                print(f"Warning: given '{path}' is not a file, using default")
+                path = pathlib.Path.cwd().joinpath("default.zmx")
+
             zemax_design, zemax_file = create_zmx(
                 self.selected_design.compound_prism,
                 self.selected_design.detector_array,
@@ -128,21 +140,37 @@ class Interactive:
             return zemax_design
 
 
+print(Design, dir(DesignConfig))
 fig = plt.figure()
 manager = plt.get_current_fig_manager()
 manager.set_window_title("Compound Prism Spectrometer Designer")
 spec_file = pathlib.Path(QFileDialog.getOpenFileName(
-    caption="Select design specification", filter="Configuration files (*.toml);;All files (*)")[0])
+    caption="Select design specification Or previous results", filter="Configuration files (*.toml);;Saved results (*.cbor);;Compressed Saved results (*.cbor.gz);;All files (*)")[0])
 if not spec_file.is_file():
-    print(f"Warning: given '{spec_file}' is not a file, using default")
+    print(f"Warning: given '{spec_file}' is not a file, using default configuration file")
     spec_file = pathlib.Path.cwd().joinpath("design_config.toml")
-spec = DesignConfig.from_dict(toml.load(spec_file))
 
-interactive = Interactive(fig, spec)
+if spec_file.suffix == ".cbor":
+    with open(spec_file, "rb") as f:
+        spec, designs = deserialize_results(f.read())
+        print(spec, designs[0])
+elif spec_file.suffix == ".gz":
+    with open(spec_file, "rb") as f:
+        spec, designs = deserialize_results(gzip.decompress(f.read()))
+        print(spec, designs[0])
+else:
+    with open(spec_file, "r") as f:
+        spec = config_from_toml(f.read())
+    designs = spec.optimize()
+
+interactive = Interactive(fig, spec, designs)
 
 mbar = manager.window.menuBar()
+
+save_action = mbar.addAction("Save Designs")
+save_action.triggered.connect(interactive.save_designs)
+
 export_action = mbar.addAction("Export Design as .zmx")
-export_action.triggered.connect(lambda:
-                                interactive.export_zemax(
-                                    pathlib.Path(QFileDialog.getSaveFileName(caption="Export zemax file", filter="Zemax Lens File (*.zmx)")[0])))
+export_action.triggered.connect(interactive.export_zemax)
+
 plt.show()
