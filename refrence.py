@@ -1,11 +1,102 @@
+import numpy as np
 import sympy
 import sympy.physics.optics
-from sympy import symbols, assuming, sin, cos, tan, sqrt, integrate, Function, And, Xor, Piecewise
+from sympy import symbols, assuming, sin, cos, tan, sqrt, Dummy, Function, And, Xor, Piecewise, \
+    sympify, simplify, Lambda, MatrixSymbol
+from sympy.core.basic import Basic
 from sympy.matrices import Matrix
-from sympy.stats import Uniform, Normal, density, cdf
+from sympy.stats import Uniform, Normal, density, cdf, E, quantile
 
+x = symbols("x", positive=True)
+print(sqrt(-abs(x)))
 x_hat = Matrix((1, 0))
 y_hat = Matrix((0, 1))
+
+
+class Ray(Basic):
+    __slots__ = Basic.__slots__ + ["origin", "direction", "s_transmittance", "p_transmittance"]
+
+    def __new__(cls, origin, direction, s_transmittance, p_transmittance):
+        args = [sympify(a) for a in (origin, direction, s_transmittance, p_transmittance)]
+        obj = Basic.__new__(cls, *args)
+        obj.origin, obj.direction, obj.s_transmittance, obj.p_transmittance = obj.args
+        return obj
+
+    @staticmethod
+    def new_from_start(y):
+        return Ray(
+            origin=y*y_hat,
+            direction=x_hat,
+            s_transmittance=1,
+            p_transmittance=1
+        )
+
+    @property
+    def transmittance(self):
+        return (self.s_transmittance + self.p_transmittance) / 2
+
+
+origin = MatrixSymbol(Dummy('origin'), 2, 1)
+direction = MatrixSymbol('direction', 2, 1)
+s_transmittance = Dummy('s_transmittance')
+p_transmittance = Dummy('p_transmittance')
+ray = Ray(origin=origin, direction=direction, s_transmittance=s_transmittance, p_transmittance=p_transmittance)
+intersection = MatrixSymbol('intersection', 2, 1)
+normal = MatrixSymbol('normal', 2, 1)
+ci = Dummy('ci')
+n1 = Dummy('n1')
+n2 = Dummy('n2')
+r = n1 / n2
+cr = sqrt(1 - r**2 * (1 - ci**2))
+v = ray.direction * r + normal * (r * ci - cr)
+s_transmittance = 1 - ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr))**2
+p_transmittance = 1 - ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci))**2
+refract = Lambda((ray.args, intersection, normal, ci, n1, n2),
+                 Ray(
+                     origin=intersection,
+                     direction=v,
+                     s_transmittance=ray.s_transmittance * s_transmittance,
+                     p_transmittance=ray.p_transmittance * p_transmittance
+                 )
+                 )
+print(refract)
+print(simplify(refract))
+print(sympy.cse(refract))
+print(refract(Ray.new_from_start(7).args, intersection, normal, ci, n1, n2))
+
+y0 = Dummy('y0')
+init = Ray.new_from_start(y0)
+print(init)
+N = 3
+refractive_indicies = [Dummy(f'n{1 + i}') for i in range(N)]
+
+ray = init
+n1 = 1
+for n2 in refractive_indicies:
+    ix = Dummy('ix')
+    iy = Dummy('iy')
+    t = Dummy('t')
+    c, s = cos(t), sin(t)
+    r = Matrix(((c, -s), (s, c)))
+    n = r * Matrix([-1, 0])
+    ray = refract(ray.args, Matrix([ix, iy]), n, Dummy('ci'), n1, n2)
+    n1 = n2
+propagate_internal = Lambda(
+    (y0, tuple(refractive_indicies)),
+    ray
+)
+print(propagate_internal)
+print(simplify(propagate_internal))
+print(sympy.cse(propagate_internal))
+
+
+def sellmeier1(b1, c1, b2, c2, b3, c3):
+    b1, c1, b2, c2, b3, c3 = (sympify(x) for x in (b1, c1, b2, c2, b3, c3))
+
+    def _sellmeier1(w):
+        w2 = w**2
+        return sqrt(1 + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3))
+    return _sellmeier1
 
 
 def rotate(angle, vector):
@@ -24,7 +115,6 @@ class Surface:
         self.angle = angle
         self.normal = normal
         self.midpt = midpt
-        self.plane = sympy.Plane(sympy.Point3D(*midpt, 0), normal_vector=(*normal, 0))
 
     @staticmethod
     def first_surface(angle, height):
@@ -38,8 +128,7 @@ class Surface:
         dx2 = abs(tan(angle)) * height / 2
         separation_distance = separation_length + Piecewise(
             (dx1 + dx2, Xor((self.normal[1] >= 0), (normal[1] >= 0))),
-            (dx1 - dx2, abs(self.normal[1]) > abs(normal[1])),
-            (dx2 - dx1, True)
+            (abs(dx1 - dx2), True)
         )
         return Surface(angle=angle, normal=normal, midpt=self.midpt + separation_distance * x_hat)
 
@@ -105,15 +194,14 @@ class DetectorArrayPositioning:
         self.direction = direction
 
 
-class Ray:
-    def __init__(self, origin, direction, s_transmittance, p_transmittance):
-        self.origin = origin
-        self.direction = direction
-        self.s_transmittance = s_transmittance
-        self.p_transmittance = p_transmittance
-        p0 = sympy.Point3D(*self.origin, 0)
-        v = sympy.Point3D(*self.direction, 0)
-        self.ray = sympy.Ray(p0, p0 + v)
+class Ray(Basic):
+    __slots__ = Basic.__slots__ + ["origin", "direction", "s_transmittance", "p_transmittance"]
+
+    def __new__(cls, origin, direction, s_transmittance, p_transmittance):
+        args = [sympify(a) for a in (origin, direction, s_transmittance, p_transmittance)]
+        obj = Basic.__new__(cls, *args)
+        obj.origin, obj.direction, obj.s_transmittance, obj.p_transmittance = obj.args
+        return obj
 
     @staticmethod
     def new_from_start(y):
@@ -151,6 +239,8 @@ class Ray:
         p = self.origin + self.direction * d
         #if p[1] <= 0 | prism_height <= p[1]:
         #    raise RayTraceError("OutOfBounds")
+        # i, = intersection(self.ray, plane.plane)
+        # print(p, i.evalf())
         return self.refract(p, plane.normal, ci, n1, n2)
 
     def intersect_curved_interface(self, lens: CurvedSurface, n1, n2):
@@ -202,7 +292,7 @@ def detector_array_positioning(cmpnd: CompoundPrism, detarr: DetectorArray, beam
     spec_dir = rotate(detarr.angle, y_hat)
     spec = spec_dir * detarr.length
     mat = upper_ray.direction.row_join(-lower_ray.direction)
-    print(mat.det())
+    # print(mat.det())
     imat = mat.inv()
     dists = imat * (spec - upper_ray.origin + lower_ray.origin)
     d2 = dists[1]
@@ -218,23 +308,71 @@ def detector_array_positioning(cmpnd: CompoundPrism, detarr: DetectorArray, beam
 
 
 def fitness(cmpnd: CompoundPrism, detarr: DetectorArray, beam: GaussianBeam):
-    px, py, vx, vy = symbols("px, py, vx, vy", real=True)
-    detpos = DetectorArrayPositioning(Matrix((px, py)), Matrix((vx, vy)))
-    # detpos = detector_array_positioning(cmpnd, detarr, beam)
+    detpos = detector_array_positioning(cmpnd, detarr, beam)
+    # print(detpos.__dict__)
     deviation_vector = detpos.position + detpos.direction * detarr.length / 2 - beam.y_mean * y_hat
     size = deviation_vector.norm()
     deviation = abs(deviation_vector[1]) / deviation_vector.norm()
     Y = Normal("Y", beam.y_mean, beam.width)
+    invY = quantile(Y)
     Z = Normal("Z", 0, beam.width)
+    pZ = sympy.stats.P(And(cmpnd.width / 2 > Z, Z > -cmpnd.width / 2))
+    B = Normal("B", [beam.y_mean, 0], [[beam.width, 0], [0, beam.width]])
     L = Uniform("Λ", *beam.wavelength_range)
     y, w = symbols("y λ", positive=True)
-    _, pos, t = Ray.new_from_start(y).propagate(w, cmpnd, detarr, detpos)
-    p_det_l_w = integrate(Piecewise((t, And(detarr.bins[0][0] <= pos, pos < detarr.bins[0][1])), (0, True)), (y, 0, cmpnd.height))
+    # print(quantile(L))
+    # print(sympy.stats.P(And(cmpnd.width / 2 > Z, Z > -cmpnd.width / 2)))
+    # print(Ray.new_from_start(Y).__dict__)
+    _, pos, t = Ray.new_from_start(Y).propagate(w, cmpnd, detarr, detpos)
+    # print("pos", pos)
+    # print(t)
+    # print(detarr.bins[0][0] <= pos, pos < detarr.bins[0][1])
+    # print(And(detarr.bins[0][0] <= pos, pos < detarr.bins[0][1]))
+    p_det_l_w = E(Piecewise((t, And(detarr.bins[0][0] <= pos, pos < detarr.bins[0][1])), (0, True)))
     return size, deviation, p_det_l_w
 
 
+def test():
+    prism_count = 3
+    glasses = [
+        sellmeier1(
+            1.029607,
+            0.00516800155,
+            0.1880506,
+            0.0166658798,
+            0.736488165,
+            138.964129
+        ),
+        sellmeier1(
+            1.87543831,
+            0.0141749518,
+            0.37375749,
+            0.0640509927,
+            2.30001797,
+            177.389795
+        ),
+        sellmeier1(
+            0.738042712,
+            0.00339065607,
+            0.363371967,
+            0.0117551189,
+            0.989296264,
+            212.842145
+        ),
+    ]
+    # glasses = symbols(f"g:{prism_count}", cls=Function, real=True, positive=True)
+    angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416]
+    angles = sympify(np.deg2rad(angles))
+    lengths = sympify((0, 0, 0))
+    cmpnd = CompoundPrism(glasses, angles, lengths, curvature=sympify(0.21), height=sympify(2.5), width=sympify(2))
+    bins = sympify(np.array([(i + 0.1, i + 0.9) for i in range(32)]) / 10)
+    detarr = DetectorArray(bins, min_ci=cos(sympy.rad(60)), angle=sympify(0), length=sympify(3.2))
+    beam = GaussianBeam(width=sympify(0.2), y_mean=sympify(0.95), wavelength_range=(0.5, 0.82))
+    print(fitness(cmpnd, detarr, beam))
+
+
 def main(prism_count: int, bins):
-    glasses = symbols(f"g:{prism_count}", cls=Function, real=True)
+    glasses = symbols(f"g:{prism_count}", cls=Function, real=True, positive=True)
     angles = symbols(f"θ:{1 + prism_count}", real=True)
     lengths = symbols(f"l:{prism_count}", positive=True)
     k, h, w = symbols("k h w", positive=True)
@@ -279,37 +417,9 @@ def main(prism_count: int, bins):
 
 
 if __name__ == "__main__":
+    test()
+    '''
     test_prism_count = 2
-    test_bins = [[ 0.1,  0.9],
-            [ 1.1,  1.9],
-            [ 2.1,  2.9],
-            [ 3.1,  3.9],
-            [ 4.1,  4.9],
-            [ 5.1,  5.9],
-            [ 6.1,  6.9],
-            [ 7.1,  7.9],
-            [ 8.1,  8.9],
-            [ 9.1,  9.9],
-            [10.1, 10.9],
-            [11.1, 11.9],
-            [12.1, 12.9],
-            [13.1, 13.9],
-            [14.1, 14.9],
-            [15.1, 15.9],
-            [16.1, 16.9],
-            [17.1, 17.9],
-            [18.1, 18.9],
-            [19.1, 19.9],
-            [20.1, 20.9],
-            [21.1, 21.9],
-            [22.1, 22.9],
-            [23.1, 23.9],
-            [24.1, 24.9],
-            [25.1, 25.9],
-            [26.1, 26.9],
-            [27.1, 27.9],
-            [28.1, 28.9],
-            [29.1, 29.9],
-            [30.1, 30.9],
-            [31.1, 31.9]]
+    test_bins = [[i + 0.1, i + 0.9] for i in range(32)]
     print(main(test_prism_count, test_bins))
+    '''

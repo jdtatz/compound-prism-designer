@@ -2,11 +2,17 @@ use crate::glasscat::Glass;
 use crate::glasscat::BUNDLED_CATALOG;
 use crate::qrng::DynamicQrng;
 use crate::ray::*;
+use crate::utils::*;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+#[cfg(feature = "pyext")]
+use pyo3::prelude::{pyclass, PyObject};
 
+#[cfg_attr(feature="pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct OptimizationConfig {
     pub iteration_count: usize,
     pub population_size: usize,
@@ -18,29 +24,38 @@ pub struct OptimizationConfig {
     pub epsilons: [f64; 3],
 }
 
+#[cfg_attr(feature="pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct CompoundPrismConfig {
     pub max_count: usize,
     pub max_height: f64,
     pub width: f64,
 }
 
+#[cfg_attr(feature="pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct GaussianBeamConfig {
     pub width: f64,
     pub wavelength_range: (f64, f64),
 }
 
+#[cfg_attr(feature="pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct DetectorArrayConfig {
     pub length: f64,
     pub max_incident_angle: f64,
-    pub bin_bounds: Box<[[f64; 2]]>,
+    pub bounds: Vec<[f64; 2]>,
 }
 
 /// Specification structure for the configuration of the Spectrometer Designer
+#[cfg_attr(feature="pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct DesignConfig {
+    pub length_unit: Cow<'static, str>,
     pub optimizer: OptimizationConfig,
     pub compound_prism: CompoundPrismConfig,
     pub detector_array: DetectorArrayConfig,
@@ -63,7 +78,7 @@ impl DesignConfig {
             self.compound_prism.width,
         );
         let detarr = DetectorArray::new(
-            self.detector_array.bin_bounds.as_ref().into(),
+            self.detector_array.bounds.as_ref(),
             self.detector_array.max_incident_angle.to_radians().cos(),
             params.detector_array_angle,
             self.detector_array.length,
@@ -77,10 +92,10 @@ impl DesignConfig {
     }
 
     pub fn maximum_detector_information(&self) -> f64 {
-        (self.detector_array.bin_bounds.len() as f64).log2()
+        (self.detector_array.bounds.len() as f64).log2()
     }
 
-    pub fn optimize(&self, _glass_catalog: Option<Box<[(String, Glass)]>>) -> Box<[Design]> {
+    pub fn optimize_designs(&self, _glass_catalog: Option<&[(String, Glass)]>) -> Vec<Design> {
         if let Some(ref _c) = _glass_catalog {
             unimplemented!("Custom glass catalogs have not been implemented yet")
         }
@@ -107,17 +122,17 @@ impl DesignConfig {
                         .glass_indices()
                         .map(|i| {
                             let (n, g) = &BUNDLED_CATALOG[i];
-                            (*n, g.clone())
+                            (Cow::Borrowed(*n), g.clone())
                         })
                         .collect(),
-                    angles: params.angles.to_owned().into_boxed_slice(),
-                    lengths: params.lengths.to_owned().into_boxed_slice(),
+                    angles: params.angles.to_owned(),
+                    lengths: params.lengths.to_owned(),
                     curvature: params.curvature,
                     height: params.prism_height,
                     width: self.compound_prism.width,
                 };
                 let detector_array = DetectorArrayDesign {
-                    bins: self.detector_array.bin_bounds.clone(),
+                    bins: self.detector_array.bounds.clone(),
                     position: detpos.position,
                     direction: detpos.direction,
                     length: self.detector_array.length,
@@ -140,11 +155,12 @@ impl DesignConfig {
     }
 }
 
-#[derive(Constructor, Debug, Clone, Serialize)]
+#[cfg_attr(feature="pyext", pyclass(name=CompoundPrism))]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct CompoundPrismDesign {
-    pub glasses: Box<[(&'static str, Glass)]>,
-    pub angles: Box<[f64]>,
-    pub lengths: Box<[f64]>,
+    pub glasses: Vec<(Cow<'static, str>, Glass)>,
+    pub angles: Vec<f64>,
+    pub lengths: Vec<f64>,
     pub curvature: f64,
     pub height: f64,
     pub width: f64,
@@ -163,9 +179,10 @@ impl<'s> Into<CompoundPrism<'s>> for &'s CompoundPrismDesign {
     }
 }
 
-#[derive(Constructor, Debug, Clone, Serialize)]
+#[cfg_attr(feature="pyext", pyclass(name=DetectorArray))]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorArrayDesign {
-    pub bins: Box<[[f64; 2]]>,
+    pub bins: Vec<[f64; 2]>,
     pub position: Pair,
     pub direction: Pair,
     pub length: f64,
@@ -193,7 +210,8 @@ impl Into<DetectorArrayPositioning> for &DetectorArrayDesign {
     }
 }
 
-#[derive(Constructor, Debug, Clone, Serialize)]
+#[cfg_attr(feature="pyext", pyclass(name=GaussianBeam))]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct GaussianBeamDesign {
     pub wavelength_range: (f64, f64),
     pub width: f64,
@@ -210,7 +228,8 @@ impl Into<GaussianBeam> for &GaussianBeamDesign {
     }
 }
 
-#[derive(Constructor, Debug, Clone, Serialize)]
+#[cfg_attr(feature="pyext", pyclass)]
+#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct Design {
     pub compound_prism: CompoundPrismDesign,
     pub detector_array: DetectorArrayDesign,
@@ -310,16 +329,16 @@ impl PM {
 
 #[derive(Clone, Debug)]
 struct Soln<F> {
-    params: Box<[f64]>,
+    params: Vec<f64>,
     fitness: F,
 }
 
-trait MultiObjectiveMinimizationProblem: Send + Sync {
+pub trait MultiObjectiveMinimizationProblem: Send + Sync {
     type Fitness: Clone + PartialEq + Send + Sync;
 
     fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64;
     fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool>;
-    fn parameter_bounds(&self) -> Box<[(f64, f64)]>;
+    fn parameter_bounds(&self) -> Vec<(f64, f64)>;
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness>;
 }
 
@@ -371,7 +390,7 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
             .iter()
             .zip(qrng.next())
             .map(|((l, u), r)| l + (u - l) * r)
-            .collect::<Box<_>>();
+            .collect::<Vec<_>>();
         if let Some(fitness) = problem.evaluate(&params) {
             population.push(Soln { params, fitness });
         }
@@ -392,7 +411,7 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
             let p1 = &archive[i];
             let p2 = &archive[j];
 
-            let params: Box<_> = p1
+            let params: Vec<_> = p1
                 .params
                 .iter()
                 .zip(p2.params.iter())
@@ -436,7 +455,7 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
             .iter()
             .zip(qrng.next())
             .map(|((l, u), r)| l + (u - l) * r)
-            .collect::<Box<_>>();
+            .collect::<Vec<_>>();
         if let Some(fitness) = problem.evaluate(&params) {
             break Soln { params, fitness };
         }
@@ -462,7 +481,7 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
                     .iter()
                     .zip(qrng.next())
                     .map(|((l, u), r)| l + (u - l) * r)
-                    .collect::<Box<_>>();
+                    .collect::<Vec<_>>();
                 if let Some(fitness) = problem.evaluate(&params) {
                     let test_soln = Soln { params, fitness };
                     /*if add_to_archive(problem, &mut archive, &test_soln)*/
@@ -475,13 +494,13 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
             };
         };
         const R: f64 = 0.5;
-        let x: Vec<_> = (&mut rng)
-            .sample_iter(rand::distributions::StandardNormal)
+        let x: Vec<f64> = (&mut rng)
+            .sample_iter(rand_distr::StandardNormal)
             .take(bounds.len() + 2)
             .collect();
         let r = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
         let x = x.into_iter().map(|xi| xi * R / r);
-        let params: Box<_> = optimal
+        let params: Vec<_> = optimal
             .params
             .iter()
             .zip(x)
@@ -594,7 +613,7 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
         }
     }
 
-    fn parameter_bounds(&self) -> Box<[(f64, f64)]> {
+    fn parameter_bounds(&self) -> Vec<(f64, f64)> {
         let prism_count_bounds = (1., (1 + self.compound_prism.max_count) as f64);
         let prism_height_bounds = (0.001, self.compound_prism.max_height);
         let glass_bounds = (0., (BUNDLED_CATALOG.len() - 1) as f64);
@@ -619,7 +638,7 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
         bounds.push(curvature_bounds);
         bounds.push(normalized_y_mean_bounds);
         bounds.push(det_arr_angle_bounds);
-        bounds.into_boxed_slice()
+        bounds
     }
 
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {

@@ -1,4 +1,4 @@
-#![allow(clippy::block_in_if_condition_stmt)]
+#![allow(clippy::block_in_if_condition_stmt, clippy::range_plus_one)]
 #[macro_use]
 extern crate derive_more;
 
@@ -9,5 +9,7 @@ pub mod optimizer;
 mod pylib;
 mod qrng;
 mod ray;
+#[macro_use]
+mod utils;
 pub use crate::glasscat::*;
 pub use crate::ray::*;

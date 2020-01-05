@@ -730,30 +730,7 @@ fn erf_inv_impl(p: f64, q: f64, s: f64) -> f64 {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    fn almost_eq(a: f64, b: f64, acc: f64) -> bool {
-        // only true if a and b are infinite with same
-        // sign
-        if a.is_infinite() || b.is_infinite() {
-            return a == b;
-        }
-        // NANs are never equal
-        if a.is_nan() && b.is_nan() {
-            return false;
-        }
-        (a - b).abs() < acc
-    }
-
-    macro_rules! assert_almost_eq {
-        ($a:expr, $b:expr, $prec:expr) => {
-            if !almost_eq($a, $b, $prec) {
-                panic!(format!(
-                    "assertion failed: `abs(left - right) < {:e}`, (left: `{}`, right: `{}`), abs(left - right) = {:.2e}",
-                    $prec, $a, $b, ($a - $b).abs()
-                ));
-            }
-        };
-    }
+    use crate::assert_almost_eq;
 
     #[test]
     fn test_erf() {

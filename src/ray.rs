@@ -1,10 +1,14 @@
 use crate::erf::{erf, erfc_inv};
 use crate::glasscat::Glass;
 use crate::qrng::Qrng;
+use crate::utils::*;
+use crate::debug_assert_almost_eq;
 use core::f64::consts::*;
-use libm::{log2, sincos};
+use libm::log2;
 use serde::{Deserialize, Serialize};
-// Can't use libm::sqrt till https://github.com/rust-lang/libm/pull/222 is merged
+#[cfg(feature = "pyext")]
+use pyo3::prelude::{pyclass, PyObject};
+
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -27,83 +31,6 @@ impl Into<&'static str> for RayTraceError {
     }
 }
 
-/// vector in R^2 represented as a 2-tuple
-#[repr(C)]
-#[derive(
-    Debug, PartialEq, Clone, Copy, From, Into, Neg, Add, Sub, Mul, Div, Serialize, Deserialize,
-)]
-pub struct Pair {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Pair {
-    /// dot product of two vectors, a • b
-    pub fn dot(self, other: Self) -> f64 {
-        self.x * other.x + self.y * other.y
-    }
-
-    /// square of the vector norm, ||v||^2
-    pub fn norm_squared(self) -> f64 {
-        self.dot(self)
-    }
-
-    /// vector norm, ||v||
-    pub fn norm(self) -> f64 {
-        self.norm_squared().sqrt()
-    }
-
-    /// is it a unit vector, ||v|| ≅? 1
-    pub fn is_unit(self) -> bool {
-        (self.norm() - 1_f64).abs() < 1e-3
-    }
-}
-
-/// rotate `vector` by `angle` CCW
-#[inline(always)]
-fn rotate(angle: f64, vector: Pair) -> Pair {
-    let (s, c) = sincos(angle);
-    Pair {
-        x: c * vector.x - s * vector.y,
-        y: s * vector.x + c * vector.y,
-    }
-}
-
-/// Matrix in R^(2x2)
-#[derive(Debug, Clone, Copy)]
-struct Mat2([f64; 4]);
-
-impl Mat2 {
-    /// New Matrix from the two given columns
-    fn new_from_cols(col1: Pair, col2: Pair) -> Self {
-        Self([col1.x, col2.x, col1.y, col2.y])
-    }
-
-    /// Matrix inverse if it exists
-    fn inverse(self) -> Option<Self> {
-        let [a, b, c, d] = self.0;
-        let det = a * d - b * c;
-        if det == 0. {
-            None
-        } else {
-            Some(Self([d / det, -b / det, -c / det, a / det]))
-        }
-    }
-}
-
-impl core::ops::Mul<Pair> for Mat2 {
-    type Output = Pair;
-
-    /// Matrix x Vector -> Vector multiplication
-    fn mul(self, rhs: Pair) -> Self::Output {
-        let [a, b, c, d] = self.0;
-        Pair {
-            x: a * rhs.x + b * rhs.y,
-            y: c * rhs.x + d * rhs.y,
-        }
-    }
-}
-
 /// Collimated Polychromatic Gaussian Beam
 #[derive(Debug, Clone)]
 pub struct GaussianBeam {
@@ -117,32 +44,35 @@ pub struct GaussianBeam {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Surface {
-    pub normal: Pair,
-    pub midpt: Pair,
+    angle: f64,
+    normal: Pair,
+    midpt: Pair,
 }
 
 impl Surface {
     fn first_surface(angle: f64, height: f64) -> Self {
         let normal = rotate(angle, (-1_f64, 0_f64).into());
+        debug_assert_almost_eq!((normal.y / normal.x).abs(), angle.tan().abs(), 1e-10);
         Self {
+            angle,
             normal,
             midpt: ((normal.y / normal.x).abs() * height * 0.5, height * 0.5).into(),
         }
     }
 
-    fn next_surface(&self, height: f64, new_angle: f64, sep_length: f64) -> Self {
-        let normal = rotate(new_angle, (-1_f64, 0_f64).into());
+    fn next_surface(&self, height: f64, angle: f64, sep_length: f64) -> Self {
+        let normal = rotate(angle, (-1_f64, 0_f64).into());
+        debug_assert_almost_eq!((normal.y / normal.x).abs(), angle.tan().abs(), 1e-10);
         let d1 = (self.normal.y / self.normal.x).abs() * height * 0.5;
         let d2 = (normal.y / normal.x).abs() * height * 0.5;
         let sep_dist = sep_length
-            + if (self.normal.y >= 0.) != (normal.y >= 0.) {
+            + if self.normal.y.is_sign_positive() != normal.y.is_sign_positive() {
                 d1 + d2
-            } else if self.normal.y.abs() > normal.y.abs() {
-                d1 - d2
             } else {
-                d2 - d1
+                (d1 - d2).abs()
             };
         Self {
+            angle,
             normal,
             midpt: self.midpt + (sep_dist, 0.).into(),
         }
@@ -611,53 +541,20 @@ pub fn detector_array_positioning(
     })
 }
 
-/// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-#[derive(Clone)]
-struct Welford {
-    count: f64,
-    mean: f64,
-    m2: f64,
-}
-
-impl Welford {
-    fn new() -> Self {
-        Welford {
-            count: 0.,
-            mean: 0.,
-            m2: 0.,
-        }
-    }
-    fn next_sample(&mut self, x: f64) {
-        self.count += 1.;
-        let delta = x - self.mean;
-        self.mean += delta / self.count;
-        let delta2 = x - self.mean;
-        self.m2 += delta * delta2;
-    }
-    #[allow(dead_code)]
-    fn variance(&self) -> f64 {
-        self.m2 / self.count
-    }
-    fn sample_variance(&self) -> f64 {
-        self.m2 / (self.count - 1.)
-    }
-}
-
-fn vector_quasi_monte_carlo_integration<Q, I, F>(
+fn vector_quasi_monte_carlo_integration<I, F>(
     max_err: f64,
     vec_len: usize,
     vector_fn: F,
 ) -> Vec<Welford>
 where
-    Q: quasirandom::Quasirandom,
-    I: Iterator<Item = f64>,
-    F: Fn(Q) -> Option<I>,
+    I: ExactSizeIterator<Item = f64>,
+    F: Fn(f64) -> Option<I>,
 {
-    const MAX_N: usize = 100000;
+    const MAX_N: usize = 10_000;
     let max_err_squared = max_err * max_err;
     let mut stats = vec![Welford::new(); vec_len];
-    let mut qrng = Qrng::new(1);
-    for u in core::iter::repeat_with(|| qrng.next::<Q>()).take(MAX_N) {
+    let mut qrng = Qrng::<f64>::new(0.5_f64);
+    for u in core::iter::repeat_with(|| qrng.next()).take(MAX_N) {
         if let Some(vec) = vector_fn(u) {
             for (v, w) in vec.zip(stats.iter_mut()) {
                 w.next_sample(v);
@@ -668,9 +565,7 @@ where
             }
         }
         if stats.iter().all(|stat| {
-            // err = sample_variance / sqrt(N)
-            let var = stat.sample_variance();
-            (var * var) < max_err_squared * stat.count
+            stat.sem_le_error_threshold(max_err_squared)
         }) {
             break;
         }
@@ -696,7 +591,7 @@ pub fn p_dets_l_wavelength(
 ) -> impl Iterator<Item = f64> {
     let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
     debug_assert!(0. <= p_z && p_z <= 1.);
-    vector_quasi_monte_carlo_integration(7.5e-3, detarr.bins.len(), move |u: f64| {
+    vector_quasi_monte_carlo_integration(5e-3, detarr.bins.len(), move |u: f64| {
         // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
         let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
         if y <= 0. || cmpnd.height <= y {
@@ -724,9 +619,9 @@ pub fn p_dets_l_wavelength(
         } else {
             None
         }
-    }).into_iter()
-        //.inspect(|w| {debug_assert!(0. <= w.mean && w.mean <= 1.); if w.count > 2. {println!("{}", w.count)}})
-        .map(|w| w.mean)
+    })
+    .into_iter()
+    .map(|w| w.mean)
 }
 
 /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
@@ -743,46 +638,12 @@ fn mutual_information(
     beam: &GaussianBeam,
     detpos: &DetectorArrayPositioning,
 ) -> f64 {
-    /*let (wmin, wmax) = beam.w_range;
-    let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
-    debug_assert!(0. <= p_z && p_z <= 1.);
-    let p_det_test_stats = vector_quasi_monte_carlo_integration(5e-4, detarr.bins.len(), |(v, u): (f64, f64)| {
-        // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-        let w = wmin + v * (wmax - wmin);
-        // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
-        let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
-        if y <= 0. || cmpnd.height <= y {
-            return None;
-        }
-        let ray = Ray::new_from_start(y);
-        if let Ok((_, pos, t)) = ray.propagate(w, cmpnd, detarr, detpos) {
-            debug_assert!(pos.is_finite());
-            debug_assert!(0. <= pos && pos <= detarr.length);
-            debug_assert!(t.is_finite());
-            debug_assert!(0. <= t && t <= 1.);
-            // What is actually being integrated is
-            // pdf_t = p_z * t * pdf(y);
-            // But because of importance sampling using the same distribution
-            // pdf_t /= pdf(y);
-            // the pdf(y) is cancelled, so.
-            // pdf_t = p_z * t;
-            let pdf_t = p_z * t;
-            Some(
-                detarr
-                    .bins
-                    .iter()
-                    .map(move |&[l, u]| if l <= pos && pos < u { pdf_t } else { 0. }),
-            )
-        } else {
-            None
-        }
-    });*/
-    const MAX_N: usize = 1000;
+    const MAX_N: usize = 10_000;
     let (wmin, wmax) = beam.w_range;
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
     let mut info_stats = vec![Welford::new(); detarr.bins.len()];
-    let mut qrng = Qrng::new(1);
-    for u in core::iter::repeat_with(|| qrng.next::<f64>()).take(MAX_N) {
+    let mut qrng = Qrng::<f64>::new(0_f64);
+    for u in core::iter::repeat_with(|| qrng.next()).take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = wmin + u * (wmax - wmin);
         let p_dets_l_w = p_dets_l_wavelength(w, cmpnd, detarr, beam, detpos);
@@ -800,28 +661,14 @@ fn mutual_information(
             }
         }
         if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
-            // err = sample_variance / sqrt(N)
-            let var = stat.sample_variance();
-            const MAX_ERR: f64 = 2.5e-3;
+            const MAX_ERR: f64 = 5e-3;
             const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
-            (var * var) < MAX_ERR_SQ * stat.count
+            stat.sem_le_error_threshold(MAX_ERR_SQ)
         }) {
             break;
         }
     }
     let mut info: f64 = info_stats.into_iter().map(|s| s.mean).sum();
-    /*for (s1, s2) in p_dets_stats.iter().zip(p_det_test_stats.iter()) {
-        println!("{} v {}; {} v {}", s1.count, s2.count, s1.sample_variance(), s2.sample_variance());
-
-        Expected :0.005104141246649202
-Actual   :0.006270770708374839
-
-Expected :0.009488595065630243
-Actual   :0.006197148940200429
-
-
-        debug_assert_eq!(s1.mean, s2.mean);
-    }*/
     for stat in p_dets_stats {
         let p_det = stat.mean;
         debug_assert!(0. <= p_det && p_det <= 1.);
@@ -853,6 +700,7 @@ pub fn trace<'s>(
     ray.trace(wavelength, cmpnd, detarr, detpos)
 }
 
+#[cfg_attr(feature="pyext", pyclass)]
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct DesignFitness {
     pub size: f64,
@@ -994,6 +842,7 @@ mod tests {
     #[test]
     fn test_with_known_prism() {
         let glasses = [
+            // N-PK52A
             &Glass::Sellmeier1([
                 1.029607,
                 0.00516800155,
@@ -1002,6 +851,7 @@ mod tests {
                 0.736488165,
                 138.964129,
             ]),
+            // N-SF57
             &Glass::Sellmeier1([
                 1.87543831,
                 0.0141749518,
@@ -1010,6 +860,7 @@ mod tests {
                 2.30001797,
                 177.389795,
             ]),
+            // N-FK58
             &Glass::Sellmeier1([
                 0.738042712,
                 0.00339065607,
