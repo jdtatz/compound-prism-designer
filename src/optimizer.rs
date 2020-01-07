@@ -2,6 +2,7 @@ use crate::glasscat::Glass;
 use crate::glasscat::BUNDLED_CATALOG;
 use crate::qrng::DynamicQrng;
 use crate::ray::*;
+use crate::fitness::*;
 use crate::utils::*;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
@@ -383,7 +384,8 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
         probability: mutation_probability,
     };
     let bounds = problem.parameter_bounds();
-    let mut qrng = DynamicQrng::new(1., bounds.len());
+    let qrng_seed = (&mut rng).sample_iter(rand_distr::Uniform::new(0., 1.)).take(bounds.len()).collect();
+    let mut qrng = DynamicQrng::new(qrng_seed);
     let mut population = Vec::with_capacity(population_size);
     while population.len() < population_size {
         let params = bounds
@@ -448,7 +450,8 @@ fn _optimize<P: MultiObjectiveMinimizationProblem>(
         probability: mutation_probability,
     };
     let bounds = problem.parameter_bounds();
-    let mut qrng = DynamicQrng::new(1., bounds.len());
+    let qrng_seed = (&mut rng).sample_iter(rand_distr::Uniform::new(0., 1.)).take(bounds.len()).collect();
+    let mut qrng = DynamicQrng::new(qrng_seed);
 
     let mut optimal = loop {
         let params = bounds

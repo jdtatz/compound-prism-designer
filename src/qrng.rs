@@ -88,8 +88,8 @@ pub struct Qrng<T: Sized> {
     alpha: T,
 }
 
+#[allow(clippy::unreadable_literal, clippy::excessive_precision)]
 const PHI_1: f64 = 1.61803398874989484820458683436563;
-const PHI_2: f64 = 1.32471795724474602596090885447809;
 
 impl Qrng<f64> {
     pub fn new(seed: f64) -> Self {
@@ -105,20 +105,6 @@ impl Qrng<f64> {
     }
 }
 
-impl Qrng<[f64; 2]> {
-    pub fn new(seed: [f64; 2]) -> Self {
-        Self {
-            state: seed,
-            alpha: [1_f64 / PHI_2, 1_f64 / (PHI_2 * PHI_2)]
-        }
-    }
-
-    pub fn next(&mut self) -> [f64; 2] {
-        self.state = [(self.state[0] + self.alpha[0]).fract(), (self.state[1] + self.alpha[1]).fract()];
-        self.state
-    }
-}
-
 fn phi(dim: usize) -> f64 {
     let mut x = 2_f64;
     let pow = ((dim + 1) as f64).recip();
@@ -129,12 +115,13 @@ fn phi(dim: usize) -> f64 {
 }
 
 pub struct DynamicQrng {
-    state: f64,
+    state: Vec<f64>,
     alphas: Vec<f64>,
 }
 
 impl DynamicQrng {
-    pub fn new(seed: f64, dim: usize) -> Self {
+    pub fn new(seed: Vec<f64>) -> Self {
+        let dim = seed.len();
         let root = phi(dim);
         let alphas = (1..=dim).map(|i| root.powi(-(i as i32))).collect();
         DynamicQrng {
@@ -143,12 +130,10 @@ impl DynamicQrng {
         }
     }
 
-    pub fn next(&mut self) -> impl ExactSizeIterator<Item = f64> + '_ {
-        let state = self.state;
-        self.state += 1_f64;
-        self.alphas
-            .iter()
-            .copied()
-            .map(move |c| (state * c).fract())
+    pub fn next(&mut self) -> &[f64] {
+        for (s, alpha) in self.state.iter_mut().zip(self.alphas.iter().copied()) {
+            *s = (*s + alpha).fract();
+        }
+        self.state.as_slice()
     }
 }

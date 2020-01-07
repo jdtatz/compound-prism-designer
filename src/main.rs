@@ -16,9 +16,9 @@ mod qrng;
 mod ray;
 #[macro_use]
 mod utils;
+mod fitness;
 
 use crate::optimizer::*;
-use crate::ray::*;
 
 #[derive(serde::Serialize)]
 struct DesignOutput {

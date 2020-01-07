@@ -80,7 +80,7 @@ pub fn rotate(angle: f64, vector: Pair) -> Pair {
     }
 }
 
-/// Matrix in R^(2x2)
+/// Matrix in R^(2x2) in row major order
 #[derive(Debug, Clone, Copy)]
 pub struct Mat2([f64; 4]);
 
