@@ -3,13 +3,13 @@ length-unit = "mm"
 
 # Genetic algorithm optimization properties
 [optimizer]
-iteration-count = 1024
-population-size = 100000
-offspring-size = 512
+iteration-count = 64
+population-size = 128
+offspring-size = 32
 crossover-distribution-index = 20
 mutation-distribution-index = 12
 mutation-probability = 0.05
-seed = 8756747673
+seed = 99645867387
 epsilons = [2.5, 0.02, 0.05]
 
 # Compound prism design specification

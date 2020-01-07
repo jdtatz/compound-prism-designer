@@ -11,5 +11,7 @@ mod qrng;
 mod ray;
 #[macro_use]
 mod utils;
+mod fitness;
 pub use crate::glasscat::*;
 pub use crate::ray::*;
+pub use crate::fitness::*;
