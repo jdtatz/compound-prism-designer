@@ -1,3 +1,5 @@
+#[cfg(target_arch ="nvptx64")]
+use crate::utils::F64Ext;
 /*
 #![feature(const_fn, const_loop, const_if_match, const_generics)]
 
@@ -114,11 +116,13 @@ fn phi(dim: usize) -> f64 {
     x
 }
 
+#[cfg(not(target_arch ="nvptx64"))]
 pub struct DynamicQrng {
     state: Vec<f64>,
     alphas: Vec<f64>,
 }
 
+#[cfg(not(target_arch ="nvptx64"))]
 impl DynamicQrng {
     pub fn new(seed: Vec<f64>) -> Self {
         let dim = seed.len();

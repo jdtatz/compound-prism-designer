@@ -4,7 +4,6 @@ use crate::erf::{erf, erfc_inv};
 use crate::ray::*;
 use core::f64::consts::*;
 use libm::log2;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "pyext")]
 use pyo3::prelude::{pyclass, PyObject};
 
@@ -182,6 +181,27 @@ pub fn fitness(
         info,
         deviation,
     })
+}
+
+impl<'a> Spectrometer<'a> {
+    pub fn fitness(&self) -> DesignFitness {
+        let deviation_vector =
+            self.detector_array_position.position +
+                self.detector_array_position.direction * self.detector_array.length * 0.5 -
+                (0., self.gaussian_beam.y_mean).into();
+        let size = deviation_vector.norm();
+        let deviation = deviation_vector.y.abs() / deviation_vector.norm();
+        let info = mutual_information(
+            &self.compound_prism,
+            &self.detector_array,
+            &self.gaussian_beam,
+            &self.detector_array_position);
+        DesignFitness {
+            size,
+            info,
+            deviation,
+        }
+    }
 }
 
 #[cfg(test)]

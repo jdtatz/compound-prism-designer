@@ -6,7 +6,6 @@ use crate::fitness::*;
 use crate::utils::*;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 #[cfg(feature = "pyext")]
 use pyo3::prelude::{pyclass, PyObject};
@@ -167,8 +166,8 @@ pub struct CompoundPrismDesign {
     pub width: f64,
 }
 
-impl<'s> Into<CompoundPrism<'s>> for &'s CompoundPrismDesign {
-    fn into(self) -> CompoundPrism<'s> {
+impl Into<CompoundPrism> for &CompoundPrismDesign {
+    fn into(self) -> CompoundPrism {
         CompoundPrism::new(
             self.glasses.iter().map(|(_, g)| g),
             &self.angles,
@@ -434,142 +433,6 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
     archive
 }
 
-fn _optimize<P: MultiObjectiveMinimizationProblem>(
-    problem: &P,
-    iteration_count: usize,
-    population_size: usize,
-    offspring_size: usize,
-    seed: u64,
-    _crossover_distribution_index: f64,
-    mutation_distribution_index: f64,
-    mutation_probability: f64,
-) -> Vec<Soln<P::Fitness>> {
-    let mut rng = PRng::seed_from_u64(seed);
-    let mutator = PM {
-        distribution_index: mutation_distribution_index,
-        probability: mutation_probability,
-    };
-    let bounds = problem.parameter_bounds();
-    let qrng_seed = (&mut rng).sample_iter(rand_distr::Uniform::new(0., 1.)).take(bounds.len()).collect();
-    let mut qrng = DynamicQrng::new(qrng_seed);
-
-    let mut optimal = loop {
-        let params = bounds
-            .iter()
-            .zip(qrng.next())
-            .map(|((l, u), r)| l + (u - l) * r)
-            .collect::<Vec<_>>();
-        if let Some(fitness) = problem.evaluate(&params) {
-            break Soln { params, fitness };
-        }
-    };
-    let mut archive = Vec::with_capacity(population_size);
-    archive.push(optimal.clone());
-    let mut failures = 0;
-    const MAX_FAILURES: usize = 50;
-
-    // temporary
-    let iteration_count = iteration_count * offspring_size + population_size;
-    let mut t0 = std::time::Instant::now();
-    let mut fg = 0;
-    let mut f = 0;
-    let mut s = 0;
-    let mut so = 0;
-    let mut sc = 0;
-    for i in 0..iteration_count {
-        if failures >= MAX_FAILURES {
-            failures = 0;
-            optimal = loop {
-                let params = bounds
-                    .iter()
-                    .zip(qrng.next())
-                    .map(|((l, u), r)| l + (u - l) * r)
-                    .collect::<Vec<_>>();
-                if let Some(fitness) = problem.evaluate(&params) {
-                    let test_soln = Soln { params, fitness };
-                    /*if add_to_archive(problem, &mut archive, &test_soln)*/
-                    {
-                        break test_soln;
-                    }
-                }
-                println!("Failure to generate new optimal");
-                fg += 1;
-            };
-        };
-        const R: f64 = 0.5;
-        let x: Vec<f64> = (&mut rng)
-            .sample_iter(rand_distr::StandardNormal)
-            .take(bounds.len() + 2)
-            .collect();
-        let r = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
-        let x = x.into_iter().map(|xi| xi * R / r);
-        let params: Vec<_> = optimal
-            .params
-            .iter()
-            .zip(x)
-            .zip(bounds.iter())
-            .map(|((&x, xi), &(lb, ub))| (x + xi).min(ub).max(lb))
-            .collect();
-        let child = if let Some(fitness) = problem.evaluate(&params) {
-            Soln { params, fitness }
-        } else {
-            failures += 1;
-            continue;
-        };
-        match problem.epsilon_dominance(&optimal.fitness, &child.fitness) {
-            Some(true) => {
-                println!("Failure");
-                failures += 1;
-                f += 1;
-            }
-            Some(false) => {
-                println!("Success");
-                failures = 0;
-                optimal = child;
-                add_to_archive(problem, &mut archive, &optimal);
-                s += 1;
-            }
-            None => {
-                // TODO temp
-                add_to_archive(problem, &mut archive, &child);
-                //if add_to_archive(problem, &mut archive, &child) {
-                failures = 0;
-                // TODO: choose new optimal using crowding distance metric
-                // temp => choose random
-                let mut dist1 = std::f64::INFINITY;
-                let mut dist2 = std::f64::INFINITY;
-                for a in archive.iter() {
-                    if a.fitness != optimal.fitness || a.fitness != child.fitness {
-                        dist1 = dist1.min(problem.grid_distance(&a.fitness, &optimal.fitness));
-                        dist2 = dist1.min(problem.grid_distance(&a.fitness, &child.fitness));
-                    }
-                }
-                if dist1 <= dist2 {
-                    optimal = child;
-                    println!("Success: child is new optimal");
-                    sc += 1;
-                } else {
-                    println!("Success: keeping optimal");
-                    so += 1;
-                }
-                //}
-            }
-        }
-        println!(
-            "Iteration {}, {:.4}ms",
-            i + 1,
-            t0.elapsed().as_secs_f64() * 1e3_f64
-        );
-        t0 = std::time::Instant::now();
-    }
-    println!("gen failures: {}", fg);
-    println!("failures: {}", f);
-    println!("successes: {}", s);
-    println!("successes w/ change: {}", sc);
-    println!("successes w/ keep: {}", so);
-    archive
-}
-
 impl MultiObjectiveMinimizationProblem for DesignConfig {
     type Fitness = DesignFitness;
 
@@ -646,8 +509,12 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
 
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
         let (cmpnd, detarr, beam) = self.array_to_params(params);
-        fitness(&cmpnd, &detarr, &beam)
-            .ok()
-            .filter(|f| f.size <= 30. * self.compound_prism.max_height && f.info > 0.2)
+        let spec: Spectrometer = Spectrometer::new(beam, cmpnd, detarr).ok()?;
+        let fit = spec.fitness();
+        if fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2 {
+            Some(fit)
+        } else {
+            None
+        }
     }
 }

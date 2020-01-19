@@ -1,7 +1,8 @@
 use crate::utils::Pair;
 use crate::glasscat::*;
 use crate::optimizer::*;
-use crate::ray::{p_dets_l_wavelength, trace, CompoundPrism, DesignFitness};
+use crate::ray::{trace, CompoundPrism};
+use crate::fitness::*;
 use ndarray::prelude::{array, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::create_exception;
@@ -10,7 +11,6 @@ use pyo3::prelude::*;
 use pyo3::types::PyAny;
 use pyo3::wrap_pyfunction;
 use pyo3::ObjectProtocol;
-use crate::ray::fitness;
 use pyo3::types::PyBytes;
 
 create_exception!(compound_prism_designer, GlassCatalogError, Exception);
