@@ -1,7 +1,7 @@
-use crate::utils::*;
-use crate::qrng::*;
 use crate::erf::{erf, erfc_inv};
+use crate::qrng::*;
 use crate::ray::*;
+use crate::utils::*;
 use core::f64::consts::*;
 use libm::log2;
 #[cfg(feature = "pyext")]
@@ -9,20 +9,19 @@ use pyo3::prelude::{pyclass, PyObject};
 
 const MAX_N: usize = 100_000;
 
-
 fn vector_quasi_monte_carlo_integration<I, F>(
     max_err: f64,
     vec_len: usize,
     vector_fn: F,
 ) -> Vec<Welford>
-    where
-        I: ExactSizeIterator<Item = f64>,
-        F: Fn(f64) -> Option<I>,
+where
+    I: ExactSizeIterator<Item = f64>,
+    F: Fn(f64) -> Option<I>,
 {
     let max_err_squared = max_err * max_err;
     let mut stats = vec![Welford::new(); vec_len];
-    let mut qrng = Qrng::<f64>::new(0.5_f64);
-    for u in core::iter::repeat_with(|| qrng.next()).take(MAX_N) {
+    let qrng = Qrng::<f64>::new(0.5_f64);
+    for u in qrng.take(MAX_N) {
         if let Some(vec) = vector_fn(u) {
             for (v, w) in vec.zip(stats.iter_mut()) {
                 w.next_sample(v);
@@ -32,9 +31,10 @@ fn vector_quasi_monte_carlo_integration<I, F>(
                 w.next_sample(0.);
             }
         }
-        if stats.iter().all(|stat| {
-            stat.sem_le_error_threshold(max_err_squared)
-        }) {
+        if stats
+            .iter()
+            .all(|stat| stat.sem_le_error_threshold(max_err_squared))
+        {
             break;
         }
     }
@@ -88,8 +88,8 @@ pub fn p_dets_l_wavelength(
             None
         }
     })
-        .into_iter()
-        .map(|w| w.mean)
+    .into_iter()
+    .map(|w| w.mean)
 }
 
 /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
@@ -109,8 +109,8 @@ fn mutual_information(
     let (wmin, wmax) = beam.w_range;
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
     let mut info_stats = vec![Welford::new(); detarr.bins.len()];
-    let mut qrng = Qrng::<f64>::new(0.5_f64);
-    for u in core::iter::repeat_with(|| qrng.next()).take(MAX_N) {
+    let qrng = Qrng::<f64>::new(0.5_f64);
+    for u in qrng.take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = wmin + u * (wmax - wmin);
         let p_dets_l_w = p_dets_l_wavelength(w, cmpnd, detarr, beam, detpos);
@@ -118,15 +118,15 @@ fn mutual_information(
             .iter_mut()
             .zip(info_stats.iter_mut())
             .zip(p_dets_l_w)
-            {
-                debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
-                dstat.next_sample(p_det_l_w);
-                if p_det_l_w > 0. {
-                    istat.next_sample(p_det_l_w * log2(p_det_l_w));
-                } else {
-                    istat.next_sample(0.);
-                }
+        {
+            debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
+            dstat.next_sample(p_det_l_w);
+            if p_det_l_w > 0. {
+                istat.next_sample(p_det_l_w * log2(p_det_l_w));
+            } else {
+                istat.next_sample(0.);
             }
+        }
         if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
             const MAX_ERR: f64 = 5e-3;
             const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
@@ -146,8 +146,7 @@ fn mutual_information(
     info
 }
 
-
-#[cfg_attr(feature="pyext", pyclass)]
+#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct DesignFitness {
     pub size: f64,
@@ -185,17 +184,17 @@ pub fn fitness(
 
 impl<'a> Spectrometer<'a> {
     pub fn fitness(&self) -> DesignFitness {
-        let deviation_vector =
-            self.detector_array_position.position +
-                self.detector_array_position.direction * self.detector_array.length * 0.5 -
-                (0., self.gaussian_beam.y_mean).into();
+        let deviation_vector = self.detector_array_position.position
+            + self.detector_array_position.direction * self.detector_array.length * 0.5
+            - (0., self.gaussian_beam.y_mean).into();
         let size = deviation_vector.norm();
         let deviation = deviation_vector.y.abs() / deviation_vector.norm();
         let info = mutual_information(
             &self.compound_prism,
             &self.detector_array,
             &self.gaussian_beam,
-            &self.detector_array_position);
+            &self.detector_array_position,
+        );
         DesignFitness {
             size,
             info,
@@ -207,10 +206,10 @@ impl<'a> Spectrometer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::glasscat::Glass;
+    use crate::utils::almost_eq;
     use rand::prelude::*;
     use std::ops::Deref;
-    use crate::utils::almost_eq;
-    use crate::glasscat::Glass;
 
     #[test]
     fn test_many() {

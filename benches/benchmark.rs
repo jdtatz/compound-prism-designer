@@ -118,11 +118,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     };
     let spec: Spectrometer = Spectrometer::new(beam, prism, detarr).unwrap();
     c.bench_function("known_design_example", |b| {
-        b.iter(|| spec.fitness().unwrap());
+        b.iter(|| spec.fitness());
     });
     c.bench_function("cuda_known_design_example", |b| {
         b.iter(|| spec.cuda_fitness().unwrap())
     });
+    let cpu_fitness = spec.fitness();
+    let cuda_fitness = spec.cuda_fitness().unwrap();
+    assert_almost_eq!(cpu_fitness.info, cuda_fitness.info, 1e-2);
+    println!("cpu: {:?}", cpu_fitness);
+    println!("cuda: {:?}", cuda_fitness);
 }
 
 criterion_group! {

@@ -1,8 +1,8 @@
 use libm::sincos;
-#[cfg(not(target_arch ="nvptx64"))]
+#[cfg(not(target_arch = "nvptx64"))]
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch ="nvptx64")]
+#[cfg(target_arch = "nvptx64")]
 pub trait F64Ext {
     fn mul_add(self, a: Self, b: Self) -> Self;
     fn sqrt(self) -> Self;
@@ -14,7 +14,7 @@ pub trait F64Ext {
     fn asin(self) -> Self;
 }
 
-#[cfg(target_arch ="nvptx64")]
+#[cfg(target_arch = "nvptx64")]
 impl F64Ext for f64 {
     fn mul_add(self, a: Self, b: Self) -> Self {
         unsafe { core::intrinsics::fmaf64(self, a, b) }
@@ -89,7 +89,7 @@ macro_rules! debug_assert_almost_eq {
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, From, Into, Neg, Add, Sub, Mul, Div)]
-#[cfg_attr(not(target_arch="nvptx64"), derive(Serialize, Deserialize))]
+#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
 pub struct Pair {
     pub x: f64,
     pub y: f64,
@@ -171,7 +171,7 @@ impl core::ops::Mul<Pair> for Mat2 {
 }
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Welford {
     pub count: f64,
     pub mean: f64,

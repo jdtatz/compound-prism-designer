@@ -1,7 +1,6 @@
-use arrayvec::ArrayVec;
-#[cfg(target_arch ="nvptx64")]
+#[cfg(target_arch = "nvptx64")]
 use crate::utils::F64Ext;
-
+use arrayvec::ArrayVec;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -33,7 +32,7 @@ impl Into<&'static str> for CatalogError {
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(target_arch ="nvptx64"), derive(Serialize, Deserialize))]
+#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
 pub enum Glass {
     Schott([f64; 6]),
     Sellmeier1([f64; 6]),

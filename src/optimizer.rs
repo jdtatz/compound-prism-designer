@@ -1,17 +1,17 @@
+use crate::fitness::*;
 use crate::glasscat::Glass;
 use crate::glasscat::BUNDLED_CATALOG;
 use crate::qrng::DynamicQrng;
 use crate::ray::*;
-use crate::fitness::*;
 use crate::utils::*;
+#[cfg(feature = "pyext")]
+use pyo3::prelude::{pyclass, PyObject};
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus as PRng;
 use std::borrow::Cow;
-#[cfg(feature = "pyext")]
-use pyo3::prelude::{pyclass, PyObject};
 
-#[cfg_attr(feature="pyext", pyclass)]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "pyext", pyclass)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct OptimizationConfig {
     pub iteration_count: usize,
@@ -24,7 +24,7 @@ pub struct OptimizationConfig {
     pub epsilons: [f64; 3],
 }
 
-#[cfg_attr(feature="pyext", pyclass)]
+#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CompoundPrismConfig {
@@ -33,7 +33,7 @@ pub struct CompoundPrismConfig {
     pub width: f64,
 }
 
-#[cfg_attr(feature="pyext", pyclass)]
+#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct GaussianBeamConfig {
@@ -41,7 +41,7 @@ pub struct GaussianBeamConfig {
     pub wavelength_range: (f64, f64),
 }
 
-#[cfg_attr(feature="pyext", pyclass)]
+#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct DetectorArrayConfig {
@@ -51,7 +51,7 @@ pub struct DetectorArrayConfig {
 }
 
 /// Specification structure for the configuration of the Spectrometer Designer
-#[cfg_attr(feature="pyext", pyclass)]
+#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct DesignConfig {
@@ -228,7 +228,7 @@ impl Into<GaussianBeam> for &GaussianBeamDesign {
     }
 }
 
-#[cfg_attr(feature="pyext", pyclass)]
+#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct Design {
     pub compound_prism: CompoundPrismDesign,
@@ -383,7 +383,10 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
         probability: mutation_probability,
     };
     let bounds = problem.parameter_bounds();
-    let qrng_seed = (&mut rng).sample_iter(rand_distr::Uniform::new(0., 1.)).take(bounds.len()).collect();
+    let qrng_seed = (&mut rng)
+        .sample_iter(rand_distr::Uniform::new(0., 1.))
+        .take(bounds.len())
+        .collect();
     let mut qrng = DynamicQrng::new(qrng_seed);
     let mut population = Vec::with_capacity(population_size);
     while population.len() < population_size {
