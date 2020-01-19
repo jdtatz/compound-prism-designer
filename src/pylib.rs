@@ -1,17 +1,17 @@
-use crate::utils::Pair;
+use crate::fitness::*;
 use crate::glasscat::*;
 use crate::optimizer::*;
 use crate::ray::{trace, CompoundPrism};
-use crate::fitness::*;
+use crate::utils::Pair;
 use ndarray::prelude::{array, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::create_exception;
 use pyo3::exceptions::Exception;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
+use pyo3::types::PyBytes;
 use pyo3::wrap_pyfunction;
 use pyo3::ObjectProtocol;
-use pyo3::types::PyBytes;
 
 create_exception!(compound_prism_designer, GlassCatalogError, Exception);
 create_exception!(compound_prism_designer, RayTraceError, Exception);
@@ -40,7 +40,6 @@ impl IntoPy<PyObject> for Pair {
         (self.x, self.y).to_object(py)
     }
 }
-
 
 #[pyclass(name=Glass)]
 #[derive(Clone)]
@@ -92,10 +91,22 @@ impl DesignFitness {
 #[pymethods]
 impl CompoundPrismDesign {
     #[new]
-    fn create(obj: &PyRawObject, glasses: Vec<&PyGlass>, angles: &PyArray1<f64>, lengths: &PyArray1<f64>, curvature: f64, height: f64, width: f64) {
+    fn create(
+        obj: &PyRawObject,
+        glasses: Vec<&PyGlass>,
+        angles: &PyArray1<f64>,
+        lengths: &PyArray1<f64>,
+        curvature: f64,
+        height: f64,
+        width: f64,
+    ) {
         obj.init({
             CompoundPrismDesign {
-                glasses: glasses.into_iter().cloned().map(|pg| (pg.name.into(), pg.glass)).collect(),
+                glasses: glasses
+                    .into_iter()
+                    .cloned()
+                    .map(|pg| (pg.name.into(), pg.glass))
+                    .collect(),
                 angles: angles.as_array().to_vec(),
                 lengths: lengths.as_array().to_vec(),
                 curvature,
@@ -107,10 +118,14 @@ impl CompoundPrismDesign {
 
     #[getter]
     fn get_glasses(&self) -> PyResult<Vec<PyGlass>> {
-        Ok(self.glasses.iter().map(|(s, g)| PyGlass {
-            name: s.to_owned().to_string(),
-            glass: g.clone(),
-        }).collect())
+        Ok(self
+            .glasses
+            .iter()
+            .map(|(s, g)| PyGlass {
+                name: s.to_owned().to_string(),
+                glass: g.clone(),
+            })
+            .collect())
     }
 
     #[getter]
@@ -166,22 +181,29 @@ impl CompoundPrismDesign {
 #[pymethods]
 impl DetectorArrayDesign {
     #[new]
-    fn create(obj: &PyRawObject, bins: &PyArray2<f64>, position: (f64, f64), direction: (f64, f64), length: f64, max_incident_angle: f64, angle: f64) -> PyResult<()> {
+    fn create(
+        obj: &PyRawObject,
+        bins: &PyArray2<f64>,
+        position: (f64, f64),
+        direction: (f64, f64),
+        length: f64,
+        max_incident_angle: f64,
+        angle: f64,
+    ) -> PyResult<()> {
         let arr = bins.as_array();
         if arr.dim().1 != 2 {
-            return Err(pyo3::exceptions::TypeError::py_err("bounds must have a shape of [_, 2]"));
+            return Err(pyo3::exceptions::TypeError::py_err(
+                "bounds must have a shape of [_, 2]",
+            ));
         }
         obj.init({
             DetectorArrayDesign {
-                bins: arr.genrows()
-                    .into_iter()
-                    .map(|r| [r[0], r[1]])
-                    .collect(),
+                bins: arr.genrows().into_iter().map(|r| [r[0], r[1]]).collect(),
                 position: position.into(),
                 direction: direction.into(),
                 length,
                 max_incident_angle,
-                angle
+                angle,
             }
         });
         Ok(())
@@ -226,7 +248,7 @@ impl GaussianBeamDesign {
             GaussianBeamDesign {
                 wavelength_range,
                 width,
-                y_mean
+                y_mean,
             }
         })
     }
@@ -246,7 +268,6 @@ impl GaussianBeamDesign {
         Ok(self.y_mean)
     }
 }
-
 
 #[pymethods]
 impl Design {
@@ -345,7 +366,6 @@ impl GaussianBeamConfig {
     }
 }
 
-
 #[pymethods]
 impl DetectorArrayConfig {
     #[getter]
@@ -363,7 +383,6 @@ impl DetectorArrayConfig {
         Ok(Array2::from(self.bounds.clone()).into_pyarray(py))
     }
 }
-
 
 #[pymethods]
 impl DesignConfig {
@@ -387,11 +406,7 @@ impl DesignConfig {
         Ok(self.gaussian_beam.clone())
     }
 
-    fn optimize(
-        &self,
-        py: Python,
-        catalog: Option<&PyAny>,
-    ) -> PyResult<Vec<Design>> {
+    fn optimize(&self, py: Python, catalog: Option<&PyAny>) -> PyResult<Vec<Design>> {
         if let Some(_) = catalog {
             return Err(pyo3::exceptions::NotImplementedError::py_err(
                 "Custom glass catalogs have not been implemented yet",
@@ -417,31 +432,32 @@ fn evaluate(
         compound_prism: compound_prism.clone(),
         detector_array: detector_array.clone(),
         gaussian_beam: gaussian_beam.clone(),
-        fitness: fit
+        fitness: fit,
     })
 }
 
 #[pymethods]
 impl Design {
     #[new]
-    fn create(obj: &PyRawObject,
-              compound_prism: &CompoundPrismDesign,
-              detector_array: &DetectorArrayDesign,
-              gaussian_beam: &GaussianBeamDesign,
-              py: Python,
+    fn create(
+        obj: &PyRawObject,
+        compound_prism: &CompoundPrismDesign,
+        detector_array: &DetectorArrayDesign,
+        gaussian_beam: &GaussianBeamDesign,
+        py: Python,
     ) -> PyResult<()> {
         obj.init({
-             let cmpnd = compound_prism.into();
-             let detarr = detector_array.into();
-             let beam = gaussian_beam.into();
-             let fit = py.allow_threads(|| fitness(&cmpnd, &detarr, &beam))?;
-             Design {
-                 compound_prism: compound_prism.clone(),
-                 detector_array: detector_array.clone(),
-                 gaussian_beam: gaussian_beam.clone(),
-                 fitness: fit
-             }
-         });
+            let cmpnd = compound_prism.into();
+            let detarr = detector_array.into();
+            let beam = gaussian_beam.into();
+            let fit = py.allow_threads(|| fitness(&cmpnd, &detarr, &beam))?;
+            Design {
+                compound_prism: compound_prism.clone(),
+                detector_array: detector_array.clone(),
+                gaussian_beam: gaussian_beam.clone(),
+                fitness: fit,
+            }
+        });
         Ok(())
     }
 
@@ -496,21 +512,14 @@ fn serialize_results<'p>(
 }
 
 #[pyfunction]
-fn deserialize_results(
-    bytes: &[u8],
-) -> PyResult<(DesignConfig, Vec<Design>)> {
-    serde_cbor::from_slice(bytes)
-        .map_err(|e| pyo3::exceptions::TypeError::py_err(e.to_string()))
+fn deserialize_results(bytes: &[u8]) -> PyResult<(DesignConfig, Vec<Design>)> {
+    serde_cbor::from_slice(bytes).map_err(|e| pyo3::exceptions::TypeError::py_err(e.to_string()))
 }
 
 #[pyfunction]
-fn config_from_toml(
-    toml_str: &str,
-) -> PyResult<DesignConfig> {
-    toml::from_str(toml_str)
-        .map_err(|e| pyo3::exceptions::TypeError::py_err(e.to_string()))
+fn config_from_toml(toml_str: &str) -> PyResult<DesignConfig> {
+    toml::from_str(toml_str).map_err(|e| pyo3::exceptions::TypeError::py_err(e.to_string()))
 }
-
 
 #[pymodule]
 fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
@@ -519,10 +528,22 @@ fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
     m.add("GlassCatalogError", GlassCatalogError::type_object())?;
     m.add("RayTraceError", RayTraceError::type_object())?;
     m.add_class::<PyGlass>()?;
-    m.add("BUNDLED_CATALOG", BUNDLED_CATALOG.iter().cloned().map(|(s, g)| Py::new(py, PyGlass {
-        name: s.to_owned(),
-        glass: g
-    })).collect::<PyResult<Vec<_>>>()?)?;
+    m.add(
+        "BUNDLED_CATALOG",
+        BUNDLED_CATALOG
+            .iter()
+            .cloned()
+            .map(|(s, g)| {
+                Py::new(
+                    py,
+                    PyGlass {
+                        name: s.to_owned(),
+                        glass: g,
+                    },
+                )
+            })
+            .collect::<PyResult<Vec<_>>>()?,
+    )?;
     m.add_class::<CompoundPrismDesign>()?;
     m.add_class::<DetectorArrayDesign>()?;
     m.add_class::<GaussianBeamDesign>()?;

@@ -3,19 +3,16 @@
 extern crate derive_more;
 #[macro_use]
 extern crate serde;
-#[macro_use]
 extern crate rustacuda_derive;
-#[cfg(not(target_arch ="nvptx64"))]
-#[macro_use]
+#[cfg(not(target_arch = "nvptx64"))]
 extern crate rustacuda;
 
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::{
     error::Error,
     fs::{read, File},
 };
-use flate2::write::GzEncoder;
-use flate2::Compression;
-
 
 mod erf;
 mod glasscat;
@@ -24,8 +21,8 @@ mod qrng;
 mod ray;
 #[macro_use]
 mod utils;
-mod fitness;
 mod cuda_fitness;
+mod fitness;
 
 use crate::optimizer::*;
 

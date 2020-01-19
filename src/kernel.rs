@@ -1,13 +1,17 @@
-use crate::{CompoundPrism, DetectorArray, DetectorArrayPositioning, GaussianBeam, Ray};
 use crate::utils::F64Ext;
-use core::{arch::nvptx::*, slice::{from_raw_parts, from_raw_parts_mut}, panic::PanicInfo};
+use crate::{CompoundPrism, DetectorArray, DetectorArrayPositioning, GaussianBeam, Ray};
+use core::{
+    arch::nvptx::*,
+    panic::PanicInfo,
+    slice::{from_raw_parts, from_raw_parts_mut},
+};
 
 #[panic_handler]
 unsafe fn panic_handle(p: &PanicInfo) -> ! {
     let (file, line) = if let Some(loc) = p.location() {
         (loc.file().as_ptr(), loc.line())
     } else {
-        (b"".as_ptr(), 0, )
+        (b"".as_ptr(), 0)
     };
     if let Some(s) = p.payload().downcast_ref::<&str>() {
         __assert_fail(s.as_ptr(), file, line, b"".as_ptr());
@@ -18,7 +22,7 @@ unsafe fn panic_handle(p: &PanicInfo) -> ! {
 }
 
 extern "C" {
-    #[link_name="llvm.nvvm.ptr.shared.to.gen"]
+    #[link_name = "llvm.nvvm.ptr.shared.to.gen"]
     fn ptr_shared_to_gen(shared_ptr: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
 
     #[link_name = "llvm.nvvm.read.ptx.sreg.laneid"]
@@ -31,7 +35,6 @@ extern "C" {
     fn shfl_bfly_sync_i32(mask: u32, val: i32, lane_mask: u32, packing: u32) -> i32;
 }
 
-
 fn next_welford_sample(mean: &mut f64, m2: &mut f64, value: f64, count: f64) {
     let delta = value - *mean;
     *mean += delta / count;
@@ -39,7 +42,14 @@ fn next_welford_sample(mean: &mut f64, m2: &mut f64, value: f64, count: f64) {
     *m2 += delta * delta2;
 }
 
-fn parallel_welford_combine(mean_a: f64, m2_a: f64, count_a: f64, mean_b: f64, m2_b: f64, count_b: f64) -> [f64; 3] {
+fn parallel_welford_combine(
+    mean_a: f64,
+    m2_a: f64,
+    count_a: f64,
+    mean_b: f64,
+    m2_b: f64,
+    count_b: f64,
+) -> [f64; 3] {
     let count = count_a + count_b;
     let delta = mean_b - mean_a;
     let mean = (count_a * mean_a + count_b * mean_b) / count;
@@ -54,7 +64,6 @@ pub fn sem_le_error_threshold(m2: f64, count: f64, error_squared: f64) -> bool {
     m2 < error_squared * (count * (count - 1.))
 }
 
-
 unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     let dest = dest as *mut u32;
     let src = src as *const T as *const u32;
@@ -62,7 +71,8 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     // let count = (core::mem::size_of::<T>()) as u32;
     let mut id = _thread_idx_x() as u32;
     while id < count {
-        dest.add(id as usize).write_volatile(src.add(id as usize).read_volatile());
+        dest.add(id as usize)
+            .write_volatile(src.add(id as usize).read_volatile());
         id += _block_dim_x() as u32;
     }
     &*(dest as *const T)
@@ -75,12 +85,12 @@ unsafe fn cuda_memcpy_slice_1d<T>(dest: *mut u8, src: &[T]) -> &[T] {
     let src = src.as_ptr() as *const u32;
     let mut id = _thread_idx_x() as u32;
     while id < count {
-        dest.add(id as usize).write_volatile(src.add(id as usize).read_volatile());
+        dest.add(id as usize)
+            .write_volatile(src.add(id as usize).read_volatile());
         id += _block_dim_x() as u32;
     }
     core::slice::from_raw_parts(dest as *const T, len)
 }
-
 
 #[no_mangle]
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
@@ -123,7 +133,7 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
     _syncthreads();
     if tid == 0 {
         let bins_ptr = (&spectrometer.detector_array.bins) as *const _ as *mut _;
-        core::mem::replace(&mut*(bins_ptr), bins);
+        core::mem::replace(&mut *(bins_ptr), bins);
     }
     _syncthreads();
     let beam = &spectrometer.gaussian_beam;
@@ -148,10 +158,16 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
         count += 1_f64;
         let prev_count = count;
         let mut finished = true;
-        for ([lb, ub], [shared_mean, shared_m2]) in spectrometer.detector_array.bins.iter().copied().zip(shared.iter_mut()) {
+        for ([lb, ub], [shared_mean, shared_m2]) in spectrometer
+            .detector_array
+            .bins
+            .iter()
+            .copied()
+            .zip(shared.iter_mut())
+        {
             let mut mean = match result {
                 Ok((_, pos, t)) if lb <= pos && pos < ub => t,
-                _ => 0_f64
+                _ => 0_f64,
             };
             if laneid == 0 {
                 next_welford_sample(shared_mean, shared_m2, mean, prev_count);
@@ -200,7 +216,14 @@ unsafe fn share(mut mean: f64, mut m2: f64, mut count: f64) -> [f64; 3] {
     for xor in [16, 8, 4, 2, 1].iter().copied() {
         // let shfled = bfly_shfl_f64_v3([mean, m2, count], xor);
         // let arr = parallel_welford_combine(mean, m2, count, shfled[0], shfled[1], shfled[2]);
-        let arr = parallel_welford_combine(mean, m2, count, bfly_shfl_f64(mean, xor), bfly_shfl_f64(m2, xor), bfly_shfl_f64(count, xor));
+        let arr = parallel_welford_combine(
+            mean,
+            m2,
+            count,
+            bfly_shfl_f64(mean, xor),
+            bfly_shfl_f64(m2, xor),
+            bfly_shfl_f64(count, xor),
+        );
         mean = arr[0];
         m2 = arr[1];
         count = arr[2];
