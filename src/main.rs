@@ -1,6 +1,14 @@
 #![allow(clippy::block_in_if_condition_stmt, clippy::range_plus_one)]
 #[macro_use]
 extern crate derive_more;
+#[macro_use]
+extern crate serde;
+#[macro_use]
+extern crate rustacuda_derive;
+#[cfg(not(target_arch ="nvptx64"))]
+#[macro_use]
+extern crate rustacuda;
+
 use std::{
     error::Error,
     fs::{read, File},
@@ -17,6 +25,7 @@ mod ray;
 #[macro_use]
 mod utils;
 mod fitness;
+mod cuda_fitness;
 
 use crate::optimizer::*;
 

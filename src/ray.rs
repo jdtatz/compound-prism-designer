@@ -3,6 +3,9 @@ use crate::utils::*;
 use crate::debug_assert_almost_eq;
 #[cfg(feature = "pyext")]
 use pyo3::prelude::{pyclass, PyObject};
+#[cfg(target_arch ="nvptx64")]
+use crate::utils::F64Ext;
+
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -27,6 +30,7 @@ impl Into<&'static str> for RayTraceError {
 
 /// Collimated Polychromatic Gaussian Beam
 #[derive(Debug, Clone)]
+#[cfg_attr(not(target_arch="nvptx64"), derive(Serialize, Deserialize))]
 pub struct GaussianBeam {
     /// 1/e^2 beam width
     pub width: f64,
@@ -37,6 +41,7 @@ pub struct GaussianBeam {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(target_arch="nvptx64"), derive(Serialize, Deserialize))]
 pub struct Surface {
     angle: f64,
     normal: Pair,
@@ -61,10 +66,10 @@ impl Surface {
         let d2 = (normal.y / normal.x).abs() * height * 0.5;
         let sep_dist = sep_length
             + if self.normal.y.is_sign_positive() != normal.y.is_sign_positive() {
-                d1 + d2
-            } else {
-                (d1 - d2).abs()
-            };
+            d1 + d2
+        } else {
+            (d1 - d2).abs()
+        };
         Self {
             angle,
             normal,
@@ -82,6 +87,7 @@ impl Surface {
 
 /// A Curved Surface, parameterized as a circular segment
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(target_arch="nvptx64"), derive(Serialize, Deserialize))]
 pub struct CurvedSurface {
     /// The midpt of the Curved Surface / circular segment
     midpt: Pair,
@@ -130,10 +136,10 @@ impl CurvedSurface {
 
 /// Compound Prism Specification
 #[derive(Debug, Clone)]
-pub struct CompoundPrism<'a> {
+pub struct CompoundPrism {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
-    prisms: Vec<(&'a Glass, Surface)>,
+    prisms: arrayvec::ArrayVec<[(Glass, Surface); 6]>,
     /// The curved lens-like last inter-media boundary surface of the compound prism
     lens: CurvedSurface,
     /// Height of compound prism
@@ -142,7 +148,7 @@ pub struct CompoundPrism<'a> {
     pub(crate) width: f64,
 }
 
-impl<'a> CompoundPrism<'a> {
+impl CompoundPrism {
     /// Create a new Compound Prism Specification
     ///
     /// # Arguments
@@ -152,7 +158,7 @@ impl<'a> CompoundPrism<'a> {
     ///  * `curvature` - Lens Curvature of last surface of compound prism
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
-    pub fn new<I: IntoIterator<Item = &'a Glass>>(
+    pub fn new<'a, I: IntoIterator<Item = &'a Glass>>(
         glasses: I,
         angles: &[f64],
         lengths: &[f64],
@@ -160,14 +166,14 @@ impl<'a> CompoundPrism<'a> {
         height: f64,
         width: f64,
     ) -> Self
-    where
-        I::IntoIter: ExactSizeIterator,
+        where
+            I::IntoIter: ExactSizeIterator,
     {
-        let glasses = glasses.into_iter();
+        let glasses = glasses.into_iter().cloned();
         debug_assert!(glasses.len() > 0);
         debug_assert!(angles.len() - 1 == glasses.len());
         debug_assert!(lengths.len() == glasses.len());
-        let mut prisms = Vec::with_capacity(glasses.len());
+        let mut prisms = arrayvec::ArrayVec::new();
         let mut last_surface = Surface::first_surface(angles[0], height);
         for ((g, a), l) in glasses.zip(&angles[1..]).zip(lengths) {
             let next = last_surface.next_surface(height, *a, *l);
@@ -183,6 +189,7 @@ impl<'a> CompoundPrism<'a> {
         }
     }
 
+    #[cfg(not(target_arch ="nvptx64"))]
     pub fn polygons(&self) -> (Vec<[Pair; 4]>, [Pair; 4], Pair, f64) {
         let mut poly = Vec::with_capacity(self.prisms.len());
         let (mut u0, mut l0) = self.prisms[0].1.end_points(self.height);
@@ -201,7 +208,7 @@ impl<'a> CompoundPrism<'a> {
 #[derive(Debug, Clone)]
 pub struct DetectorArray<'a> {
     /// Boundaries of detection bins
-    pub(crate) bins: &'a [[f64; 2]],
+    pub bins: &'a [[f64; 2]],
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     min_ci: f64,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
@@ -231,6 +238,7 @@ impl<'a> DetectorArray<'a> {
 /// Positioning of detector array
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(not(target_arch="nvptx64"), derive(Serialize, Deserialize))]
 pub struct DetectorArrayPositioning {
     /// Position vector of array
     pub position: Pair,
@@ -452,7 +460,7 @@ impl Ray {
     fn trace<'s>(
         self,
         wavelength: f64,
-        cmpnd: &'s CompoundPrism<'s>,
+        cmpnd: &'s CompoundPrism,
         detarr: &'s DetectorArray<'s>,
         detpos: &'s DetectorArrayPositioning,
     ) -> impl Iterator<Item = Result<Pair, RayTraceError>> + 's {
@@ -548,10 +556,45 @@ pub fn detector_array_positioning(
 pub fn trace<'s>(
     wavelength: f64,
     init_y: f64,
-    cmpnd: &'s CompoundPrism<'s>,
+    cmpnd: &'s CompoundPrism,
     detarr: &'s DetectorArray<'s>,
     detpos: &'s DetectorArrayPositioning,
 ) -> impl Iterator<Item = Result<Pair, RayTraceError>> + 's {
     let ray = Ray::new_from_start(init_y);
     ray.trace(wavelength, cmpnd, detarr, detpos)
+}
+
+pub struct Spectrometer<'a> {
+    pub gaussian_beam: GaussianBeam,
+    pub compound_prism: CompoundPrism,
+    pub detector_array: DetectorArray<'a>,
+    pub detector_array_position: DetectorArrayPositioning,
+}
+
+impl<'a> Spectrometer<'a> {
+    pub fn new(gaussian_beam: GaussianBeam,
+               compound_prism: CompoundPrism,
+               detector_array: DetectorArray<'a>) -> Result<Self, RayTraceError> {
+        let detector_array_position = detector_array_positioning(&compound_prism, &detector_array, &gaussian_beam)?;
+        Ok(Self {
+            gaussian_beam,
+            compound_prism,
+            detector_array,
+            detector_array_position
+        })
+    }
+
+    pub fn propagate(&self, wavelength: f64, initial_y: f64) -> Result<(f64, f64), RayTraceError> {
+        Ray::new_from_start(initial_y)
+            .propagate(wavelength, &self.compound_prism,
+                       &self.detector_array, &self.detector_array_position)
+            .map(|(_p, pos, t)| (pos, t))
+    }
+
+    pub fn trace_ray_path<'s>(&'s self, wavelength: f64, initial_y: f64) -> impl Iterator<Item = Result<Pair, RayTraceError>> +'s {
+        Ray::new_from_start(initial_y).trace(wavelength,
+                                             &self.compound_prism,
+                                             &self.detector_array,
+                                             &self.detector_array_position)
+    }
 }
