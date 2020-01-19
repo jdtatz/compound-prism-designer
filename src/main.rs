@@ -3,9 +3,9 @@
 extern crate derive_more;
 #[macro_use]
 extern crate serde;
-extern crate rustacuda_derive;
 #[cfg(not(target_arch = "nvptx64"))]
 extern crate rustacuda;
+extern crate rustacuda_derive;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;

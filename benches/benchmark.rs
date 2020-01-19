@@ -116,7 +116,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         y_mean: 0.95,
         w_range: (0.5, 0.82),
     };
-    let spec: Spectrometer = Spectrometer::new(beam, prism, detarr).unwrap();
+    let spec = Spectrometer::new(beam, prism, detarr).unwrap();
     c.bench_function("known_design_example", |b| {
         b.iter(|| spec.fitness());
     });

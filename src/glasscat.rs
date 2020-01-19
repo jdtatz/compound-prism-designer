@@ -1,5 +1,5 @@
 #[cfg(target_arch = "nvptx64")]
-use crate::utils::F64Ext;
+use crate::utils::Float;
 use arrayvec::ArrayVec;
 
 #[derive(Debug, Display, Clone, Copy)]
@@ -49,8 +49,8 @@ pub enum Glass {
     Extended3([f64; 9]),
 }
 
-fn iter_to_array<A: arrayvec::Array<Item = f64>>(
-    it: impl IntoIterator<Item = f64>,
+fn iter_to_array<A: arrayvec::Array>(
+    it: impl IntoIterator<Item = A::Item>,
 ) -> Result<A, CatalogError> {
     it.into_iter()
         .collect::<ArrayVec<_>>()

@@ -1,21 +1,15 @@
 use crate::fitness::DesignFitness;
-use crate::ray::{
-    CompoundPrism, DetectorArray, DetectorArrayPositioning, GaussianBeam, Spectrometer,
-};
-use crate::utils::Welford;
+use crate::ray::Spectrometer;
+use crate::utils::{Float, Pair, Welford};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
-use rustacuda::memory::{DeviceBox, DeviceBuffer};
+use rustacuda::memory::{DeviceBox, DeviceBuffer, DeviceCopy};
 use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::CStr;
 
-unsafe impl rustacuda::memory::DeviceCopy for CompoundPrism {}
-unsafe impl<'a> rustacuda::memory::DeviceCopy for DetectorArray<'a> {}
-unsafe impl rustacuda::memory::DeviceCopy for DetectorArrayPositioning {}
-unsafe impl rustacuda::memory::DeviceCopy for GaussianBeam {}
-unsafe impl<'a> rustacuda::memory::DeviceCopy for Spectrometer<'a> {}
+unsafe impl<'a, F: Float + DeviceCopy> DeviceCopy for Spectrometer<'a, F> {}
 
 const PTX: &[u8] = concat!(
     include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx"),
@@ -51,7 +45,7 @@ struct CudaFitnessContext {
     ctxt: Context,
     module: Module,
     stream: Stream,
-    dev_spec: DeviceBox<Spectrometer<'static>>,
+    dev_spec: DeviceBox<Spectrometer<'static, f64>>,
     dev_bins: Option<DeviceBuffer<[f64; 2]>>,
     dev_probs: Option<DeviceBuffer<f64>>,
 }
@@ -61,7 +55,7 @@ impl CudaFitnessContext {
         ContextStack::push(&ctxt)?;
         let module = Module::load_from_string(unsafe { CStr::from_bytes_with_nul_unchecked(PTX) })?;
         let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
-        let dev_spec = unsafe { DeviceBox::<Spectrometer>::zeroed() }?;
+        let dev_spec = unsafe { DeviceBox::zeroed() }?;
         Ok(Self {
             ctxt,
             module,
@@ -75,13 +69,13 @@ impl CudaFitnessContext {
     fn launch_p_dets_l_ws<'a>(
         &mut self,
         seed: f64,
-        spec: &Spectrometer<'a>,
+        spec: &Spectrometer<'a, f64>,
     ) -> rustacuda::error::CudaResult<Vec<f64>> {
         ContextStack::push(&self.ctxt)?;
 
         let detarr = &spec.detector_array;
         self.dev_spec.copy_from(unsafe {
-            std::mem::transmute::<&Spectrometer<'a>, &Spectrometer<'static>>(spec)
+            std::mem::transmute::<&Spectrometer<'a, _>, &Spectrometer<'static, _>>(spec)
         })?; // FIXME immediately, very unsafe & dangerous
         let dev_bins = match &mut self.dev_bins {
             Some(ref mut dev_bins) if dev_bins.len() == detarr.bins.len() => {
@@ -105,7 +99,7 @@ impl CudaFitnessContext {
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(FNAME) })?;
-        let dynamic_shared_mem = std::mem::size_of::<Spectrometer>() as u32
+        let dynamic_shared_mem = std::mem::size_of::<Spectrometer<f64>>() as u32
             + std::mem::size_of_val(spec.detector_array.bins) as u32
             + detarr.bins.len() as u32 * NWARP * 2 * std::mem::size_of::<f64>() as u32;
         let stream = &self.stream;
@@ -156,7 +150,7 @@ pub enum CudaFitnessError {
     Cuda(rustacuda::error::CudaError),
 }
 
-impl<'a> Spectrometer<'a> {
+impl<'a> Spectrometer<'a, f64> {
     pub fn cuda_fitness(&self) -> Result<DesignFitness, CudaFitnessError> {
         const MAX_ERR: f64 = 5e-3;
         const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
@@ -164,8 +158,11 @@ impl<'a> Spectrometer<'a> {
         let beam = &self.gaussian_beam;
         let detarr = &self.detector_array;
         let detpos = &self.detector_array_position;
-        let deviation_vector =
-            detpos.position + detpos.direction * detarr.length * 0.5 - (0., beam.y_mean).into();
+        let deviation_vector = detpos.position + detpos.direction * detarr.length * 0.5
+            - Pair {
+                x: 0_f64,
+                y: beam.y_mean,
+            };
         let size = deviation_vector.norm();
         let deviation = deviation_vector.y.abs() / deviation_vector.norm();
 

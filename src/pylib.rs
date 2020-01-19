@@ -28,14 +28,14 @@ impl From<crate::ray::RayTraceError> for PyErr {
     }
 }
 
-impl<'src> FromPyObject<'src> for Pair {
+impl<'src> FromPyObject<'src> for Pair<f64> {
     fn extract(obj: &'src PyAny) -> Result<Self, PyErr> {
         let (x, y) = obj.extract()?;
         Ok(Pair { x, y })
     }
 }
 
-impl IntoPy<PyObject> for Pair {
+impl IntoPy<PyObject> for Pair<f64> {
     fn into_py(self, py: Python) -> PyObject {
         (self.x, self.y).to_object(py)
     }
@@ -162,7 +162,7 @@ impl CompoundPrismDesign {
         &'p PyArray1<f64>,
         f64,
     )> {
-        let cmpnd: CompoundPrism = self.into();
+        let cmpnd: CompoundPrism<f64> = self.into();
         let (polys, lens_poly, lens_center, lens_radius) = cmpnd.polygons();
         let polys = polys
             .into_iter()
@@ -199,8 +199,14 @@ impl DetectorArrayDesign {
         obj.init({
             DetectorArrayDesign {
                 bins: arr.genrows().into_iter().map(|r| [r[0], r[1]]).collect(),
-                position: position.into(),
-                direction: direction.into(),
+                position: Pair {
+                    x: position.0,
+                    y: position.1,
+                },
+                direction: Pair {
+                    x: direction.0,
+                    y: direction.1,
+                },
                 length,
                 max_incident_angle,
                 angle,

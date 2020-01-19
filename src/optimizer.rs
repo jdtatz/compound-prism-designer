@@ -67,7 +67,10 @@ impl DesignConfig {
         3 * self.compound_prism.max_count + 6
     }
 
-    fn array_to_params(&self, params: &[f64]) -> (CompoundPrism, DetectorArray, GaussianBeam) {
+    fn array_to_params(
+        &self,
+        params: &[f64],
+    ) -> (CompoundPrism<f64>, DetectorArray<f64>, GaussianBeam<f64>) {
         let params = Params::from_slice(params, self.compound_prism.max_count);
         let cmpnd = CompoundPrism::new(
             params.glass_indices().map(|i| &BUNDLED_CATALOG[i].1),
@@ -166,8 +169,8 @@ pub struct CompoundPrismDesign {
     pub width: f64,
 }
 
-impl Into<CompoundPrism> for &CompoundPrismDesign {
-    fn into(self) -> CompoundPrism {
+impl Into<CompoundPrism<f64>> for &CompoundPrismDesign {
+    fn into(self) -> CompoundPrism<f64> {
         CompoundPrism::new(
             self.glasses.iter().map(|(_, g)| g),
             &self.angles,
@@ -183,15 +186,15 @@ impl Into<CompoundPrism> for &CompoundPrismDesign {
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorArrayDesign {
     pub bins: Vec<[f64; 2]>,
-    pub position: Pair,
-    pub direction: Pair,
+    pub position: Pair<f64>,
+    pub direction: Pair<f64>,
     pub length: f64,
     pub max_incident_angle: f64,
     pub angle: f64,
 }
 
-impl<'s> Into<DetectorArray<'s>> for &'s DetectorArrayDesign {
-    fn into(self) -> DetectorArray<'s> {
+impl<'s> Into<DetectorArray<'s, f64>> for &'s DetectorArrayDesign {
+    fn into(self) -> DetectorArray<'s, f64> {
         DetectorArray::new(
             &self.bins,
             self.max_incident_angle.to_radians().cos(),
@@ -201,8 +204,8 @@ impl<'s> Into<DetectorArray<'s>> for &'s DetectorArrayDesign {
     }
 }
 
-impl Into<DetectorArrayPositioning> for &DetectorArrayDesign {
-    fn into(self) -> DetectorArrayPositioning {
+impl Into<DetectorArrayPositioning<f64>> for &DetectorArrayDesign {
+    fn into(self) -> DetectorArrayPositioning<f64> {
         DetectorArrayPositioning {
             position: self.position,
             direction: self.direction,
@@ -218,8 +221,8 @@ pub struct GaussianBeamDesign {
     pub y_mean: f64,
 }
 
-impl Into<GaussianBeam> for &GaussianBeamDesign {
-    fn into(self) -> GaussianBeam {
+impl Into<GaussianBeam<f64>> for &GaussianBeamDesign {
+    fn into(self) -> GaussianBeam<f64> {
         GaussianBeam {
             width: self.width,
             y_mean: self.y_mean,
@@ -512,7 +515,7 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
 
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
         let (cmpnd, detarr, beam) = self.array_to_params(params);
-        let spec: Spectrometer = Spectrometer::new(beam, cmpnd, detarr).ok()?;
+        let spec = Spectrometer::new(beam, cmpnd, detarr).ok()?;
         let fit = spec.fitness();
         if fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2 {
             Some(fit)
