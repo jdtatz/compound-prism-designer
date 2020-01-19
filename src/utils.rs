@@ -1,51 +1,292 @@
-use libm::sincos;
+use core::ops::{
+    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
+};
 #[cfg(not(target_arch = "nvptx64"))]
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "nvptx64")]
-pub trait F64Ext {
+pub trait Float:
+    Sized
+    + Copy
+    + core::fmt::Debug
+    + core::fmt::Display
+    + PartialEq
+    + PartialOrd
+    + Neg<Output = Self>
+    + Add<Output = Self>
+    + AddAssign
+    + Sub<Output = Self>
+    + SubAssign
+    + Mul<Output = Self>
+    + MulAssign
+    + Div<Output = Self>
+    + DivAssign
+    + Rem<Output = Self>
+    + RemAssign
+{
+    fn from_f64(v: f64) -> Self;
+    fn to_f64(self) -> f64;
+    fn zero() -> Self;
+    fn one() -> Self;
+    fn is_sign_positive(self) -> bool;
     fn mul_add(self, a: Self, b: Self) -> Self;
     fn sqrt(self) -> Self;
     fn exp(self) -> Self;
     fn ln(self) -> Self;
-    fn powf(self, e: f64) -> Self;
+    fn powf(self, n: Self) -> Self;
     fn fract(self) -> Self;
     fn abs(self) -> Self;
+    fn sincos(self) -> (Self, Self);
+    fn tan(self) -> Self;
     fn asin(self) -> Self;
 }
 
-#[cfg(target_arch = "nvptx64")]
-impl F64Ext for f64 {
+impl Float for f32 {
+    fn from_f64(v: f64) -> Self {
+        v as f32
+    }
+
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+
+    fn zero() -> Self {
+        0_f32
+    }
+
+    fn one() -> Self {
+        1_f32
+    }
+
+    fn is_sign_positive(self) -> bool {
+        self.is_sign_positive()
+    }
+
     fn mul_add(self, a: Self, b: Self) -> Self {
-        unsafe { core::intrinsics::fmaf64(self, a, b) }
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::fmaf32(self, a, b) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.mul_add(a, b)
+        }
     }
 
     fn sqrt(self) -> Self {
-        unsafe { core::intrinsics::sqrtf64(self) }
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::sqrtf32(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.sqrt()
+        }
     }
 
     fn exp(self) -> Self {
-        unsafe { core::intrinsics::expf64(self) }
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::expf32(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.exp()
+        }
     }
 
     fn ln(self) -> Self {
-        libm::log(self)
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::logf(self)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.ln()
+        }
     }
 
-    fn powf(self, e: f64) -> Self {
-        libm::pow(self, e)
+    fn powf(self, n: Self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::powf(self, n)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.powf(n)
+        }
     }
 
     fn fract(self) -> Self {
-        self - unsafe { core::intrinsics::truncf64(self) }
+        #[cfg(target_arch = "nvptx64")]
+        {
+            self - unsafe { core::intrinsics::truncf32(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.fract()
+        }
     }
 
     fn abs(self) -> Self {
-        unsafe { core::intrinsics::fabsf64(self) }
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::fabsf32(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.abs()
+        }
+    }
+
+    fn sincos(self) -> (Self, Self) {
+        libm::sincosf(self)
+    }
+
+    fn tan(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::tanf(self)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.tan()
+        }
     }
 
     fn asin(self) -> Self {
-        libm::asin(self)
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::asinf(self)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.asin()
+        }
+    }
+}
+
+impl Float for f64 {
+    fn from_f64(v: f64) -> Self {
+        v
+    }
+
+    fn to_f64(self) -> f64 {
+        self
+    }
+
+    fn zero() -> Self {
+        0_f64
+    }
+
+    fn one() -> Self {
+        1_f64
+    }
+
+    fn is_sign_positive(self) -> bool {
+        self.is_sign_positive()
+    }
+
+    fn mul_add(self, a: Self, b: Self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::fmaf64(self, a, b) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.mul_add(a, b)
+        }
+    }
+
+    fn sqrt(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::sqrtf64(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.sqrt()
+        }
+    }
+
+    fn exp(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::expf64(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.exp()
+        }
+    }
+
+    fn ln(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::log(self)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.ln()
+        }
+    }
+
+    fn powf(self, n: Self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::pow(self, n)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.powf(n)
+        }
+    }
+
+    fn fract(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            self - unsafe { core::intrinsics::truncf64(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.fract()
+        }
+    }
+
+    fn abs(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            unsafe { core::intrinsics::fabsf64(self) }
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.abs()
+        }
+    }
+
+    fn sincos(self) -> (Self, Self) {
+        libm::sincos(self)
+    }
+
+    fn tan(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::tan(self)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.tan()
+        }
+    }
+
+    fn asin(self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            libm::asin(self)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            self.asin()
+        }
     }
 }
 
@@ -88,36 +329,36 @@ macro_rules! debug_assert_almost_eq {
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, From, Into, Neg, Add, Sub, Mul, Div)]
+#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div)]
 #[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
-pub struct Pair {
-    pub x: f64,
-    pub y: f64,
+pub struct Pair<F: Float> {
+    pub x: F,
+    pub y: F,
 }
 
-impl Pair {
+impl<F: Float> Pair<F> {
     /// dot product of two vectors, a • b
-    pub fn dot(self, other: Self) -> f64 {
+    pub fn dot(self, other: Self) -> F {
         self.x * other.x + self.y * other.y
     }
 
     /// square of the vector norm, ||v||^2
-    pub fn norm_squared(self) -> f64 {
+    pub fn norm_squared(self) -> F {
         self.dot(self)
     }
 
     /// vector norm, ||v||
-    pub fn norm(self) -> f64 {
+    pub fn norm(self) -> F {
         self.norm_squared().sqrt()
     }
 
     /// is it a unit vector, ||v|| ≅? 1
     pub fn is_unit(self) -> bool {
-        (self.norm() - 1_f64).abs() < 1e-3
+        almost_eq(self.norm().to_f64(), 1_f64, 1e-3)
     }
 
     /// Fused multiply add of two vectors with a scalar, (self * a) + b
-    pub fn mul_add(self, a: f64, b: Pair) -> Pair {
+    pub fn mul_add(self, a: F, b: Self) -> Self {
         Pair {
             x: self.x.mul_add(a, b.x),
             y: self.y.mul_add(a, b.y),
@@ -127,8 +368,8 @@ impl Pair {
 
 /// rotate `vector` by `angle` CCW
 #[inline(always)]
-pub fn rotate(angle: f64, vector: Pair) -> Pair {
-    let (s, c) = sincos(angle);
+pub fn rotate<F: Float>(angle: F, vector: Pair<F>) -> Pair<F> {
+    let (s, c) = angle.sincos();
     Pair {
         x: c * vector.x - s * vector.y,
         y: s * vector.x + c * vector.y,
@@ -137,11 +378,11 @@ pub fn rotate(angle: f64, vector: Pair) -> Pair {
 
 /// Matrix in R^(2x2) in row major order
 #[derive(Debug, Clone, Copy)]
-pub struct Mat2([f64; 4]);
+pub struct Mat2<F: Float>([F; 4]);
 
-impl Mat2 {
+impl<F: Float> Mat2<F> {
     /// New Matrix from the two given columns
-    pub fn new_from_cols(col1: Pair, col2: Pair) -> Self {
+    pub fn new_from_cols(col1: Pair<F>, col2: Pair<F>) -> Self {
         Self([col1.x, col2.x, col1.y, col2.y])
     }
 
@@ -149,7 +390,7 @@ impl Mat2 {
     pub fn inverse(self) -> Option<Self> {
         let [a, b, c, d] = self.0;
         let det = a * d - b * c;
-        if det == 0. {
+        if det == F::from_f64(0.) {
             None
         } else {
             Some(Self([d / det, -b / det, -c / det, a / det]))
@@ -157,11 +398,11 @@ impl Mat2 {
     }
 }
 
-impl core::ops::Mul<Pair> for Mat2 {
-    type Output = Pair;
+impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
+    type Output = Pair<F>;
 
     /// Matrix x Vector -> Vector multiplication
-    fn mul(self, rhs: Pair) -> Self::Output {
+    fn mul(self, rhs: Pair<F>) -> Self::Output {
         let [a, b, c, d] = self.0;
         Pair {
             x: a * rhs.x + b * rhs.y,

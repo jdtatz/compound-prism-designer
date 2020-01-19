@@ -1,6 +1,6 @@
 #![allow(clippy::many_single_char_names, clippy::unreadable_literal, clippy::excessive_precision)]
 #[cfg(target_arch = "nvptx64")]
-use crate::utils::F64Ext;
+use crate::utils::Float;
 use core::f64::{INFINITY, NAN, NEG_INFINITY};
 /// Modified from [statrs](https://github.com/boxtown/statrs),
 /// to improve the polynomial evaluation

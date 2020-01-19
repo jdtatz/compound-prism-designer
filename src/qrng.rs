@@ -1,5 +1,4 @@
-#[cfg(target_arch = "nvptx64")]
-use crate::utils::F64Ext;
+use crate::utils::Float;
 /*
 #![feature(const_fn, const_loop, const_if_match, const_generics)]
 
@@ -92,17 +91,18 @@ pub struct Qrng<T> {
 #[allow(clippy::unreadable_literal, clippy::excessive_precision)]
 const PHI_1: f64 = 1.61803398874989484820458683436563;
 
-impl Qrng<f64> {
-    pub fn new(seed: f64) -> Self {
+impl<F: Float> Qrng<F> {
+    pub fn new(seed: F) -> Self {
+        const ALPHA: f64 = 1_f64 / PHI_1;
         Self {
             state: seed,
-            alpha: 1_f64 / PHI_1,
+            alpha: F::from_f64(ALPHA),
         }
     }
 }
 
-impl Iterator for Qrng<f64> {
-    type Item = f64;
+impl<F: Float> Iterator for Qrng<F> {
+    type Item = F;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.state = (self.state + self.alpha).fract();

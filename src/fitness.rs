@@ -52,10 +52,10 @@ where
 ///  * `detpos` - the position and orientation of the detector array
 pub fn p_dets_l_wavelength(
     wavelength: f64,
-    cmpnd: &CompoundPrism,
-    detarr: &DetectorArray,
-    beam: &GaussianBeam,
-    detpos: &DetectorArrayPositioning,
+    cmpnd: &CompoundPrism<f64>,
+    detarr: &DetectorArray<f64>,
+    beam: &GaussianBeam<f64>,
+    detpos: &DetectorArrayPositioning<f64>,
 ) -> impl Iterator<Item = f64> {
     let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
     debug_assert!(0. <= p_z && p_z <= 1.);
@@ -101,10 +101,10 @@ pub fn p_dets_l_wavelength(
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
 fn mutual_information(
-    cmpnd: &CompoundPrism,
-    detarr: &DetectorArray,
-    beam: &GaussianBeam,
-    detpos: &DetectorArrayPositioning,
+    cmpnd: &CompoundPrism<f64>,
+    detarr: &DetectorArray<f64>,
+    beam: &GaussianBeam<f64>,
+    detpos: &DetectorArrayPositioning<f64>,
 ) -> f64 {
     let (wmin, wmax) = beam.w_range;
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
@@ -165,13 +165,16 @@ pub struct DesignFitness {
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 pub fn fitness(
-    cmpnd: &CompoundPrism,
-    detarr: &DetectorArray,
-    beam: &GaussianBeam,
+    cmpnd: &CompoundPrism<f64>,
+    detarr: &DetectorArray<f64>,
+    beam: &GaussianBeam<f64>,
 ) -> Result<DesignFitness, RayTraceError> {
     let detpos = detector_array_positioning(cmpnd, detarr, beam)?;
-    let deviation_vector =
-        detpos.position + detpos.direction * detarr.length * 0.5 - (0., beam.y_mean).into();
+    let deviation_vector = detpos.position + detpos.direction * detarr.length * 0.5
+        - Pair {
+            x: 0.,
+            y: beam.y_mean,
+        };
     let size = deviation_vector.norm();
     let deviation = deviation_vector.y.abs() / deviation_vector.norm();
     let info = mutual_information(cmpnd, detarr, beam, &detpos);
@@ -182,11 +185,14 @@ pub fn fitness(
     })
 }
 
-impl<'a> Spectrometer<'a> {
+impl<'a> Spectrometer<'a, f64> {
     pub fn fitness(&self) -> DesignFitness {
         let deviation_vector = self.detector_array_position.position
             + self.detector_array_position.direction * self.detector_array.length * 0.5
-            - (0., self.gaussian_beam.y_mean).into();
+            - Pair {
+                x: 0.,
+                y: self.gaussian_beam.y_mean,
+            };
         let size = deviation_vector.norm();
         let deviation = deviation_vector.y.abs() / deviation_vector.norm();
         let info = mutual_information(

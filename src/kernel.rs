@@ -1,4 +1,4 @@
-use crate::utils::F64Ext;
+use crate::utils::Float;
 use crate::{CompoundPrism, DetectorArray, DetectorArrayPositioning, GaussianBeam, Ray};
 use core::{
     arch::nvptx::*,
@@ -96,7 +96,7 @@ unsafe fn cuda_memcpy_slice_1d<T>(dest: *mut u8, src: &[T]) -> &[T] {
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
     seed: f64,
     max_evals: u32,
-    spectrometer: &crate::Spectrometer,
+    spectrometer: &crate::Spectrometer<f64>,
     nbin: u32,
     bins: *const [f64; 2],
     prob: *mut f64,
@@ -117,7 +117,7 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
 
     let ptr: *mut u8 = ptr_shared_to_gen(0 as _) as _;
     let spec_ptr = ptr;
-    let bins_ptr = spec_ptr.add(core::mem::size_of::<crate::Spectrometer>());
+    let bins_ptr = spec_ptr.add(core::mem::size_of::<crate::Spectrometer<f64>>());
     let prob_ptr = bins_ptr.add(core::mem::size_of_val(bins));
     let ptr = prob_ptr as *mut [f64; 2];
 
