@@ -1,18 +1,17 @@
 #![allow(clippy::many_single_char_names, clippy::unreadable_literal, clippy::excessive_precision)]
-#[cfg(target_arch = "nvptx64")]
 use crate::utils::Float;
 use core::f64::{INFINITY, NAN, NEG_INFINITY};
 /// Modified from [statrs](https://github.com/boxtown/statrs),
 /// to improve the polynomial evaluation
 
-fn polynomial(z: f64, coeff: &[f64]) -> f64 {
+fn polynomial<F: Float>(z: F, coeff: &[f64]) -> F {
     let n = coeff.len();
     if n == 0 {
-        return 0.0;
+        return F::zero();
     }
-    let mut sum = coeff[n - 1];
+    let mut sum = F::from_f64(coeff[n - 1]);
     for i in (0..n - 1).rev() {
-        sum = sum.mul_add(z, coeff[i]);
+        sum = sum.mul_add(z, F::from_f64(coeff[i]));
     }
     sum
 }
@@ -20,7 +19,7 @@ fn polynomial(z: f64, coeff: &[f64]) -> f64 {
 /// `erf` calculates the error function at `x`.
 pub fn erf(x: f64) -> f64 {
     if x.is_nan() {
-        NAN
+        x
     } else if x == INFINITY {
         1.0
     } else if x == NEG_INFINITY {
@@ -66,15 +65,15 @@ pub fn erfc(x: f64) -> f64 {
 
 /// `erfc_inv` calculates the complementary inverse
 /// error function at `x`.
-pub fn erfc_inv(x: f64) -> f64 {
-    if x <= 0.0 {
-        INFINITY
-    } else if x >= 2.0 {
-        NEG_INFINITY
-    } else if x > 1.0 {
-        erf_inv_impl(-1.0 + x, 2.0 - x, -1.0)
+pub fn erfc_inv<F: Float>(x: F) -> F {
+    if x <= F::zero() {
+        F::infinity()
+    } else if x >= F::from_f64(2.0) {
+        -F::infinity()
+    } else if x > F::one() {
+        erf_inv_impl(-F::one() + x, F::from_f64(2.0) - x, -F::one())
     } else {
-        erf_inv_impl(1.0 - x, x, 1.0)
+        erf_inv_impl(F::one() - x, x, F::one())
     }
 }
 
@@ -685,43 +684,43 @@ fn erf_impl(z: f64, complement: bool) -> f64 {
 // `erf_inv_impl` computes the inverse error function where
 // `p`,`q`, and `s` are the first, second, and third intermediate
 // parameters respectively
-fn erf_inv_impl(p: f64, q: f64, s: f64) -> f64 {
-    let result = if p <= 0.5 {
-        let y = 0.0891314744949340820313;
-        let g = p * (p + 10.0);
+fn erf_inv_impl<F: Float>(p: F, q: F, s: F) -> F {
+    let result = if p <= F::from_f64(0.5) {
+        let y = F::from_f64(0.0891314744949340820313);
+        let g = p * (p + F::from_f64(10.0));
         let r = polynomial(p, ERF_INV_IMPL_AN) / polynomial(p, ERF_INV_IMPL_AD);
         g * y + g * r
-    } else if q >= 0.25 {
-        let y = 2.249481201171875;
-        let g = (-2.0 * q.ln()).sqrt();
-        let xs = q - 0.25;
+    } else if q >= F::from_f64(0.25) {
+        let y = F::from_f64(2.249481201171875);
+        let g = (-F::from_f64(2.0) * q.ln()).sqrt();
+        let xs = q - F::from_f64(0.25);
         let r = polynomial(xs, ERF_INV_IMPL_BN) / polynomial(xs, ERF_INV_IMPL_BD);
         g / (y + r)
     } else {
         let x = (-q.ln()).sqrt();
-        if x < 3.0 {
-            let y = 0.807220458984375;
-            let xs = x - 1.125;
+        if x < F::from_f64(3.0) {
+            let y = F::from_f64(0.807220458984375);
+            let xs = x - F::from_f64(1.125);
             let r = polynomial(xs, ERF_INV_IMPL_CN) / polynomial(xs, ERF_INV_IMPL_CD);
             y * x + r * x
-        } else if x < 6.0 {
-            let y = 0.93995571136474609375;
-            let xs = x - 3.0;
+        } else if x < F::from_f64(6.0) {
+            let y = F::from_f64(0.93995571136474609375);
+            let xs = x - F::from_f64(3.0);
             let r = polynomial(xs, ERF_INV_IMPL_DN) / polynomial(xs, ERF_INV_IMPL_DD);
             y * x + r * x
-        } else if x < 18.0 {
-            let y = 0.98362827301025390625;
-            let xs = x - 6.0;
+        } else if x < F::from_f64(18.0) {
+            let y = F::from_f64(0.98362827301025390625);
+            let xs = x - F::from_f64(6.0);
             let r = polynomial(xs, ERF_INV_IMPL_EN) / polynomial(xs, ERF_INV_IMPL_ED);
             y * x + r * x
-        } else if x < 44.0 {
-            let y = 0.99714565277099609375;
-            let xs = x - 18.0;
+        } else if x < F::from_f64(44.0) {
+            let y = F::from_f64(0.99714565277099609375);
+            let xs = x - F::from_f64(18.0);
             let r = polynomial(xs, ERF_INV_IMPL_FN) / polynomial(xs, ERF_INV_IMPL_FD);
             y * x + r * x
         } else {
-            let y = 0.99941349029541015625;
-            let xs = x - 44.0;
+            let y = F::from_f64(0.99941349029541015625);
+            let xs = x - F::from_f64(44.0);
             let r = polynomial(xs, ERF_INV_IMPL_GN) / polynomial(xs, ERF_INV_IMPL_GD);
             y * x + r * x
         }

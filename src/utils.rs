@@ -1,11 +1,12 @@
 use core::ops::{
-    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
+    Add, AddAssign, Div, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 #[cfg(not(target_arch = "nvptx64"))]
 use serde::{Deserialize, Serialize};
 
 pub trait Float:
-    Sized
+    'static
+    + Sized
     + Copy
     + core::fmt::Debug
     + core::fmt::Display
@@ -19,7 +20,6 @@ pub trait Float:
     + Mul<Output = Self>
     + MulAssign
     + Div<Output = Self>
-    + DivAssign
     + Rem<Output = Self>
     + RemAssign
 {
@@ -27,17 +27,40 @@ pub trait Float:
     fn to_f64(self) -> f64;
     fn zero() -> Self;
     fn one() -> Self;
+    fn infinity() -> Self;
+    fn is_finite(self) -> bool;
+    fn is_infinite(self) -> bool;
+    fn is_nan(self) -> bool;
     fn is_sign_positive(self) -> bool;
     fn mul_add(self, a: Self, b: Self) -> Self;
+    fn sqr(self) -> Self {
+        self * self
+    }
     fn sqrt(self) -> Self;
     fn exp(self) -> Self;
     fn ln(self) -> Self;
+    fn log2(self) -> Self;
     fn powf(self, n: Self) -> Self;
     fn fract(self) -> Self;
     fn abs(self) -> Self;
     fn sincos(self) -> (Self, Self);
     fn tan(self) -> Self;
     fn asin(self) -> Self;
+    fn floor(self) -> Self;
+    fn min(self, other: Self) -> Self {
+        if self <= other {
+            self
+        } else {
+            other
+        }
+    }
+    fn max(self, other: Self) -> Self {
+        if self >= other {
+            self
+        } else {
+            other
+        }
+    }
 }
 
 impl Float for f32 {
@@ -55,6 +78,22 @@ impl Float for f32 {
 
     fn one() -> Self {
         1_f32
+    }
+
+    fn infinity() -> Self {
+        core::f32::INFINITY
+    }
+
+    fn is_finite(self) -> bool {
+        self.is_finite()
+    }
+
+    fn is_infinite(self) -> bool {
+        self.is_infinite()
+    }
+
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 
     fn is_sign_positive(self) -> bool {
@@ -103,6 +142,10 @@ impl Float for f32 {
         {
             self.ln()
         }
+    }
+
+    fn log2(self) -> Self {
+        libm::log2f(self)
     }
 
     fn powf(self, n: Self) -> Self {
@@ -163,6 +206,10 @@ impl Float for f32 {
             self.asin()
         }
     }
+
+    fn floor(self) -> Self {
+        self.floor()
+    }
 }
 
 impl Float for f64 {
@@ -180,6 +227,22 @@ impl Float for f64 {
 
     fn one() -> Self {
         1_f64
+    }
+
+    fn infinity() -> Self {
+        core::f64::INFINITY
+    }
+
+    fn is_finite(self) -> bool {
+        self.is_finite()
+    }
+
+    fn is_infinite(self) -> bool {
+        self.is_infinite()
+    }
+
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 
     fn is_sign_positive(self) -> bool {
@@ -228,6 +291,10 @@ impl Float for f64 {
         {
             self.ln()
         }
+    }
+
+    fn log2(self) -> Self {
+        libm::log2(self)
     }
 
     fn powf(self, n: Self) -> Self {
@@ -287,6 +354,10 @@ impl Float for f64 {
         {
             self.asin()
         }
+    }
+
+    fn floor(self) -> Self {
+        self.floor()
     }
 }
 
@@ -390,7 +461,7 @@ impl<F: Float> Mat2<F> {
     pub fn inverse(self) -> Option<Self> {
         let [a, b, c, d] = self.0;
         let det = a * d - b * c;
-        if det == F::from_f64(0.) {
+        if det == F::zero() {
             None
         } else {
             Some(Self([d / det, -b / det, -c / det, a / det]))
@@ -412,43 +483,45 @@ impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
 }
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-#[derive(Clone, Default)]
-pub struct Welford {
-    pub count: f64,
-    pub mean: f64,
-    m2: f64,
+#[derive(Clone)]
+#[cfg(not(target_arch = "nvptx64"))]
+pub struct Welford<F: Float> {
+    pub count: F,
+    pub mean: F,
+    m2: F,
 }
 
-impl Welford {
+#[cfg(not(target_arch = "nvptx64"))]
+impl<F: Float> Welford<F> {
     pub fn new() -> Self {
         Welford {
-            count: 0.,
-            mean: 0.,
-            m2: 0.,
+            count: F::zero(),
+            mean: F::zero(),
+            m2: F::zero(),
         }
     }
-    pub fn next_sample(&mut self, x: f64) {
-        self.count += 1.;
+    pub fn next_sample(&mut self, x: F) {
+        self.count += F::one();
         let delta = x - self.mean;
         self.mean += delta / self.count;
         let delta2 = x - self.mean;
         self.m2 += delta * delta2;
     }
     #[allow(dead_code)]
-    pub fn variance(&self) -> f64 {
+    pub fn variance(&self) -> F {
         self.m2 / self.count
     }
     #[allow(dead_code)]
-    pub fn sample_variance(&self) -> f64 {
-        self.m2 / (self.count - 1.)
+    pub fn sample_variance(&self) -> F {
+        self.m2 / (self.count - F::one())
     }
-    pub fn sem(&self) -> f64 {
+    pub fn sem(&self) -> F {
         (self.sample_variance() / self.count).sqrt()
     }
     /// Is the Standard Error of the Mean (SEM) less than the error threshold?
     /// Uses the square of the error for numerical stability (avoids sqrt)
-    pub fn sem_le_error_threshold(&self, error_squared: f64) -> bool {
+    pub fn sem_le_error_threshold(&self, error_squared: F) -> bool {
         // SEM^2 = self.sample_variance() / self.count
-        self.m2 < error_squared * (self.count * (self.count - 1.))
+        self.m2 < error_squared * (self.count * (self.count - F::one()))
     }
 }
