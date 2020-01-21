@@ -67,6 +67,16 @@ impl<const N: usize> Qrng<N> {
         }
         self.state
     }
+
+    pub fn step(&mut self, step: u32) -> [f64; N] {
+        let step = step as f64;
+        let mut i = 0;
+        while i < N {
+            self.state[i] = (self.state[i] + step * self.alpha[i]) % 1_f64;
+            i += 1;
+        }
+        self.state
+    }
 }
 
 #[cfg(test)]
@@ -110,6 +120,7 @@ impl<F: Float> Iterator for Qrng<F> {
     }
 }
 
+#[cfg(not(target_arch = "nvptx64"))]
 fn phi(dim: usize) -> f64 {
     let mut x = 2_f64;
     let pow = ((dim + 1) as f64).recip();

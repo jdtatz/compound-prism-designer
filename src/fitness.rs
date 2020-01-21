@@ -1,26 +1,24 @@
-use crate::erf::{erf, erfc_inv};
+use crate::erf::erf;
 use crate::qrng::*;
 use crate::ray::*;
 use crate::utils::*;
 use core::f64::consts::*;
-use libm::log2;
-#[cfg(feature = "pyext")]
-use pyo3::prelude::{pyclass, PyObject};
 
 const MAX_N: usize = 100_000;
 
-fn vector_quasi_monte_carlo_integration<I, F>(
-    max_err: f64,
+fn vector_quasi_monte_carlo_integration<V, I, F>(
+    max_err: V,
     vec_len: usize,
     vector_fn: F,
-) -> Vec<Welford>
+) -> Vec<Welford<V>>
 where
-    I: ExactSizeIterator<Item = f64>,
-    F: Fn(f64) -> Option<I>,
+    V: Float,
+    I: ExactSizeIterator<Item = V>,
+    F: Fn(V) -> Option<I>,
 {
     let max_err_squared = max_err * max_err;
     let mut stats = vec![Welford::new(); vec_len];
-    let qrng = Qrng::<f64>::new(0.5_f64);
+    let qrng = Qrng::<V>::new(V::from_f64(0.5_f64));
     for u in qrng.take(MAX_N) {
         if let Some(vec) = vector_fn(u) {
             for (v, w) in vec.zip(stats.iter_mut()) {
@@ -28,7 +26,7 @@ where
             }
         } else {
             for w in stats.iter_mut() {
-                w.next_sample(0.);
+                w.next_sample(V::zero());
             }
         }
         if stats
@@ -50,27 +48,29 @@ where
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
 ///  * `detpos` - the position and orientation of the detector array
-pub fn p_dets_l_wavelength(
-    wavelength: f64,
-    cmpnd: &CompoundPrism<f64>,
-    detarr: &DetectorArray<f64>,
-    beam: &GaussianBeam<f64>,
-    detpos: &DetectorArrayPositioning<f64>,
-) -> impl Iterator<Item = f64> {
-    let p_z = erf(cmpnd.width * FRAC_1_SQRT_2 / beam.width);
-    debug_assert!(0. <= p_z && p_z <= 1.);
-    vector_quasi_monte_carlo_integration(5e-3, detarr.bins.len(), move |u: f64| {
+pub fn p_dets_l_wavelength<F: Float>(
+    wavelength: F,
+    cmpnd: &CompoundPrism<F>,
+    detarr: &DetectorArray<F>,
+    beam: &GaussianBeam<F>,
+    detpos: &DetectorArrayPositioning<F>,
+) -> impl Iterator<Item = F> {
+    let p_z = F::from_f64(erf(
+        cmpnd.width.to_f64() * FRAC_1_SQRT_2 / beam.width.to_f64()
+    ));
+    debug_assert!(F::zero() <= p_z && p_z <= F::one());
+    vector_quasi_monte_carlo_integration(F::from_f64(5e-3), detarr.bins.len(), move |u: F| {
         // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
-        let y = beam.y_mean - beam.width * FRAC_1_SQRT_2 * erfc_inv(2. * u);
-        if y <= 0. || cmpnd.height <= y {
+        let y = beam.inverse_cdf_initial_y(u);
+        if y <= F::zero() || cmpnd.height <= y {
             return None;
         }
         let ray = Ray::new_from_start(y);
         if let Ok((_, pos, t)) = ray.propagate(wavelength, cmpnd, detarr, detpos) {
             debug_assert!(pos.is_finite());
-            debug_assert!(0. <= pos && pos <= detarr.length);
+            debug_assert!(F::zero() <= pos && pos <= detarr.length);
             debug_assert!(t.is_finite());
-            debug_assert!(0. <= t && t <= 1.);
+            debug_assert!(F::zero() <= t && t <= F::one());
             // What is actually being integrated is
             // pdf_t = p_z * t * pdf(y);
             // But because of importance sampling using the same distribution
@@ -78,12 +78,13 @@ pub fn p_dets_l_wavelength(
             // the pdf(y) is cancelled, so.
             // pdf_t = p_z * t;
             let pdf_t = p_z * t;
-            Some(
-                detarr
-                    .bins
-                    .iter()
-                    .map(move |&[l, u]| if l <= pos && pos < u { pdf_t } else { 0. }),
-            )
+            Some(detarr.bins.iter().map(move |&[l, u]| {
+                if l <= pos && pos < u {
+                    pdf_t
+                } else {
+                    F::zero()
+                }
+            }))
         } else {
             None
         }
@@ -100,58 +101,59 @@ pub fn p_dets_l_wavelength(
 /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-fn mutual_information(
-    cmpnd: &CompoundPrism<f64>,
-    detarr: &DetectorArray<f64>,
-    beam: &GaussianBeam<f64>,
-    detpos: &DetectorArrayPositioning<f64>,
-) -> f64 {
-    let (wmin, wmax) = beam.w_range;
+fn mutual_information<F: Float>(
+    cmpnd: &CompoundPrism<F>,
+    detarr: &DetectorArray<F>,
+    beam: &GaussianBeam<F>,
+    detpos: &DetectorArrayPositioning<F>,
+) -> F {
     let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
     let mut info_stats = vec![Welford::new(); detarr.bins.len()];
-    let qrng = Qrng::<f64>::new(0.5_f64);
+    let qrng = Qrng::<F>::new(F::from_f64(0.5_f64));
     for u in qrng.take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-        let w = wmin + u * (wmax - wmin);
+        let w = beam.inverse_cdf_wavelength(u);
         let p_dets_l_w = p_dets_l_wavelength(w, cmpnd, detarr, beam, detpos);
         for ((dstat, istat), p_det_l_w) in p_dets_stats
             .iter_mut()
             .zip(info_stats.iter_mut())
             .zip(p_dets_l_w)
         {
-            debug_assert!(0. <= p_det_l_w && p_det_l_w <= 1.);
+            debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
             dstat.next_sample(p_det_l_w);
-            if p_det_l_w > 0. {
-                istat.next_sample(p_det_l_w * log2(p_det_l_w));
+            if p_det_l_w > F::zero() {
+                istat.next_sample(p_det_l_w * p_det_l_w.log2());
             } else {
-                istat.next_sample(0.);
+                istat.next_sample(F::zero());
             }
         }
         if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
             const MAX_ERR: f64 = 5e-3;
             const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
-            stat.sem_le_error_threshold(MAX_ERR_SQ)
+            stat.sem_le_error_threshold(F::from_f64(MAX_ERR_SQ))
         }) {
             break;
         }
     }
-    let mut info: f64 = info_stats.into_iter().map(|s| s.mean).sum();
+    let mut info: F = info_stats
+        .into_iter()
+        .map(|s| s.mean)
+        .fold(F::zero(), core::ops::Add::add);
     for stat in p_dets_stats {
         let p_det = stat.mean;
-        debug_assert!(0. <= p_det && p_det <= 1.);
-        if p_det > 0. {
-            info -= p_det * log2(p_det);
+        debug_assert!(F::zero() <= p_det && p_det <= F::one());
+        if p_det > F::zero() {
+            info -= p_det * p_det.log2();
         }
     }
     info
 }
 
-#[cfg_attr(feature = "pyext", pyclass)]
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct DesignFitness {
-    pub size: f64,
-    pub info: f64,
-    pub deviation: f64,
+pub struct DesignFitness<F: Float> {
+    pub size: F,
+    pub info: F,
+    pub deviation: F,
 }
 
 /// Return the fitness of the spectrometer design to be minimized by an optimizer.
@@ -164,15 +166,15 @@ pub struct DesignFitness {
 ///  * `prism` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
-pub fn fitness(
-    cmpnd: &CompoundPrism<f64>,
-    detarr: &DetectorArray<f64>,
-    beam: &GaussianBeam<f64>,
-) -> Result<DesignFitness, RayTraceError> {
+pub fn fitness<F: Float>(
+    cmpnd: &CompoundPrism<F>,
+    detarr: &DetectorArray<F>,
+    beam: &GaussianBeam<F>,
+) -> Result<DesignFitness<F>, RayTraceError> {
     let detpos = detector_array_positioning(cmpnd, detarr, beam)?;
-    let deviation_vector = detpos.position + detpos.direction * detarr.length * 0.5
+    let deviation_vector = detpos.position + detpos.direction * detarr.length * F::from_f64(0.5)
         - Pair {
-            x: 0.,
+            x: F::zero(),
             y: beam.y_mean,
         };
     let size = deviation_vector.norm();
@@ -185,16 +187,46 @@ pub fn fitness(
     })
 }
 
-impl<'a> Spectrometer<'a, f64> {
-    pub fn fitness(&self) -> DesignFitness {
-        let deviation_vector = self.detector_array_position.position
-            + self.detector_array_position.direction * self.detector_array.length * 0.5
-            - Pair {
-                x: 0.,
-                y: self.gaussian_beam.y_mean,
-            };
-        let size = deviation_vector.norm();
-        let deviation = deviation_vector.y.abs() / deviation_vector.norm();
+impl<'a, F: Float> Spectrometer<'a, F> {
+    pub fn p_dets_l_wavelength(&self, wavelength: F) -> impl Iterator<Item = F> {
+        let p_z = self.probability_z_in_bounds();
+        debug_assert!(F::zero() <= p_z && p_z <= F::one());
+        let nbin = self.detector_array.bins.len();
+        vector_quasi_monte_carlo_integration(F::from_f64(5e-3), nbin, move |u: F| {
+            // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
+            let y = self.gaussian_beam.inverse_cdf_initial_y(u);
+            if y <= F::zero() || self.compound_prism.height <= y {
+                return None;
+            }
+            if let Ok((pos, t)) = self.propagate(wavelength, y) {
+                debug_assert!(pos.is_finite());
+                debug_assert!(F::zero() <= pos && pos <= self.detector_array.length);
+                debug_assert!(t.is_finite());
+                debug_assert!(F::zero() <= t && t <= F::one());
+                // What is actually being integrated is
+                // pdf_t = p_z * t * pdf(y);
+                // But because of importance sampling using the same distribution
+                // pdf_t /= pdf(y);
+                // the pdf(y) is cancelled, so.
+                // pdf_t = p_z * t;
+                let pdf_t = p_z * t;
+                Some(self.detector_array.bins.iter().map(move |&[l, u]| {
+                    if l <= pos && pos < u {
+                        pdf_t
+                    } else {
+                        F::zero()
+                    }
+                }))
+            } else {
+                None
+            }
+        })
+            .into_iter()
+            .map(|w| w.mean)
+    }
+
+    pub fn fitness(&self) -> DesignFitness<F> {
+        let (size, deviation) = self.size_and_deviation();
         let info = mutual_information(
             &self.compound_prism,
             &self.detector_array,

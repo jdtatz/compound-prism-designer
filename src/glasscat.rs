@@ -1,6 +1,6 @@
-#[cfg(target_arch = "nvptx64")]
 use crate::utils::Float;
 use arrayvec::ArrayVec;
+use core::str::FromStr;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum CatalogError {
@@ -33,20 +33,20 @@ impl Into<&'static str> for CatalogError {
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
-pub enum Glass {
-    Schott([f64; 6]),
-    Sellmeier1([f64; 6]),
-    Sellmeier2([f64; 5]),
-    Sellmeier3([f64; 8]),
-    Sellmeier4([f64; 5]),
-    Sellmeier5([f64; 10]),
-    Herzberger([f64; 6]),
-    Conrady([f64; 3]),
-    HandbookOfOptics1([f64; 4]),
-    HandbookOfOptics2([f64; 4]),
-    Extended([f64; 8]),
-    Extended2([f64; 8]),
-    Extended3([f64; 9]),
+pub enum Glass<F: Float> {
+    Schott([F; 6]),
+    Sellmeier1([F; 6]),
+    Sellmeier2([F; 5]),
+    Sellmeier3([F; 8]),
+    Sellmeier4([F; 5]),
+    Sellmeier5([F; 10]),
+    Herzberger([F; 6]),
+    Conrady([F; 3]),
+    HandbookOfOptics1([F; 4]),
+    HandbookOfOptics2([F; 4]),
+    Extended([F; 8]),
+    Extended2([F; 8]),
+    Extended3([F; 9]),
 }
 
 fn iter_to_array<A: arrayvec::Array>(
@@ -58,13 +58,13 @@ fn iter_to_array<A: arrayvec::Array>(
         .map_err(|_| CatalogError::InvalidGlassDescription)
 }
 
-impl Glass {
+impl<F: Float> Glass<F> {
     /// Create Glass parametrization structure
     ///
     /// # Arguments
     ///  * `num` - dispersion formula number
     ///  * `cd` - dispersion formula coefficients
-    pub fn new(num: i32, cd: impl IntoIterator<Item = f64>) -> Result<Self, CatalogError> {
+    pub fn new(num: i32, cd: impl IntoIterator<Item = F>) -> Result<Self, CatalogError> {
         Ok(match num {
             1 => Glass::Schott(iter_to_array(cd)?),
             2 => Glass::Sellmeier1(iter_to_array(cd)?),
@@ -89,7 +89,8 @@ impl Glass {
     /// # Arguments
     ///  * `w` - wavelength in micrometers
     #[allow(clippy::many_single_char_names)]
-    pub fn calc_n(&self, w: f64) -> f64 {
+    #[inline(never)]
+    pub fn calc_n(&self, w: F) -> F {
         match self {
             Glass::Schott(cd) => {
                 let &[a0, a1, a2, a3, a4, a5] = cd;
@@ -102,19 +103,19 @@ impl Glass {
             Glass::Sellmeier1(cd) => {
                 let &[b1, c1, b2, c2, b3, c3] = cd;
                 let w2 = w * w;
-                (1_f64 + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3)).sqrt()
+                (F::one() + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3)).sqrt()
             }
             Glass::Sellmeier2(cd) => {
                 let &[a, b1, l1, b2, l2] = cd;
                 let w2 = w * w;
                 let l1 = l1 * l1;
                 let l2 = l2 * l2;
-                (1_f64 + a + b1 * w2 / (w2 - l1) + b2 / (w2 - l2)).sqrt()
+                (F::one() + a + b1 * w2 / (w2 - l1) + b2 / (w2 - l2)).sqrt()
             }
             Glass::Sellmeier3(cd) => {
                 let &[k1, l1, k2, l2, k3, l3, k4, l4] = cd;
                 let w2 = w * w;
-                (1_f64
+                (F::one()
                     + k1 * w2 / (w2 - l1)
                     + k2 * w2 / (w2 - l2)
                     + k3 * w2 / (w2 - l3)
@@ -129,7 +130,7 @@ impl Glass {
             Glass::Sellmeier5(cd) => {
                 let &[k1, l1, k2, l2, k3, l3, k4, l4, k5, l5] = cd;
                 let w2 = w * w;
-                (1_f64
+                (F::one()
                     + k1 * w2 / (w2 - l1)
                     + k2 * w2 / (w2 - l2)
                     + k3 * w2 / (w2 - l3)
@@ -142,13 +143,13 @@ impl Glass {
                 let w2 = w * w;
                 let w4 = w2 * w2;
                 let w6 = w2 * w4;
-                let l = 1_f64 / (w2 - 0.028_f64);
+                let l = F::one() / (w2 - F::from_f64(0.028_f64));
                 let l2 = l * l;
                 a + b * l + c * l2 + d * w2 + e * w4 + f * w6
             }
             Glass::Conrady(cd) => {
                 let &[n0, a, b] = cd;
-                n0 + a / w + b / w.powf(3.5)
+                n0 + a / w + b / w.powf(F::from_f64(3.5))
             }
             Glass::HandbookOfOptics1(cd) => {
                 let &[a, b, c, d] = cd;
@@ -202,8 +203,8 @@ impl Glass {
 
 /// Break down a Glass parametrization structure
 /// into its dispersion formula number and coefficients
-impl<'g> Into<(i32, &'g [f64])> for &'g Glass {
-    fn into(self) -> (i32, &'g [f64]) {
+impl<'g, F: Float> Into<(i32, &'g [F])> for &'g Glass<F> {
+    fn into(self) -> (i32, &'g [F]) {
         match self {
             Glass::Schott(cd) => (1, cd.as_ref()),
             Glass::Sellmeier1(cd) => (2, cd.as_ref()),
@@ -222,22 +223,34 @@ impl<'g> Into<(i32, &'g [f64])> for &'g Glass {
     }
 }
 
-struct CatalogIter<'s> {
+impl<F: Float> From<&Glass<f64>> for Glass<F> {
+    fn from(g: &Glass<f64>) -> Self {
+        let (form, data): (i32, &[f64]) = g.into();
+        match Glass::new(form, data.iter().copied().map(|f| F::from_f64(f))) {
+            Ok(g) => g,
+            Err(_) => unreachable!()
+        }
+    }
+}
+
+struct CatalogIter<'s, F: Float + FromStr> {
     file_lines: core::str::Lines<'s>,
     name: Option<&'s str>,
     dispersion_form: i32,
+    marker: core::marker::PhantomData<F>,
 }
 
-impl<'s> CatalogIter<'s> {
+impl<'s, F: Float + FromStr> CatalogIter<'s, F> {
     fn new(file: &'s str) -> Self {
         CatalogIter {
             file_lines: file.lines(),
             name: None,
             dispersion_form: -1,
+            marker: core::marker::PhantomData,
         }
     }
 
-    fn next_result(&mut self) -> Result<Option<(&'s str, Glass)>, CatalogError> {
+    fn next_result(&mut self) -> Result<Option<(&'s str, Glass<F>)>, CatalogError> {
         while let Some(line) = self.file_lines.next() {
             if line.starts_with("NM") {
                 let mut nm = line.split(' ');
@@ -272,8 +285,8 @@ impl<'s> CatalogIter<'s> {
     }
 }
 
-impl<'s> Iterator for CatalogIter<'s> {
-    type Item = Result<(&'s str, Glass), CatalogError>;
+impl<'s, F: Float + FromStr> Iterator for CatalogIter<'s, F> {
+    type Item = Result<(&'s str, Glass<F>), CatalogError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_result().transpose()
@@ -281,13 +294,15 @@ impl<'s> Iterator for CatalogIter<'s> {
 }
 
 /// Create glass catalog from .agf file
-pub fn new_catalog(file: &str) -> impl Iterator<Item = Result<(&str, Glass), CatalogError>> {
+pub fn new_catalog<F: Float + FromStr>(
+    file: &str,
+) -> impl Iterator<Item = Result<(&str, Glass<F>), CatalogError>> {
     CatalogIter::new(file)
 }
 
 #[rustfmt::skip]
 #[allow(clippy::unreadable_literal)]
-pub const BUNDLED_CATALOG: &[(&str, Glass)] = &[
+pub const BUNDLED_CATALOG: &[(&str, Glass<f64>)] = &[
     ("F2", Glass::Sellmeier1([1.34533359, 0.00997743871, 0.209073176, 0.0470450767, 0.937357162, 111.886764])),
     ("F5", Glass::Sellmeier1([1.3104463, 0.00958633048, 0.19603426, 0.0457627627, 0.96612977, 115.011883])),
     ("K10", Glass::Sellmeier1([1.15687082, 0.00809424251, 0.0642625444, 0.0386051284, 0.872376139, 104.74773])),

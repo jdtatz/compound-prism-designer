@@ -28,6 +28,5 @@ mod fitness;
 pub use crate::fitness::*;
 pub use crate::glasscat::*;
 pub use crate::ray::*;
-pub use crate::utils::Welford;
 #[cfg(target_arch = "nvptx64")]
 mod kernel;

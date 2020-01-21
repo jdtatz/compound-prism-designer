@@ -60,7 +60,7 @@ fn profiled() -> Criterion {
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let glasses = [
-        &Glass::Sellmeier1([
+        Glass::Sellmeier1([
             1.029607,
             0.00516800155,
             0.1880506,
@@ -68,7 +68,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             0.736488165,
             138.964129,
         ]),
-        &Glass::Sellmeier1([
+        Glass::Sellmeier1([
             1.87543831,
             0.0141749518,
             0.37375749,
@@ -76,7 +76,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             2.30001797,
             177.389795,
         ]),
-        &Glass::Sellmeier1([
+        Glass::Sellmeier1([
             0.738042712,
             0.00339065607,
             0.363371967,
@@ -86,10 +86,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         ]),
     ];
     let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
-    let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
-    let lengths = [0_f64; 3];
-    let prism = CompoundPrism::new(
-        glasses.iter().copied(),
+    let angles: Box<[f32]> = angles.iter().cloned().map(f32::to_radians).collect();
+    let lengths = [0_f32; 3];
+    let prism = CompoundPrism::<f32>::new(
+        glasses.iter().cloned(),
         angles.as_ref().into(),
         lengths.as_ref().into(),
         0.21,
@@ -100,10 +100,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     const NBIN: usize = 32;
     let pmt_length = 3.2;
     let bounds: Box<[_]> = (0..=NBIN)
-        .map(|i| (i as f64) / (NBIN as f64) * pmt_length)
+        .map(|i| (i as f32) / (NBIN as f32) * pmt_length)
         .collect();
     let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
-    let spec_max_accepted_angle = (60_f64).to_radians();
+    let spec_max_accepted_angle = (60_f32).to_radians();
     let detarr = DetectorArray::new(
         bins.as_ref().into(),
         spec_max_accepted_angle.cos(),
@@ -117,15 +117,15 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         w_range: (0.5, 0.82),
     };
     let spec = Spectrometer::new(beam, prism, detarr).unwrap();
-    c.bench_function("known_design_example", |b| {
+    /*c.bench_function("known_design_example", |b| {
         b.iter(|| spec.fitness());
-    });
+    });*/
     c.bench_function("cuda_known_design_example", |b| {
         b.iter(|| spec.cuda_fitness().unwrap())
     });
     let cpu_fitness = spec.fitness();
     let cuda_fitness = spec.cuda_fitness().unwrap();
-    assert_almost_eq!(cpu_fitness.info, cuda_fitness.info, 1e-2);
+    assert_almost_eq!(cpu_fitness.info as f64, cuda_fitness.info as f64, 1e-2);
     println!("cpu: {:?}", cpu_fitness);
     println!("cuda: {:?}", cuda_fitness);
 }

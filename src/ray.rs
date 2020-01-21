@@ -35,6 +35,20 @@ pub struct GaussianBeam<F: Float> {
     pub w_range: (F, F),
 }
 
+impl<F: Float> GaussianBeam<F> {
+    pub fn inverse_cdf_wavelength(&self, p: F) -> F {
+        self.w_range.0 + (self.w_range.1 - self.w_range.0) * p
+    }
+
+    pub fn inverse_cdf_initial_y(&self, p: F) -> F {
+        use core::f64::consts::FRAC_1_SQRT_2;
+        self.y_mean
+            - self.width
+                * F::from_f64(FRAC_1_SQRT_2)
+                * crate::erf::erfc_inv(F::from_f64(2.) * p)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
 pub struct Surface<F: Float> {
@@ -99,6 +113,7 @@ impl<F: Float> Surface<F> {
         }
     }
 
+    #[cfg(not(target_arch = "nvptx64"))]
     pub fn end_points(&self, height: F) -> (Pair<F>, Pair<F>) {
         let dx = self.normal.y / self.normal.x * height * F::from_f64(0.5);
         let ux = self.midpt.x - dx;
@@ -149,6 +164,7 @@ impl<F: Float> CurvedSurface<F> {
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
 
+    #[cfg(not(target_arch = "nvptx64"))]
     fn end_points(&self, height: F) -> (Pair<F>, Pair<F>) {
         let theta_2 =
             F::from_f64(2.) * (self.max_dist_sq.sqrt() / (F::from_f64(2.) * self.radius)).asin();
@@ -185,7 +201,7 @@ impl<F: Float> CurvedSurface<F> {
 pub struct CompoundPrism<F: Float> {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
-    prisms: arrayvec::ArrayVec<[(Glass, Surface<F>); 6]>,
+    prisms: arrayvec::ArrayVec<[(Glass<F>, Surface<F>); 6]>,
     /// The curved lens-like last inter-media boundary surface of the compound prism
     lens: CurvedSurface<F>,
     /// Height of compound prism
@@ -204,7 +220,7 @@ impl<F: Float> CompoundPrism<F> {
     ///  * `curvature` - Lens Curvature of last surface of compound prism
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
-    pub fn new<'a, I: IntoIterator<Item = &'a Glass>>(
+    pub fn new<I: IntoIterator<Item = Glass<F>>>(
         glasses: I,
         angles: &[F],
         lengths: &[F],
@@ -215,7 +231,7 @@ impl<F: Float> CompoundPrism<F> {
     where
         I::IntoIter: ExactSizeIterator,
     {
-        let glasses = glasses.into_iter().cloned();
+        let glasses = glasses.into_iter();
         debug_assert!(glasses.len() > 0);
         debug_assert!(angles.len() - 1 == glasses.len());
         debug_assert!(lengths.len() == glasses.len());
@@ -282,6 +298,7 @@ impl<'a, F: Float> DetectorArray<'a, F> {
         }
     }
 
+    #[cfg(not(target_arch = "nvptx64"))]
     pub fn end_points(&self, pos: &DetectorArrayPositioning<F>) -> (Pair<F>, Pair<F>) {
         (pos.position, pos.position + pos.direction * self.length)
     }
@@ -355,7 +372,7 @@ impl<F: Float> Ray<F> {
         debug_assert!(n2 >= F::one());
         debug_assert!(normal.is_unit());
         let r = n1 / n2;
-        let cr_sq = F::one() - r * r * (F::one() - ci * ci);
+        let cr_sq = F::one() - r.sqr() * (F::one() - ci.sqr());
         if cr_sq < F::zero() {
             return Err(RayTraceError::TotalInternalReflection);
         }
@@ -366,8 +383,8 @@ impl<F: Float> Ray<F> {
         Ok(Self {
             origin: intersection,
             direction: v,
-            s_transmittance: self.s_transmittance * (F::one() - fresnel_rs * fresnel_rs),
-            p_transmittance: self.p_transmittance * (F::one() - fresnel_rp * fresnel_rp),
+            s_transmittance: self.s_transmittance * (F::one() - fresnel_rs.sqr()),
+            p_transmittance: self.p_transmittance * (F::one() - fresnel_rp.sqr()),
         })
     }
 
@@ -392,7 +409,7 @@ impl<F: Float> Ray<F> {
             return Err(RayTraceError::OutOfBounds);
         }
         let d = (self.origin - plane.midpt).dot(plane.normal) / ci;
-        let p = self.origin + self.direction * d;
+        let p = self.direction.mul_add(d, self.origin);
         if p.y <= F::zero() || prism_height <= p.y {
             return Err(RayTraceError::OutOfBounds);
         }
@@ -423,7 +440,7 @@ impl<F: Float> Ray<F> {
         if d <= F::zero() {
             return Err(RayTraceError::NoSurfaceIntersection);
         }
-        let p = self.origin + self.direction * d;
+        let p = self.direction.mul_add(d, self.origin);
         if !lens.is_along_arc(p) {
             return Err(RayTraceError::NoSurfaceIntersection);
         }
@@ -450,7 +467,7 @@ impl<F: Float> Ray<F> {
         }
         let d = (self.origin - detpos.position).dot(detarr.normal) / ci;
         debug_assert!(d > F::zero());
-        let p = self.origin + self.direction * d;
+        let p = self.direction.mul_add(d, self.origin);
         debug_assert!((detpos.direction).is_unit());
         let pos = (p - detpos.position).dot(detpos.direction);
         if pos < F::zero() || detarr.length < pos {
@@ -474,7 +491,7 @@ impl<F: Float> Ray<F> {
                 .prisms
                 .iter()
                 .try_fold((self, F::one()), |(ray, n1), (glass, plane)| {
-                    let n2 = F::from_f64(glass.calc_n(wavelength.to_f64()));
+                    let n2 = glass.calc_n(wavelength);
                     debug_assert!(n2 >= F::one());
                     let ray = ray.intersect_plane_interface(plane, n1, n2, cmpnd.height)?;
                     Ok((ray, n2))
@@ -512,6 +529,7 @@ impl<F: Float> Ray<F> {
     ///  * `cmpnd` - the compound prism specification
     ///  * `detarr` - detector array specification
     ///  * `detpos` - the position and orientation of the detector array
+    #[cfg(not(target_arch = "nvptx64"))]
     fn trace<'s>(
         self,
         wavelength: F,
@@ -527,7 +545,7 @@ impl<F: Float> Ray<F> {
         let mut propagation_fn = move || -> Result<Option<Pair<F>>, RayTraceError> {
             match prisms.next() {
                 Some((glass, plane)) => {
-                    let n2 = F::from_f64(glass.calc_n(wavelength.to_f64()));
+                    let n2 = glass.calc_n(wavelength);
                     ray = ray.intersect_plane_interface(plane, n1, n2, cmpnd.height)?;
                     n1 = n2;
                     Ok(Some(ray.origin))
@@ -560,7 +578,7 @@ impl<F: Float> Ray<F> {
 ///  * `cmpnd` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
-pub fn detector_array_positioning<F: Float>(
+pub(crate) fn detector_array_positioning<F: Float>(
     cmpnd: &CompoundPrism<F>,
     detarr: &DetectorArray<F>,
     beam: &GaussianBeam<F>,
@@ -588,7 +606,7 @@ pub fn detector_array_positioning<F: Float>(
     let imat = mat.inverse().ok_or(RayTraceError::NoSurfaceIntersection)?;
     let dists = imat * (spec - upper_ray.origin + lower_ray.origin);
     let d2 = dists.y;
-    let l_vertex = lower_ray.origin + lower_ray.direction * d2;
+    let l_vertex = lower_ray.direction.mul_add(d2, lower_ray.origin);
     let (pos, dir) = if d2 > F::zero() {
         (l_vertex, spec_dir)
     } else {
@@ -597,7 +615,7 @@ pub fn detector_array_positioning<F: Float>(
         if d2 < F::zero() {
             return Err(RayTraceError::NoSurfaceIntersection);
         }
-        let u_vertex = lower_ray.origin + lower_ray.direction * d2;
+        let u_vertex = lower_ray.direction.mul_add(d2, lower_ray.origin);
         (u_vertex, -spec_dir)
     };
     Ok(DetectorArrayPositioning {
@@ -606,27 +624,7 @@ pub fn detector_array_positioning<F: Float>(
     })
 }
 
-/// Trace the propagation of a ray of `wavelength` through the compound prism and
-/// intersection the detector array. Returning an iterator of the ray's origin position and
-/// all of the intersection positions.
-///
-/// # Arguments
-///  * `wavelength` - the wavelength of the light ray
-///  * `init_y` - the inital y value of the ray
-///  * `cmpnd` - the compound prism specification
-///  * `detarr` - detector array specification
-///  * `detpos` - the position and orientation of the detector array
-pub fn trace<'s, F: Float>(
-    wavelength: F,
-    init_y: F,
-    cmpnd: &'s CompoundPrism<F>,
-    detarr: &'s DetectorArray<'s, F>,
-    detpos: &'s DetectorArrayPositioning<F>,
-) -> impl Iterator<Item = Result<Pair<F>, RayTraceError>> + 's {
-    let ray = Ray::new_from_start(init_y);
-    ray.trace(wavelength, cmpnd, detarr, detpos)
-}
-
+#[derive(Debug, Clone)]
 pub struct Spectrometer<'a, F: Float> {
     pub gaussian_beam: GaussianBeam<F>,
     pub compound_prism: CompoundPrism<F>,
@@ -650,6 +648,14 @@ impl<'a, F: Float> Spectrometer<'a, F> {
         })
     }
 
+    /// Propagate a ray of `wavelength` start `initial_y` through the spectrometer.
+    /// Returning the intersection position on the detector array
+    /// and the transmission probability.
+    ///
+    /// # Arguments
+    ///  * `self` - spectrometer specification
+    ///  * `wavelength` - the wavelength of the light ray
+    ///  * `initial_y` - the initial y value of the ray
     pub fn propagate(&self, wavelength: F, initial_y: F) -> Result<(F, F), RayTraceError> {
         Ray::new_from_start(initial_y)
             .propagate(
@@ -661,6 +667,15 @@ impl<'a, F: Float> Spectrometer<'a, F> {
             .map(|(_p, pos, t)| (pos, t))
     }
 
+    /// Trace the propagation of a ray of `wavelength` through the spectrometer.
+    /// Returning an iterator of the ray's origin position and
+    /// all of the intersection positions.
+    ///
+    /// # Arguments
+    ///  * `self` - spectrometer specification
+    ///  * `wavelength` - the wavelength of the light ray
+    ///  * `initial_y` - the initial y value of the ray
+    #[cfg(not(target_arch = "nvptx64"))]
     pub fn trace_ray_path<'s>(
         &'s self,
         wavelength: F,
@@ -673,4 +688,33 @@ impl<'a, F: Float> Spectrometer<'a, F> {
             &self.detector_array_position,
         )
     }
+
+    pub(crate) fn size_and_deviation(&self) -> (F, F) {
+        let deviation_vector = self.detector_array_position.position
+            + self.detector_array_position.direction
+                * self.detector_array.length
+                * F::from_f64(0.5)
+            - Pair {
+                x: F::zero(),
+                y: self.gaussian_beam.y_mean,
+            };
+        let size = deviation_vector.norm();
+        let deviation = deviation_vector.y.abs() / deviation_vector.norm();
+        (size, deviation)
+    }
+
+    pub(crate) fn probability_z_in_bounds(&self) -> F {
+        let p_z = F::from_f64(crate::erf::erf(
+            self.compound_prism.width.to_f64() * core::f64::consts::FRAC_1_SQRT_2 / self.gaussian_beam.width.to_f64(),
+        ));
+        debug_assert!(F::zero() <= p_z && p_z <= F::one());
+        p_z
+    }
 }
+// cpu => 1.434454269122527
+
+// 5.6923 ms & approx.ftz => 1.4349899
+// 6.5894 ms & full.ftz => 1.4349899
+// 34.771 ms & div.f32 => 1.4349926
+
+// 180.14 ms & div.f64 => 1.4339791804027775
