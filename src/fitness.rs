@@ -39,116 +39,6 @@ where
     stats
 }
 
-/// Conditional Probability of detection per detector given a wavelength
-/// { p(D=d|Λ=λ) : d in D }
-///
-/// # Arguments
-///  * `wavelength` - given wavelength
-///  * `cmpnd` - the compound prism specification
-///  * `detarr` - detector array specification
-///  * `beam` - input gaussian beam specification
-///  * `detpos` - the position and orientation of the detector array
-pub fn p_dets_l_wavelength<F: Float>(
-    wavelength: F,
-    cmpnd: &CompoundPrism<F>,
-    detarr: &LinearDetectorArray<F>,
-    beam: &GaussianBeam<F>,
-    detpos: &DetectorArrayPositioning<F>,
-) -> impl Iterator<Item = F> {
-    let p_z = F::from_f64(erf(
-        cmpnd.width.to_f64() * FRAC_1_SQRT_2 / beam.width.to_f64()
-    ));
-    debug_assert!(F::zero() <= p_z && p_z <= F::one());
-    vector_quasi_monte_carlo_integration(F::from_f64(5e-3), detarr.bin_count as usize, move |u: F| {
-        // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
-        let y = beam.inverse_cdf_initial_y(u);
-        if y <= F::zero() || cmpnd.height <= y {
-            return None;
-        }
-        let ray = Ray::new_from_start(y);
-        if let Ok((_, pos, t)) = ray.propagate(wavelength, cmpnd, detarr, detpos) {
-            debug_assert!(pos.is_finite());
-            debug_assert!(F::zero() <= pos && pos <= detarr.length);
-            debug_assert!(t.is_finite());
-            debug_assert!(F::zero() <= t && t <= F::one());
-            // What is actually being integrated is
-            // pdf_t = p_z * t * pdf(y);
-            // But because of importance sampling using the same distribution
-            // pdf_t /= pdf(y);
-            // the pdf(y) is cancelled, so.
-            // pdf_t = p_z * t;
-            let pdf_t = p_z * t;
-            Some(detarr.bounds().map(move |[l, u]| {
-                if l <= pos && pos < u {
-                    pdf_t
-                } else {
-                    F::zero()
-                }
-            }))
-        } else {
-            None
-        }
-    })
-    .into_iter()
-    .map(|w| w.mean)
-}
-
-/// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
-/// I(Λ; D) = H(D) - H(D|Λ)
-///   = Sum(Integrate(p(Λ=λ) p(D=d|Λ=λ) log2(p(D=d|Λ=λ)), {λ, wmin, wmax}), d in D)
-///      - Sum(p(D=d) log2(p(D=d)), d in D)
-/// p(D=d) = Expectation_Λ(p(D=d|Λ=λ)) = Integrate(p(Λ=λ) p(D=d|Λ=λ), {λ, wmin, wmax})
-/// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
-/// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
-/// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-fn mutual_information<F: Float>(
-    cmpnd: &CompoundPrism<F>,
-    detarr: &LinearDetectorArray<F>,
-    beam: &GaussianBeam<F>,
-    detpos: &DetectorArrayPositioning<F>,
-) -> F {
-    let mut p_dets_stats = vec![Welford::new(); detarr.bin_count as usize];
-    let mut info_stats = vec![Welford::new(); detarr.bin_count as usize];
-    let qrng = Qrng::<F>::new(F::from_f64(0.5_f64));
-    for u in qrng.take(MAX_N) {
-        // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-        let w = beam.inverse_cdf_wavelength(u);
-        let p_dets_l_w = p_dets_l_wavelength(w, cmpnd, detarr, beam, detpos);
-        for ((dstat, istat), p_det_l_w) in p_dets_stats
-            .iter_mut()
-            .zip(info_stats.iter_mut())
-            .zip(p_dets_l_w)
-        {
-            debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
-            dstat.next_sample(p_det_l_w);
-            if p_det_l_w > F::zero() {
-                istat.next_sample(p_det_l_w * p_det_l_w.log2());
-            } else {
-                istat.next_sample(F::zero());
-            }
-        }
-        if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
-            const MAX_ERR: f64 = 5e-3;
-            const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
-            stat.sem_le_error_threshold(F::from_f64(MAX_ERR_SQ))
-        }) {
-            break;
-        }
-    }
-    let mut info: F = info_stats
-        .into_iter()
-        .map(|s| s.mean)
-        .fold(F::zero(), core::ops::Add::add);
-    for stat in p_dets_stats {
-        let p_det = stat.mean;
-        debug_assert!(F::zero() <= p_det && p_det <= F::one());
-        if p_det > F::zero() {
-            info -= p_det * p_det.log2();
-        }
-    }
-    info
-}
-
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct DesignFitness<F: Float> {
     pub size: F,
@@ -156,38 +46,12 @@ pub struct DesignFitness<F: Float> {
     pub deviation: F,
 }
 
-/// Return the fitness of the spectrometer design to be minimized by an optimizer.
-/// The fitness objectives are
-/// * size = the distance from the mean starting position of the beam to the center of detector array
-/// * info = I(Λ; D)
-/// * deviation = sin(abs(angle of deviation))
-///
-/// # Arguments
-///  * `prism` - the compound prism specification
-///  * `detarr` - detector array specification
-///  * `beam` - input gaussian beam specification
-pub fn fitness<F: Float>(
-    cmpnd: &CompoundPrism<F>,
-    detarr: &LinearDetectorArray<F>,
-    beam: &GaussianBeam<F>,
-) -> Result<DesignFitness<F>, RayTraceError> {
-    let detpos = detector_array_positioning(cmpnd, detarr, beam)?;
-    let deviation_vector = detpos.position + detpos.direction * detarr.length * F::from_f64(0.5)
-        - Pair {
-            x: F::zero(),
-            y: beam.y_mean,
-        };
-    let size = deviation_vector.norm();
-    let deviation = deviation_vector.y.abs() / deviation_vector.norm();
-    let info = mutual_information(cmpnd, detarr, beam, &detpos);
-    Ok(DesignFitness {
-        size,
-        info,
-        deviation,
-    })
-}
-
 impl<F: Float> Spectrometer<F> {
+    /// Conditional Probability of detection per detector given a `wavelength`
+    /// { p(D=d|Λ=λ) : d in D }
+    ///
+    /// # Arguments
+    ///  * `wavelength` - given wavelength
     pub fn p_dets_l_wavelength(&self, wavelength: F) -> impl Iterator<Item = F> {
         let p_z = self.probability_z_in_bounds();
         debug_assert!(F::zero() <= p_z && p_z <= F::one());
@@ -221,13 +85,19 @@ impl<F: Float> Spectrometer<F> {
                 None
             }
         })
-            .into_iter()
-            .map(|w| w.mean)
+        .into_iter()
+        .map(|w| w.mean)
     }
 
-    pub fn mutual_information(
-        &self,
-    ) -> F {
+    /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
+    /// I(Λ; D) = H(D) - H(D|Λ)
+    ///   = Sum(Integrate(p(Λ=λ) p(D=d|Λ=λ) log2(p(D=d|Λ=λ)), {λ, wmin, wmax}), d in D)
+    ///      - Sum(p(D=d) log2(p(D=d)), d in D)
+    /// p(D=d) = Expectation_Λ(p(D=d|Λ=λ)) = Integrate(p(Λ=λ) p(D=d|Λ=λ), {λ, wmin, wmax})
+    /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
+    /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
+    /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
+    pub fn mutual_information(&self) -> F {
         let nbin = self.detector_array.bin_count as usize;
         let mut p_dets_stats = vec![Welford::new(); nbin];
         let mut info_stats = vec![Welford::new(); nbin];
@@ -240,15 +110,15 @@ impl<F: Float> Spectrometer<F> {
                 .iter_mut()
                 .zip(info_stats.iter_mut())
                 .zip(p_dets_l_w)
-                {
-                    debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
-                    dstat.next_sample(p_det_l_w);
-                    if p_det_l_w > F::zero() {
-                        istat.next_sample(p_det_l_w * p_det_l_w.log2());
-                    } else {
-                        istat.next_sample(F::zero());
-                    }
+            {
+                debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
+                dstat.next_sample(p_det_l_w);
+                if p_det_l_w > F::zero() {
+                    istat.next_sample(p_det_l_w * p_det_l_w.log2());
+                } else {
+                    istat.next_sample(F::zero());
                 }
+            }
             if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
                 const MAX_ERR: f64 = 5e-3;
                 const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
@@ -271,7 +141,11 @@ impl<F: Float> Spectrometer<F> {
         info
     }
 
-
+    /// Return the fitness of the spectrometer design to be minimized by an optimizer.
+    /// The fitness objectives are
+    /// * size = the distance from the mean starting position of the beam to the center of detector array
+    /// * info = I(Λ; D)
+    /// * deviation = sin(abs(angle of deviation))
     pub fn fitness(&self) -> DesignFitness<F> {
         let (size, deviation) = self.size_and_deviation();
         let info = self.mutual_information();
