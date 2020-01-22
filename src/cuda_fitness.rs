@@ -9,15 +9,14 @@ use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::CStr;
 
-// FIXME immediately, very unsafe & dangerous
-unsafe impl<'a, F: Float + DeviceCopy> DeviceCopy for Spectrometer<'a, F> {}
+unsafe impl<F: Float + DeviceCopy> DeviceCopy for Spectrometer<F> {}
 
 const PTX: &[u8] = concat!(
     include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx"),
     "\0"
 )
 .as_bytes();
-const MAX_N: usize = 128;
+const MAX_N: usize = 256;
 const MAX_M: usize = 16_384;
 const NWARP: u32 = 2;
 #[allow(clippy::unreadable_literal)]
@@ -69,36 +68,32 @@ impl CudaFitnessContext {
         })
     }
 
-    fn launch_p_dets_l_ws<'a, F: KernelFloat>(
+    fn launch_p_dets_l_ws<F: KernelFloat>(
         &mut self,
         seed: f64,
-        spec: &Spectrometer<'a, F>,
+        spec: &Spectrometer<F>,
     ) -> rustacuda::error::CudaResult<Vec<F>> {
         ContextStack::push(&self.ctxt)?;
 
-        let bins = spec.detector_array.bins;
+        let nbin = spec.detector_array.bin_count as usize;
         let mut dev_spec = DeviceBox::new(spec)?;
-        let mut dev_bins = DeviceBuffer::from_slice(bins)?;
-        let mut dev_probs = unsafe { DeviceBuffer::zeroed(MAX_N * bins.len()) }?;
+        let mut dev_probs = unsafe { DeviceBuffer::zeroed(MAX_N * nbin) }?;
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
         let dynamic_shared_mem = std::mem::size_of::<Spectrometer<F>>() as u32
-            + std::mem::size_of_val(bins) as u32
-            + bins.len() as u32 * NWARP * std::mem::size_of::<[F; 2]>() as u32;
+            + nbin as u32 * NWARP * std::mem::size_of::<[F; 2]>() as u32;
         let stream = &self.stream;
         unsafe {
             launch!(function<<<(MAX_N as u32) / NWARP, 32 * NWARP, dynamic_shared_mem, stream>>>(
                 F::from_f64(seed),
                 MAX_M as u32,
                 dev_spec.as_device_ptr(),
-                bins.len() as u32,
-                dev_bins.as_device_ptr(),
                 dev_probs.as_device_ptr()
             ))?;
         }
         self.stream.synchronize()?;
-        let mut p_dets_l_ws = vec![F::zero(); MAX_N * bins.len()];
+        let mut p_dets_l_ws = vec![F::zero(); MAX_N * nbin];
         dev_probs.copy_to(&mut p_dets_l_ws)?;
         Ok(p_dets_l_ws)
     }
@@ -134,7 +129,7 @@ pub enum CudaFitnessError {
     Cuda(rustacuda::error::CudaError),
 }
 
-impl<'a, F: KernelFloat> Spectrometer<'a, F> {
+impl<F: KernelFloat> Spectrometer<F> {
     pub fn cuda_fitness(&self) -> Result<DesignFitness<F>, CudaFitnessError> {
         const MAX_ERR: f64 = 5e-3;
         const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
@@ -143,7 +138,7 @@ impl<'a, F: KernelFloat> Spectrometer<'a, F> {
             .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))?;
         let mut state = mutex.lock();
 
-        let nbin = self.detector_array.bins.len();
+        let nbin = self.detector_array.bin_count as usize;
         let mut p_dets = vec![Welford::new(); nbin];
         let mut plog2p_p_det_l_w = vec![Welford::new(); nbin];
 

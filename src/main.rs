@@ -28,13 +28,13 @@ use crate::optimizer::*;
 
 #[derive(serde::Serialize)]
 struct DesignOutput {
-    specification: DesignConfig<f32>,
-    designs: Vec<Design<f32>>,
+    specification: DesignConfig,
+    designs: Vec<Design>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let file = read("design_config.toml")?;
-    let config: DesignConfig<f32> = toml::from_slice(file.as_ref())?;
+    let config: DesignConfig = toml::from_slice(file.as_ref())?;
     let designs = config.optimize_designs(None);
 
     let out = (config, designs);

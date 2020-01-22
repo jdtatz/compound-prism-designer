@@ -1,9 +1,9 @@
-use crate::utils::Float;
+use crate::utils::{Float, Welford};
 use crate::Spectrometer;
 use core::{
     arch::nvptx::*,
     panic::PanicInfo,
-    slice::{from_raw_parts, from_raw_parts_mut},
+    slice::from_raw_parts_mut,
 };
 
 #[panic_handler]
@@ -62,50 +62,15 @@ impl CudaFloat for f64 {
     }
 }
 
-fn next_welford_sample<F: Float>(mean: &mut F, m2: &mut F, value: F, count: F) {
-    let delta = value - *mean;
-    *mean += delta / count;
-    let delta2 = value - *mean;
-    *m2 += delta * delta2;
-}
-
-fn parallel_welford_combine<F: Float>(
-    mean_a: F,
-    m2_a: F,
-    count_a: F,
-    mean_b: F,
-    m2_b: F,
-    count_b: F,
-) -> [F; 3] {
-    let count = count_a + count_b;
-    let delta = mean_b - mean_a;
-    let mean = (count_a * mean_a + count_b * mean_b) / count;
-    let m2 = m2_a + m2_b + (delta * delta) * count_a * count_b / count;
-    [mean, m2, count]
-}
-
-/// Is the Standard Error of the Mean (SEM) less than the error threshold?
-/// Uses the square of the error for numerical stability (avoids sqrt)
-pub fn sem_le_error_threshold<F: Float>(m2: F, count: F, error_squared: F) -> bool {
-    // SEM^2 = self.sample_variance() / self.count
-    m2 < error_squared * (count * (count - F::one()))
-}
-
-unsafe fn share_welford<F: CudaFloat>(mut mean: F, mut m2: F, mut count: F) -> [F; 3] {
+unsafe fn share_welford<F: CudaFloat>(welford: &mut Welford<F>) {
     for xor in [16, 8, 4, 2, 1].iter().copied() {
-        let arr = parallel_welford_combine(
-            mean,
-            m2,
-            count,
-            mean.shfl_bfly_sync(xor),
-            m2.shfl_bfly_sync(xor),
-            count.shfl_bfly_sync(xor),
-        );
-        mean = arr[0];
-        m2 = arr[1];
-        count = arr[2];
+        let other = Welford {
+            count: welford.count.shfl_bfly_sync(xor),
+            mean: welford.mean.shfl_bfly_sync(xor),
+            m2: welford.m2.shfl_bfly_sync(xor)
+        };
+        welford.combine(other);
     }
-    [mean, m2, count]
 }
 
 unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
@@ -122,29 +87,13 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
-unsafe fn cuda_memcpy_slice_1d<T>(dest: *mut u8, src: &[T]) -> &[T] {
-    let dest = dest as *mut u32;
-    let len = src.len();
-    let count = (core::mem::size_of::<T>() * len / core::mem::size_of::<u32>()) as u32;
-    let src = src.as_ptr() as *const u32;
-    let mut id = _thread_idx_x() as u32;
-    while id < count {
-        dest.add(id as usize)
-            .write_volatile(src.add(id as usize).read_volatile());
-        id += _block_dim_x() as u32;
-    }
-    core::slice::from_raw_parts(dest as *const T, len)
-}
-
 unsafe fn kernel<F: CudaFloat>(
     seed: F,
     max_evals: u32,
     spectrometer: &Spectrometer<F>,
-    nbin: u32,
-    bins: *const [F; 2],
     prob: *mut F,
 ) {
-    if max_evals == 0 || nbin == 0 {
+    if max_evals == 0 {
         return;
     }
     const MAX_ERR: f64 = 5e-3;
@@ -156,14 +105,15 @@ unsafe fn kernel<F: CudaFloat>(
     let tid = _thread_idx_x() as u32;
     let warpid = tid / 32;
     let nwarps = _block_dim_x() as u32 / 32;
-    let bins = from_raw_parts(bins, nbin as usize);
 
     let ptr: *mut u8 = ptr_shared_to_gen(0 as _) as _;
     let spec_ptr = ptr;
-    let bins_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<F>>());
-    let prob_ptr = bins_ptr.add(core::mem::size_of_val(bins));
+    let prob_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<F>>());
     let ptr = prob_ptr as *mut [F; 2];
 
+    let spectrometer = cuda_memcpy_1d(spec_ptr, spectrometer);
+    _syncthreads();
+    let nbin = spectrometer.detector_array.bin_count;
     let shared = from_raw_parts_mut(ptr.add((warpid * nbin) as usize), nbin as usize);
     if laneid == 0 {
         for [mean, m2] in shared.iter_mut() {
@@ -171,14 +121,7 @@ unsafe fn kernel<F: CudaFloat>(
             *m2 = F::zero();
         }
     }
-    let spectrometer = cuda_memcpy_1d(spec_ptr, spectrometer);
-    let bins = cuda_memcpy_slice_1d(bins_ptr, bins);
-    _syncthreads();
-    if tid == 0 {
-        let bins_ptr = (&spectrometer.detector_array.bins) as *const _ as *mut _;
-        core::mem::replace(&mut *(bins_ptr), bins);
-    }
-    _syncthreads();
+
 
     let id = (_block_idx_x() as u32) * nwarps + warpid;
 
@@ -195,33 +138,39 @@ unsafe fn kernel<F: CudaFloat>(
         let u = qrng_n.mul_add(F::from_f64(ALPHA), seed).fract();
         let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
         let result = spectrometer.propagate(wavelength, y0);
-        count += F::one();
         let prev_count = count;
         let mut finished = true;
         for ([lb, ub], [shared_mean, shared_m2]) in spectrometer
             .detector_array
-            .bins
-            .iter()
-            .copied()
+            .bounds()
             .zip(shared.iter_mut())
         {
             let mut mean = match result {
                 Ok((pos, t)) if lb <= pos && pos < ub => t,
                 _ => F::zero(),
             };
+            let mut welford = if laneid == 0 {
+                let mut w = Welford {
+                    count: prev_count,
+                    mean: *shared_mean,
+                    m2: *shared_m2
+                };
+                w.next_sample(mean);
+                w
+            } else {
+                Welford {
+                    count: F::one(),
+                    mean,
+                    m2: F::zero()
+                }
+            };
+            share_welford(&mut welford);
             if laneid == 0 {
-                next_welford_sample(shared_mean, shared_m2, mean, prev_count);
-                mean = *shared_mean;
+                count = welford.count;
+                *shared_mean = welford.mean;
+                *shared_m2 = welford.m2;
             }
-            let m2 = if laneid == 0 { *shared_m2 } else { F::zero() };
-            let n = if laneid == 0 { prev_count } else { F::one() };
-            let arr = share_welford(mean, m2, n);
-            if laneid == 0 {
-                *shared_mean = arr[0];
-                *shared_m2 = arr[1];
-                count = arr[2];
-            }
-            finished = finished && sem_le_error_threshold(arr[1], arr[2], F::from_f64(MAX_ERR_SQR));
+            finished = finished && welford.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR));
         }
         if finished {
             break;
@@ -242,11 +191,9 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
     seed: f32,
     max_evals: u32,
     spectrometer: &Spectrometer<f32>,
-    nbin: u32,
-    bins: *const [f32; 2],
     prob: *mut f32,
 ) {
-    kernel(seed, max_evals, spectrometer, nbin, bins, prob)
+    kernel(seed, max_evals, spectrometer, prob)
 }
 
 #[no_mangle]
@@ -254,9 +201,7 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths_f64(
     seed: f64,
     max_evals: u32,
     spectrometer: &Spectrometer<f64>,
-    nbin: u32,
-    bins: *const [f64; 2],
     prob: *mut f64,
 ) {
-    kernel(seed, max_evals, spectrometer, nbin, bins, prob)
+    kernel(seed, max_evals, spectrometer,  prob)
 }

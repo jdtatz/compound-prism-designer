@@ -1,10 +1,10 @@
 use crate::fitness::*;
 use crate::glasscat::*;
 use crate::optimizer::*;
-use crate::ray::{trace, CompoundPrism};
-use crate::utils::Pair;
+use crate::ray::{CompoundPrism, LinearDetectorArray, Spectrometer};
+use crate::utils::{Pair, Float};
 use ndarray::prelude::{array, Array2};
-use numpy::{IntoPyArray, PyArray1, PyArray2};
+use numpy::{ToPyArray, PyArray1, PyArray2};
 use pyo3::create_exception;
 use pyo3::exceptions::Exception;
 use pyo3::prelude::*;
@@ -46,7 +46,7 @@ impl IntoPy<PyObject> for Pair<f64> {
 pub struct PyGlass {
     #[pyo3(get)]
     name: String,
-    glass: Glass,
+    glass: Glass<f64>,
 }
 
 #[pymethods]
@@ -70,21 +70,24 @@ fn create_glass_catalog(catalog_file_contents: &str) -> PyResult<Vec<PyGlass>> {
         .collect()
 }
 
-#[pymethods]
-impl DesignFitness {
-    #[getter]
-    fn get_size(&self) -> PyResult<impl IntoPy<PyObject>> {
-        Ok(self.size)
-    }
+#[pyclass(name=DesignFitness)]
+#[derive(Debug, Clone)]
+struct PyDesignFitness {
+    #[pyo3(get)]
+    size: f64,
+    #[pyo3(get)]
+    info: f64,
+    #[pyo3(get)]
+    deviation: f64,
+}
 
-    #[getter]
-    fn get_info(&self) -> PyResult<impl IntoPy<PyObject>> {
-        Ok(self.info)
-    }
-
-    #[getter]
-    fn get_deviation(&self) -> PyResult<impl IntoPy<PyObject>> {
-        Ok(self.deviation)
+impl<F: Float> From<DesignFitness<F>> for PyDesignFitness  {
+    fn from(fit: DesignFitness<F>) -> Self {
+        Self {
+            size: fit.size.to_f64(),
+            info: fit.info.to_f64(),
+            deviation: fit.deviation.to_f64()
+        }
     }
 }
 
@@ -167,12 +170,12 @@ impl CompoundPrismDesign {
         let polys = polys
             .into_iter()
             .map(|[p0, p1, p2, p3]| {
-                (array![[p0.x, p0.y], [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]]).into_pyarray(py)
+                (array![[p0.x, p0.y], [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]]).to_pyarray(py)
             })
             .collect();
         let [p0, p1, p2, p3] = lens_poly;
         let lens_poly =
-            (array![[p0.x, p0.y], [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]]).into_pyarray(py);
+            (array![[p0.x, p0.y], [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]]).to_pyarray(py);
         let lens_center = PyArray1::from_slice(py, &[lens_center.x, lens_center.y]);
         Ok((polys, lens_poly, lens_center, lens_radius))
     }
@@ -183,22 +186,22 @@ impl DetectorArrayDesign {
     #[new]
     fn create(
         obj: &PyRawObject,
-        bins: &PyArray2<f64>,
+        bin_count: u32,
+        bin_size: f64,
+        linear_slope: f64,
+        linear_intercept: f64,
         position: (f64, f64),
         direction: (f64, f64),
         length: f64,
         max_incident_angle: f64,
         angle: f64,
-    ) -> PyResult<()> {
-        let arr = bins.as_array();
-        if arr.dim().1 != 2 {
-            return Err(pyo3::exceptions::TypeError::py_err(
-                "bounds must have a shape of [_, 2]",
-            ));
-        }
+    ) {
         obj.init({
             DetectorArrayDesign {
-                bins: arr.genrows().into_iter().map(|r| [r[0], r[1]]).collect(),
+                bin_count,
+                bin_size,
+                linear_slope,
+                linear_intercept,
                 position: Pair {
                     x: position.0,
                     y: position.1,
@@ -212,12 +215,12 @@ impl DetectorArrayDesign {
                 angle,
             }
         });
-        Ok(())
     }
 
     #[getter]
     fn get_bins<'py>(&'py self, py: Python<'py>) -> PyResult<&'py PyArray2<f64>> {
-        Ok(Array2::from(self.bins.clone()).into_pyarray(py))
+        let detarr: LinearDetectorArray<f64> = self.into();
+        Ok(Array2::from(detarr.bounds().collect::<Vec<_>>()).to_pyarray(py))
     }
 
     #[getter]
@@ -293,8 +296,8 @@ impl Design {
     }
 
     #[getter]
-    fn get_fitness(&self) -> PyResult<impl IntoPy<PyObject>> {
-        Ok(self.fitness)
+    fn get_fitness(&self) -> PyResult<PyDesignFitness> {
+        Ok(self.fitness.into())
     }
 }
 
@@ -373,7 +376,7 @@ impl GaussianBeamConfig {
 }
 
 #[pymethods]
-impl DetectorArrayConfig {
+impl LinearDetectorArrayArrayConfig {
     #[getter]
     fn get_length(&self) -> PyResult<impl IntoPy<PyObject>> {
         Ok(self.length)
@@ -382,11 +385,6 @@ impl DetectorArrayConfig {
     #[getter]
     fn get_max_incident_angle(&self) -> PyResult<impl IntoPy<PyObject>> {
         Ok(self.max_incident_angle)
-    }
-
-    #[getter]
-    fn get_bounds<'p>(&self, py: Python<'p>) -> PyResult<impl 'p + IntoPy<PyObject>> {
-        Ok(Array2::from(self.bounds.clone()).into_pyarray(py))
     }
 }
 
@@ -423,25 +421,6 @@ impl DesignConfig {
     }
 }
 
-#[pyfunction]
-fn evaluate(
-    py: Python,
-    compound_prism: &CompoundPrismDesign,
-    detector_array: &DetectorArrayDesign,
-    gaussian_beam: &GaussianBeamDesign,
-) -> PyResult<Design> {
-    let cmpnd = compound_prism.into();
-    let detarr = detector_array.into();
-    let beam = gaussian_beam.into();
-    let fit = py.allow_threads(|| fitness(&cmpnd, &detarr, &beam))?;
-    Ok(Design {
-        compound_prism: compound_prism.clone(),
-        detector_array: detector_array.clone(),
-        gaussian_beam: gaussian_beam.clone(),
-        fitness: fit,
-    })
-}
-
 #[pymethods]
 impl Design {
     #[new]
@@ -472,19 +451,16 @@ impl Design {
         wavelengths: &PyArray1<f64>,
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
-        let cmpnd = (&self.compound_prism).into();
-        let detarr = (&self.detector_array).into();
-        let detpos = (&self.detector_array).into();
-        let beam = (&self.gaussian_beam).into();
+        let spec: Spectrometer<f64> = self.into();
         py.allow_threads(|| {
             wavelengths
                 .as_array()
                 .into_iter()
-                .flat_map(|w| p_dets_l_wavelength(*w, &cmpnd, &detarr, &beam, &detpos))
-                .collect::<Box<_>>()
+                .flat_map(|w| spec.p_dets_l_wavelength(*w))
+                .collect::<Vec<_>>()
         })
-        .into_pyarray(py)
-        .reshape((wavelengths.len(), self.detector_array.bins.len()))
+        .to_pyarray(py)
+        .reshape((wavelengths.len(), self.detector_array.bin_count as usize))
         .map_err(|e| e.into())
     }
 
@@ -494,15 +470,13 @@ impl Design {
         inital_y: f64,
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
-        let cmpnd = (&self.compound_prism).into();
-        let detarr = (&self.detector_array).into();
-        let detpos = (&self.detector_array).into();
+        let spec: Spectrometer<f64> = self.into();
         Ok(Array2::from(
-            trace(wavelength, inital_y, &cmpnd, &detarr, &detpos)
+            spec.trace_ray_path(wavelength, inital_y)
                 .map(|r| r.map(|p| [p.x, p.y]))
                 .collect::<Result<Vec<_>, _>>()?,
         )
-        .into_pyarray(py))
+        .to_pyarray(py))
     }
 }
 
@@ -553,15 +527,14 @@ fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<CompoundPrismDesign>()?;
     m.add_class::<DetectorArrayDesign>()?;
     m.add_class::<GaussianBeamDesign>()?;
-    m.add_class::<DesignFitness>()?;
+    m.add_class::<PyDesignFitness>()?;
     m.add_class::<Design>()?;
     m.add_class::<OptimizationConfig>()?;
     m.add_class::<CompoundPrismConfig>()?;
     m.add_class::<GaussianBeamConfig>()?;
-    m.add_class::<DetectorArrayConfig>()?;
+    m.add_class::<LinearDetectorArrayArrayConfig>()?;
     m.add_class::<DesignConfig>()?;
     m.add_wrapped(wrap_pyfunction!(create_glass_catalog))?;
-    m.add_wrapped(wrap_pyfunction!(evaluate))?;
     m.add_wrapped(wrap_pyfunction!(serialize_results))?;
     m.add_wrapped(wrap_pyfunction!(deserialize_results))?;
     m.add_wrapped(wrap_pyfunction!(config_from_toml))?;

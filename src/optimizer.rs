@@ -44,10 +44,13 @@ pub struct GaussianBeamConfig {
 #[cfg_attr(feature = "pyext", pyclass)]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct DetectorArrayConfig {
+pub struct LinearDetectorArrayArrayConfig {
+    pub bin_count: u32,
+    pub bin_size: f64,
+    pub linear_slope: f64,
+    pub linear_intercept: f64,
     pub length: f64,
     pub max_incident_angle: f64,
-    pub bounds: Vec<[f64; 2]>,
 }
 
 /// Specification structure for the configuration of the Spectrometer Designer
@@ -58,7 +61,7 @@ pub struct DesignConfig {
     pub length_unit: Cow<'static, str>,
     pub optimizer: OptimizationConfig,
     pub compound_prism: CompoundPrismConfig,
-    pub detector_array: DetectorArrayConfig,
+    pub detector_array: LinearDetectorArrayArrayConfig,
     pub gaussian_beam: GaussianBeamConfig,
 }
 
@@ -70,18 +73,21 @@ impl DesignConfig {
     fn array_to_params(
         &self,
         params: &[f64],
-    ) -> (CompoundPrism<f64>, DetectorArray<f64>, GaussianBeam<f64>) {
+    ) -> Option<Spectrometer<f64>> {
         let params = Params::from_slice(params, self.compound_prism.max_count);
         let cmpnd = CompoundPrism::new(
-            params.glass_indices().map(|i| &BUNDLED_CATALOG[i].1),
+            params.glass_indices().map(|i| &BUNDLED_CATALOG[i].1).cloned(),
             &params.angles,
             &params.lengths,
             params.curvature,
             params.prism_height,
             self.compound_prism.width,
         );
-        let detarr = DetectorArray::new(
-            self.detector_array.bounds.as_ref(),
+        let detarr = LinearDetectorArray::new(
+            self.detector_array.bin_count,
+            self.detector_array.bin_size,
+            self.detector_array.linear_slope,
+            self.detector_array.linear_intercept,
             self.detector_array.max_incident_angle.to_radians().cos(),
             params.detector_array_angle,
             self.detector_array.length,
@@ -91,14 +97,14 @@ impl DesignConfig {
             y_mean: params.y_mean,
             w_range: self.gaussian_beam.wavelength_range,
         };
-        (cmpnd, detarr, beam)
+        Spectrometer::new(beam, cmpnd, detarr).ok()
     }
 
     pub fn maximum_detector_information(&self) -> f64 {
-        (self.detector_array.bounds.len() as f64).log2()
+        (self.detector_array.bin_count as f64).log2()
     }
 
-    pub fn optimize_designs(&self, _glass_catalog: Option<&[(String, Glass)]>) -> Vec<Design> {
+    pub fn optimize_designs(&self, _glass_catalog: Option<&[(String, Glass<f64>)]>) -> Vec<Design> {
         if let Some(ref _c) = _glass_catalog {
             unimplemented!("Custom glass catalogs have not been implemented yet")
         }
@@ -116,9 +122,7 @@ impl DesignConfig {
         archive
             .into_iter()
             .map(|s| {
-                let (cmpnd, detarr, beam) = self.array_to_params(&s.params);
-                let detpos = detector_array_positioning(&cmpnd, &detarr, &beam)
-                    .expect("Only valid designs should result from optimization");
+                let spec = self.array_to_params(&s.params).expect("Only valid designs should result from optimization");
                 let params = Params::from_slice(&s.params, self.compound_prism.max_count);
                 let compound_prism = CompoundPrismDesign {
                     glasses: params
@@ -135,9 +139,12 @@ impl DesignConfig {
                     width: self.compound_prism.width,
                 };
                 let detector_array = DetectorArrayDesign {
-                    bins: self.detector_array.bounds.clone(),
-                    position: detpos.position,
-                    direction: detpos.direction,
+                    bin_count: self.detector_array.bin_count,
+                    bin_size: self.detector_array.bin_size,
+                    linear_slope: self.detector_array.linear_slope,
+                    linear_intercept: self.detector_array.linear_intercept,
+                    position: spec.detector_array_position.position,
+                    direction: spec.detector_array_position.direction,
                     length: self.detector_array.length,
                     max_incident_angle: self.detector_array.max_incident_angle,
                     angle: params.detector_array_angle,
@@ -161,7 +168,7 @@ impl DesignConfig {
 #[cfg_attr(feature="pyext", pyclass(name=CompoundPrism))]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct CompoundPrismDesign {
-    pub glasses: Vec<(Cow<'static, str>, Glass)>,
+    pub glasses: Vec<(Cow<'static, str>, Glass<f64>)>,
     pub angles: Vec<f64>,
     pub lengths: Vec<f64>,
     pub curvature: f64,
@@ -172,7 +179,7 @@ pub struct CompoundPrismDesign {
 impl Into<CompoundPrism<f64>> for &CompoundPrismDesign {
     fn into(self) -> CompoundPrism<f64> {
         CompoundPrism::new(
-            self.glasses.iter().map(|(_, g)| g),
+            self.glasses.iter().map(|(_, g)| g).cloned(),
             &self.angles,
             &self.lengths,
             self.curvature,
@@ -185,7 +192,10 @@ impl Into<CompoundPrism<f64>> for &CompoundPrismDesign {
 #[cfg_attr(feature="pyext", pyclass(name=DetectorArray))]
 #[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorArrayDesign {
-    pub bins: Vec<[f64; 2]>,
+    pub bin_count: u32,
+    pub bin_size: f64,
+    pub linear_slope: f64,
+    pub linear_intercept: f64,
     pub position: Pair<f64>,
     pub direction: Pair<f64>,
     pub length: f64,
@@ -193,10 +203,13 @@ pub struct DetectorArrayDesign {
     pub angle: f64,
 }
 
-impl<'s> Into<DetectorArray<'s, f64>> for &'s DetectorArrayDesign {
-    fn into(self) -> DetectorArray<'s, f64> {
-        DetectorArray::new(
-            &self.bins,
+impl Into<LinearDetectorArray<f64>> for &DetectorArrayDesign {
+    fn into(self) -> LinearDetectorArray<f64> {
+        LinearDetectorArray::new(
+            self.bin_count,
+            self.bin_size,
+            self.linear_slope,
+            self.linear_intercept,
             self.max_incident_angle.to_radians().cos(),
             self.angle,
             self.length,
@@ -237,8 +250,20 @@ pub struct Design {
     pub compound_prism: CompoundPrismDesign,
     pub detector_array: DetectorArrayDesign,
     pub gaussian_beam: GaussianBeamDesign,
-    pub fitness: DesignFitness,
+    pub fitness: DesignFitness<f64>,
 }
+
+impl Into<Spectrometer<f64>> for &Design {
+    fn into(self) -> Spectrometer<f64> {
+        let beam = (&self.gaussian_beam).into();
+        let cmpnd = (&self.compound_prism).into();
+        let detarr = (&self.detector_array).into();
+
+        Spectrometer::new(beam, cmpnd, detarr)
+            .expect("Only valid designs should result from optimization")
+    }
+}
+
 
 #[derive(Debug, Clone)]
 struct Params<'s> {
@@ -348,7 +373,7 @@ pub trait MultiObjectiveMinimizationProblem: Send + Sync {
 fn add_to_archive<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     archive: &mut Vec<Soln<P::Fitness>>,
-    child: &Soln<P::Fitness>,
+    child: Soln<P::Fitness>,
 ) -> bool {
     let mut dominated = false;
     archive.retain(
@@ -362,7 +387,7 @@ fn add_to_archive<P: MultiObjectiveMinimizationProblem>(
         },
     );
     if !dominated {
-        archive.push(child.clone());
+        archive.push(child);
     }
     !dominated
 }
@@ -432,7 +457,7 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
                 offspring.push(Soln { params, fitness });
             }
         }
-        for o in offspring.iter() {
+        for o in offspring.into_iter() {
             add_to_archive(problem, &mut archive, o);
         }
     }
@@ -440,7 +465,7 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
 }
 
 impl MultiObjectiveMinimizationProblem for DesignConfig {
-    type Fitness = DesignFitness;
+    type Fitness = DesignFitness<f64>;
 
     fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64 {
         let eps = &self.optimizer.epsilons;
@@ -453,7 +478,7 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
 
     fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool> {
         let eps = &self.optimizer.epsilons;
-        let box_id = |f: &DesignFitness| {
+        let box_id = |f: &DesignFitness<f64>| {
             [
                 (f.size / eps[0]).floor(),
                 (-f.info / eps[1]).floor(),
@@ -461,7 +486,7 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
             ]
         };
         let square = |x: f64| x * x;
-        let box_dist = |f: &DesignFitness, bid: &[f64; 3]| {
+        let box_dist = |f: &DesignFitness<f64>, bid: &[f64; 3]| {
             square(f.size - bid[0] * eps[0])
                 + square(f.info - bid[1] * eps[1])
                 + square(f.deviation - bid[2] * eps[2])
@@ -514,13 +539,22 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
     }
 
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
-        let (cmpnd, detarr, beam) = self.array_to_params(params);
-        let spec = Spectrometer::new(beam, cmpnd, detarr).ok()?;
-        let fit = spec.fitness();
+        let spec = self.array_to_params(params)?;
+        /*let fit = spec.fitness();
         if fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2 {
             Some(fit)
         } else {
             None
-        }
+        }*/
+        let spec: Spectrometer<f32> = (&spec).into();
+        spec
+            .cuda_fitness()
+            .ok()
+            .map(|fit| DesignFitness {
+                size: fit.size as f64,
+                info: fit.info as f64,
+                deviation: fit.deviation as f64
+            })
+            .filter(|fit| fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2)
     }
 }

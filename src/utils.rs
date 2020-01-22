@@ -208,7 +208,14 @@ impl Float for f32 {
     }
 
     fn floor(self) -> Self {
-        self.floor()
+        #[cfg(target_arch = "nvptx64")]
+            {
+                unsafe { core::intrinsics::floorf32(self) }
+            }
+        #[cfg(not(target_arch = "nvptx64"))]
+            {
+                self.floor()
+            }
     }
 }
 
@@ -357,7 +364,14 @@ impl Float for f64 {
     }
 
     fn floor(self) -> Self {
-        self.floor()
+        #[cfg(target_arch = "nvptx64")]
+            {
+                unsafe { core::intrinsics::floorf64(self) }
+            }
+        #[cfg(not(target_arch = "nvptx64"))]
+            {
+                self.floor()
+            }
     }
 }
 
@@ -483,15 +497,13 @@ impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
 }
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-#[derive(Clone)]
-#[cfg(not(target_arch = "nvptx64"))]
+#[derive(Copy, Clone)]
 pub struct Welford<F: Float> {
     pub count: F,
     pub mean: F,
-    m2: F,
+    pub m2: F,
 }
 
-#[cfg(not(target_arch = "nvptx64"))]
 impl<F: Float> Welford<F> {
     pub fn new() -> Self {
         Welford {
@@ -523,5 +535,12 @@ impl<F: Float> Welford<F> {
     pub fn sem_le_error_threshold(&self, error_squared: F) -> bool {
         // SEM^2 = self.sample_variance() / self.count
         self.m2 < error_squared * (self.count * (self.count - F::one()))
+    }
+    pub fn combine(&mut self, other: Self) {
+        let count = self.count + other.count;
+        let delta = other.mean - self.mean;
+        self.mean = (self.count * self.mean + other.count * other.mean) / count;
+        self.m2 = self.m2 + other.m2 + delta.sqr() * self.count * other.count / count;
+        self.count = count;
     }
 }
