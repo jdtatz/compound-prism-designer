@@ -3,13 +3,13 @@ length-unit = "mm"
 
 # Genetic algorithm optimization properties
 [optimizer]
-iteration-count = 256
+iteration-count = 1024
 population-size = 512
-offspring-size = 64
+offspring-size = 256
 crossover-distribution-index = 20
-mutation-distribution-index = 12
+mutation-distribution-index = 8
 mutation-probability = 0.05
-seed = 2389745672034587
+seed = 23895756439273
 epsilons = [2.5, 0.02, 0.05]
 
 # Compound prism design specification
@@ -17,7 +17,7 @@ epsilons = [2.5, 0.02, 0.05]
 # Max number of prisms to use in design
 max-count = 4
 # Max height of the prisms in [length-unit]
-max-height = 20
+max-height = 25
 # Width of the prisms in [length-unit]
 width = 7
 
@@ -30,40 +30,11 @@ wavelength-range = [0.5, 0.82]
 
 # Detector array properties
 [detector-array]
+bin-count = 32
+bin-size = 0.8
+linear-slope = 1
+linear-intercept = 0.1
 # Total length of array in [length-unit]
 length = 32
 # Maximum accepted incident angle in [degrees] (max=90)
 max-incident-angle = 45
-# Boundries of the detector bins in the array, an Nx2 list, in [length-unit]
-bounds = [[ 0.1,  0.9],
-        [ 1.1,  1.9],
-        [ 2.1,  2.9],
-        [ 3.1,  3.9],
-        [ 4.1,  4.9],
-        [ 5.1,  5.9],
-        [ 6.1,  6.9],
-        [ 7.1,  7.9],
-        [ 8.1,  8.9],
-        [ 9.1,  9.9],
-        [10.1, 10.9],
-        [11.1, 11.9],
-        [12.1, 12.9],
-        [13.1, 13.9],
-        [14.1, 14.9],
-        [15.1, 15.9],
-        [16.1, 16.9],
-        [17.1, 17.9],
-        [18.1, 18.9],
-        [19.1, 19.9],
-        [20.1, 20.9],
-        [21.1, 21.9],
-        [22.1, 22.9],
-        [23.1, 23.9],
-        [24.1, 24.9],
-        [25.1, 25.9],
-        [26.1, 26.9],
-        [27.1, 27.9],
-        [28.1, 28.9],
-        [29.1, 29.9],
-        [30.1, 30.9],
-        [31.1, 31.9]]

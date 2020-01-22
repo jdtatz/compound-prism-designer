@@ -266,11 +266,21 @@ impl<F: Float> CompoundPrism<F> {
     }
 }
 
-/// Array of detectors
+/// Linear Array of detectors
+/// where the bins are defined by
+/// for i in 0..bin_count
+/// lower_bound = linear_slope * i + linear_intercept
+/// upper_bound = linear_slope * i + linear_intercept + bin_size
 #[derive(Debug, Clone)]
-pub struct DetectorArray<'a, F: Float> {
-    /// Boundaries of detection bins
-    pub bins: &'a [[F; 2]],
+pub struct LinearDetectorArray<F: Float> {
+    /// The number of bins in the array
+    pub(crate) bin_count: u32,
+    /// The size / length of the bins
+    bin_size: F,
+    /// The slope used in the linear equation find the bin bounds
+    linear_slope: F,
+    /// The intercept used in the linear equation find the bin bounds
+    linear_intercept: F,
     /// Minimum cosine of incident angle == cosine of maximum allowed incident angle
     min_ci: F,
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
@@ -281,10 +291,17 @@ pub struct DetectorArray<'a, F: Float> {
     pub(crate) length: F,
 }
 
-impl<'a, F: Float> DetectorArray<'a, F> {
-    pub fn new(bins: &'a [[F; 2]], min_ci: F, angle: F, length: F) -> Self {
+impl<F: Float> LinearDetectorArray<F> {
+    pub fn new(bin_count: u32, bin_size: F, linear_slope: F, linear_intercept: F, min_ci: F, angle: F, length: F) -> Self {
+        debug_assert!(bin_count > 0);
+        debug_assert!(bin_size > F::zero());
+        debug_assert!(linear_slope > F::zero());
+        debug_assert!(linear_intercept >= F::zero());
         Self {
-            bins,
+            bin_count,
+            bin_size,
+            linear_slope,
+            linear_intercept,
             min_ci,
             angle,
             normal: rotate(
@@ -296,6 +313,15 @@ impl<'a, F: Float> DetectorArray<'a, F> {
             ),
             length,
         }
+    }
+
+    pub fn bounds<'s>(&'s self) -> impl ExactSizeIterator<Item=[F; 2]> + 's {
+        (0..self.bin_count).map(move |i| {
+            let i = F::from_f64(i as f64);
+            let lb = self.linear_intercept + self.linear_slope * i;
+            let ub = lb + self.bin_size;
+            [lb, ub]
+        })
     }
 
     #[cfg(not(target_arch = "nvptx64"))]
@@ -458,7 +484,7 @@ impl<F: Float> Ray<F> {
     ///  * `detpos` - the position and orientation of the detector array
     fn intersect_detector_array(
         self,
-        detarr: &DetectorArray<F>,
+        detarr: &LinearDetectorArray<F>,
         detpos: &DetectorArrayPositioning<F>,
     ) -> Result<(Pair<F>, F, F), RayTraceError> {
         let ci = -self.direction.dot(detarr.normal);
@@ -513,7 +539,7 @@ impl<F: Float> Ray<F> {
         self,
         wavelength: F,
         cmpnd: &CompoundPrism<F>,
-        detarr: &DetectorArray<F>,
+        detarr: &LinearDetectorArray<F>,
         detpos: &DetectorArrayPositioning<F>,
     ) -> Result<(Pair<F>, F, F), RayTraceError> {
         self.propagate_internal(cmpnd, wavelength)?
@@ -534,7 +560,7 @@ impl<F: Float> Ray<F> {
         self,
         wavelength: F,
         cmpnd: &'s CompoundPrism<F>,
-        detarr: &'s DetectorArray<'s, F>,
+        detarr: &'s LinearDetectorArray<F>,
         detpos: &'s DetectorArrayPositioning<F>,
     ) -> impl Iterator<Item = Result<Pair<F>, RayTraceError>> + 's {
         let mut ray = self;
@@ -580,7 +606,7 @@ impl<F: Float> Ray<F> {
 ///  * `beam` - input gaussian beam specification
 pub(crate) fn detector_array_positioning<F: Float>(
     cmpnd: &CompoundPrism<F>,
-    detarr: &DetectorArray<F>,
+    detarr: &LinearDetectorArray<F>,
     beam: &GaussianBeam<F>,
 ) -> Result<DetectorArrayPositioning<F>, RayTraceError> {
     let ray = Ray::new_from_start(beam.y_mean);
@@ -625,18 +651,18 @@ pub(crate) fn detector_array_positioning<F: Float>(
 }
 
 #[derive(Debug, Clone)]
-pub struct Spectrometer<'a, F: Float> {
+pub struct Spectrometer<F: Float> {
     pub gaussian_beam: GaussianBeam<F>,
     pub compound_prism: CompoundPrism<F>,
-    pub detector_array: DetectorArray<'a, F>,
+    pub detector_array: LinearDetectorArray<F>,
     pub detector_array_position: DetectorArrayPositioning<F>,
 }
 
-impl<'a, F: Float> Spectrometer<'a, F> {
+impl<F: Float> Spectrometer<F> {
     pub fn new(
         gaussian_beam: GaussianBeam<F>,
         compound_prism: CompoundPrism<F>,
-        detector_array: DetectorArray<'a, F>,
+        detector_array: LinearDetectorArray<F>,
     ) -> Result<Self, RayTraceError> {
         let detector_array_position =
             detector_array_positioning(&compound_prism, &detector_array, &gaussian_beam)?;
@@ -718,3 +744,89 @@ impl<'a, F: Float> Spectrometer<'a, F> {
 // 34.771 ms & div.f32 => 1.4349926
 
 // 180.14 ms & div.f64 => 1.4339791804027775
+
+impl<F: Float> From<&Pair<f64>> for Pair<F> {
+    fn from(p: &Pair<f64>) -> Self {
+        Self {
+            x: F::from_f64(p.x),
+            y: F::from_f64(p.y),
+        }
+    }
+}
+
+impl<F: Float> From<&Surface<f64>> for Surface<F> {
+    fn from(s: &Surface<f64>) -> Self {
+        Self {
+            angle: F::from_f64(s.angle),
+            normal: (&s.normal).into(),
+            midpt: (&s.midpt).into()
+        }
+    }
+}
+
+impl<F: Float> From<&CurvedSurface<f64>> for CurvedSurface<F> {
+    fn from(s: &CurvedSurface<f64>) -> Self {
+        Self {
+            midpt: (&s.midpt).into(),
+            center: (&s.center).into(),
+            radius: F::from_f64(s.radius),
+            max_dist_sq: F::from_f64(s.max_dist_sq)
+        }
+    }
+}
+
+impl<F: Float> From<&GaussianBeam<f64>> for GaussianBeam<F> {
+    fn from(b: &GaussianBeam<f64>) -> Self {
+        Self {
+            width: F::from_f64(b.width),
+            y_mean: F::from_f64(b.y_mean),
+            w_range: (F::from_f64(b.w_range.0), F::from_f64(b.w_range.1))
+        }
+    }
+}
+
+impl<F: Float> From<&CompoundPrism<f64>> for CompoundPrism<F> {
+    fn from(c: &CompoundPrism<f64>) -> Self {
+        Self {
+            prisms: c.prisms.iter().map(|(s, g)| (s.into(), g.into())).collect(),
+            lens: (&c.lens).into(),
+            height: F::from_f64(c.height),
+            width: F::from_f64(c.width),
+        }
+    }
+}
+
+impl<F: Float> From<&LinearDetectorArray<f64>> for LinearDetectorArray<F> {
+    fn from(d: &LinearDetectorArray<f64>) -> Self {
+        Self {
+            bin_count: d.bin_count,
+            bin_size: F::from_f64(d.bin_size),
+            linear_slope: F::from_f64(d.linear_slope),
+            linear_intercept: F::from_f64(d.linear_intercept),
+            min_ci: F::from_f64(d.min_ci),
+            angle: F::from_f64(d.angle),
+            normal: (&d.normal).into(),
+            length: F::from_f64(d.length)
+        }
+    }
+}
+
+impl<F: Float> From<&DetectorArrayPositioning<f64>> for DetectorArrayPositioning<F> {
+    fn from(d: &DetectorArrayPositioning<f64>) -> Self {
+        Self {
+            position: (&d.position).into(),
+            direction: (&d.direction).into()
+        }
+    }
+}
+
+impl<F: Float> From<&Spectrometer<f64>> for Spectrometer<F> {
+    fn from(s: &Spectrometer<f64>) -> Self {
+        Self {
+            gaussian_beam: (&s.gaussian_beam).into(),
+            compound_prism: (&s.compound_prism).into(),
+            detector_array: (&s.detector_array).into(),
+            detector_array_position: (&s.detector_array_position).into()
+        }
+    }
+}

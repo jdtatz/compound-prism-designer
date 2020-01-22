@@ -99,13 +99,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     const NBIN: usize = 32;
     let pmt_length = 3.2;
-    let bounds: Box<[_]> = (0..=NBIN)
-        .map(|i| (i as f32) / (NBIN as f32) * pmt_length)
-        .collect();
-    let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
     let spec_max_accepted_angle = (60_f32).to_radians();
-    let detarr = DetectorArray::new(
-        bins.as_ref().into(),
+    let detarr = LinearDetectorArray::new(
+        NBIN as u32,
+        0.1,
+        0.1,
+        0.0,
         spec_max_accepted_angle.cos(),
         0.,
         pmt_length,
@@ -117,9 +116,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         w_range: (0.5, 0.82),
     };
     let spec = Spectrometer::new(beam, prism, detarr).unwrap();
-    /*c.bench_function("known_design_example", |b| {
+    c.bench_function("known_design_example", |b| {
         b.iter(|| spec.fitness());
-    });*/
+    });
     c.bench_function("cuda_known_design_example", |b| {
         b.iter(|| spec.cuda_fitness().unwrap())
     });

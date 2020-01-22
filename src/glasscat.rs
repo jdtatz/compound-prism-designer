@@ -414,8 +414,8 @@ mod tests {
     const BUNDLED_CATALOG_FILE: &str = include_str!("catalog.agf");
 
     fn generate_bundled_catalog() {
-        println!("pub const BUNDLED_CATALOG: &[(&str, Glass)] = &[");
-        for r in new_catalog(BUNDLED_CATALOG_FILE) {
+        println!("pub const BUNDLED_CATALOG: &[(&str, Glass<f64>)] = &[");
+        for r in new_catalog::<f64>(BUNDLED_CATALOG_FILE) {
             let (n, g) = r.unwrap();
             println!("  (\"{}\", Glass::{:?}),", n, g);
         }

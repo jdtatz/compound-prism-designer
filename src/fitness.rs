@@ -51,7 +51,7 @@ where
 pub fn p_dets_l_wavelength<F: Float>(
     wavelength: F,
     cmpnd: &CompoundPrism<F>,
-    detarr: &DetectorArray<F>,
+    detarr: &LinearDetectorArray<F>,
     beam: &GaussianBeam<F>,
     detpos: &DetectorArrayPositioning<F>,
 ) -> impl Iterator<Item = F> {
@@ -59,7 +59,7 @@ pub fn p_dets_l_wavelength<F: Float>(
         cmpnd.width.to_f64() * FRAC_1_SQRT_2 / beam.width.to_f64()
     ));
     debug_assert!(F::zero() <= p_z && p_z <= F::one());
-    vector_quasi_monte_carlo_integration(F::from_f64(5e-3), detarr.bins.len(), move |u: F| {
+    vector_quasi_monte_carlo_integration(F::from_f64(5e-3), detarr.bin_count as usize, move |u: F| {
         // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
         let y = beam.inverse_cdf_initial_y(u);
         if y <= F::zero() || cmpnd.height <= y {
@@ -78,7 +78,7 @@ pub fn p_dets_l_wavelength<F: Float>(
             // the pdf(y) is cancelled, so.
             // pdf_t = p_z * t;
             let pdf_t = p_z * t;
-            Some(detarr.bins.iter().map(move |&[l, u]| {
+            Some(detarr.bounds().map(move |[l, u]| {
                 if l <= pos && pos < u {
                     pdf_t
                 } else {
@@ -103,12 +103,12 @@ pub fn p_dets_l_wavelength<F: Float>(
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
 fn mutual_information<F: Float>(
     cmpnd: &CompoundPrism<F>,
-    detarr: &DetectorArray<F>,
+    detarr: &LinearDetectorArray<F>,
     beam: &GaussianBeam<F>,
     detpos: &DetectorArrayPositioning<F>,
 ) -> F {
-    let mut p_dets_stats = vec![Welford::new(); detarr.bins.len()];
-    let mut info_stats = vec![Welford::new(); detarr.bins.len()];
+    let mut p_dets_stats = vec![Welford::new(); detarr.bin_count as usize];
+    let mut info_stats = vec![Welford::new(); detarr.bin_count as usize];
     let qrng = Qrng::<F>::new(F::from_f64(0.5_f64));
     for u in qrng.take(MAX_N) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
@@ -168,7 +168,7 @@ pub struct DesignFitness<F: Float> {
 ///  * `beam` - input gaussian beam specification
 pub fn fitness<F: Float>(
     cmpnd: &CompoundPrism<F>,
-    detarr: &DetectorArray<F>,
+    detarr: &LinearDetectorArray<F>,
     beam: &GaussianBeam<F>,
 ) -> Result<DesignFitness<F>, RayTraceError> {
     let detpos = detector_array_positioning(cmpnd, detarr, beam)?;
@@ -187,11 +187,11 @@ pub fn fitness<F: Float>(
     })
 }
 
-impl<'a, F: Float> Spectrometer<'a, F> {
+impl<F: Float> Spectrometer<F> {
     pub fn p_dets_l_wavelength(&self, wavelength: F) -> impl Iterator<Item = F> {
         let p_z = self.probability_z_in_bounds();
         debug_assert!(F::zero() <= p_z && p_z <= F::one());
-        let nbin = self.detector_array.bins.len();
+        let nbin = self.detector_array.bin_count as usize;
         vector_quasi_monte_carlo_integration(F::from_f64(5e-3), nbin, move |u: F| {
             // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
             let y = self.gaussian_beam.inverse_cdf_initial_y(u);
@@ -210,7 +210,7 @@ impl<'a, F: Float> Spectrometer<'a, F> {
                 // the pdf(y) is cancelled, so.
                 // pdf_t = p_z * t;
                 let pdf_t = p_z * t;
-                Some(self.detector_array.bins.iter().map(move |&[l, u]| {
+                Some(self.detector_array.bounds().map(move |[l, u]| {
                     if l <= pos && pos < u {
                         pdf_t
                     } else {
@@ -225,14 +225,56 @@ impl<'a, F: Float> Spectrometer<'a, F> {
             .map(|w| w.mean)
     }
 
+    pub fn mutual_information(
+        &self,
+    ) -> F {
+        let nbin = self.detector_array.bin_count as usize;
+        let mut p_dets_stats = vec![Welford::new(); nbin];
+        let mut info_stats = vec![Welford::new(); nbin];
+        let qrng = Qrng::<F>::new(F::from_f64(0.5_f64));
+        for u in qrng.take(MAX_N) {
+            // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
+            let w = self.gaussian_beam.inverse_cdf_wavelength(u);
+            let p_dets_l_w = self.p_dets_l_wavelength(w);
+            for ((dstat, istat), p_det_l_w) in p_dets_stats
+                .iter_mut()
+                .zip(info_stats.iter_mut())
+                .zip(p_dets_l_w)
+                {
+                    debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
+                    dstat.next_sample(p_det_l_w);
+                    if p_det_l_w > F::zero() {
+                        istat.next_sample(p_det_l_w * p_det_l_w.log2());
+                    } else {
+                        istat.next_sample(F::zero());
+                    }
+                }
+            if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
+                const MAX_ERR: f64 = 5e-3;
+                const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
+                stat.sem_le_error_threshold(F::from_f64(MAX_ERR_SQ))
+            }) {
+                break;
+            }
+        }
+        let mut info: F = info_stats
+            .into_iter()
+            .map(|s| s.mean)
+            .fold(F::zero(), core::ops::Add::add);
+        for stat in p_dets_stats {
+            let p_det = stat.mean;
+            debug_assert!(F::zero() <= p_det && p_det <= F::one());
+            if p_det > F::zero() {
+                info -= p_det * p_det.log2();
+            }
+        }
+        info
+    }
+
+
     pub fn fitness(&self) -> DesignFitness<F> {
         let (size, deviation) = self.size_and_deviation();
-        let info = mutual_information(
-            &self.compound_prism,
-            &self.detector_array,
-            &self.gaussian_beam,
-            &self.detector_array_position,
-        );
+        let info = self.mutual_information();
         DesignFitness {
             size,
             info,
@@ -262,10 +304,6 @@ mod tests {
         let max_length = 0.5 * prism_height;
         let pmt_length = 3.2;
         const NBIN: usize = 32;
-        let bounds: Box<[_]> = (0..=NBIN)
-            .map(|i| (i as f64) / (NBIN as f64) * pmt_length)
-            .collect();
-        let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (45_f64).to_radians();
         let beam_width = 0.2;
         let wavelegth_range = (0.5, 0.82);
@@ -274,6 +312,7 @@ mod tests {
             let nprism: usize = rng.gen_range(1, 1 + max_nprism);
             let glasses = (0..nprism)
                 .map(|_| &catalog[rng.gen_range(0, nglass)].1)
+                .cloned()
                 .collect::<Vec<_>>();
             let angles = (0..nprism + 1)
                 .map(|_| rng.gen_range(-FRAC_PI_2, FRAC_PI_2))
@@ -283,7 +322,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let curvature = rng.gen_range(0., 1.);
             let prism = CompoundPrism::new(
-                glasses,
+                glasses.into_iter(),
                 angles.as_ref(),
                 lengths.as_ref(),
                 curvature,
@@ -292,8 +331,11 @@ mod tests {
             );
 
             let detarr_angle = rng.gen_range(-PI, PI);
-            let detarr = DetectorArray::new(
-                bins.as_ref().into(),
+            let detarr = LinearDetectorArray::new(
+                NBIN as u32,
+                0.1,
+                0.1,
+                0.0,
                 spec_max_accepted_angle.cos(),
                 detarr_angle,
                 pmt_length,
@@ -331,7 +373,7 @@ mod tests {
     fn test_with_known_prism() {
         let glasses = [
             // N-PK52A
-            &Glass::Sellmeier1([
+            Glass::Sellmeier1([
                 1.029607,
                 0.00516800155,
                 0.1880506,
@@ -340,7 +382,7 @@ mod tests {
                 138.964129,
             ]),
             // N-SF57
-            &Glass::Sellmeier1([
+            Glass::Sellmeier1([
                 1.87543831,
                 0.0141749518,
                 0.37375749,
@@ -349,7 +391,7 @@ mod tests {
                 177.389795,
             ]),
             // N-FK58
-            &Glass::Sellmeier1([
+            Glass::Sellmeier1([
                 0.738042712,
                 0.00339065607,
                 0.363371967,
@@ -362,7 +404,7 @@ mod tests {
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
         let lengths = [0_f64; 3];
         let prism = CompoundPrism::new(
-            glasses.iter().copied(),
+            glasses.iter().cloned(),
             angles.as_ref(),
             lengths.as_ref(),
             0.21,
@@ -372,13 +414,12 @@ mod tests {
 
         const NBIN: usize = 32;
         let pmt_length = 3.2;
-        let bounds: Box<[_]> = (0..=NBIN)
-            .map(|i| (i as f64) / (NBIN as f64) * pmt_length)
-            .collect();
-        let bins: Box<[_]> = bounds.windows(2).map(|t| [t[0], t[1]]).collect();
         let spec_max_accepted_angle = (60_f64).to_radians();
-        let detarr = DetectorArray::new(
-            bins.as_ref().into(),
+        let detarr = LinearDetectorArray::new(
+            NBIN as u32,
+            0.1,
+            0.1,
+            0.0,
             spec_max_accepted_angle.cos(),
             0.,
             pmt_length,
@@ -397,7 +438,7 @@ mod tests {
             v.size
         );
         assert!(
-            almost_eq(v.info, 1.444212905142612, 5e-3),
+            almost_eq(v.info, 1.44, 1e-2),
             "Mutual information is incorrect. {} ≉ 1.44",
             v.info
         );
