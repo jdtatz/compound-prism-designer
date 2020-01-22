@@ -1,10 +1,6 @@
 use crate::utils::{Float, Welford};
 use crate::Spectrometer;
-use core::{
-    arch::nvptx::*,
-    panic::PanicInfo,
-    slice::from_raw_parts_mut,
-};
+use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
 
 #[panic_handler]
 unsafe fn panic_handle(p: &PanicInfo) -> ! {
@@ -67,7 +63,7 @@ unsafe fn share_welford<F: CudaFloat>(welford: &mut Welford<F>) {
         let other = Welford {
             count: welford.count.shfl_bfly_sync(xor),
             mean: welford.mean.shfl_bfly_sync(xor),
-            m2: welford.m2.shfl_bfly_sync(xor)
+            m2: welford.m2.shfl_bfly_sync(xor),
         };
         welford.combine(other);
     }
@@ -122,7 +118,6 @@ unsafe fn kernel<F: CudaFloat>(
         }
     }
 
-
     let id = (_block_idx_x() as u32) * nwarps + warpid;
 
     let u = (F::from_f64(id as f64))
@@ -140,10 +135,8 @@ unsafe fn kernel<F: CudaFloat>(
         let result = spectrometer.propagate(wavelength, y0);
         let prev_count = count;
         let mut finished = true;
-        for ([lb, ub], [shared_mean, shared_m2]) in spectrometer
-            .detector_array
-            .bounds()
-            .zip(shared.iter_mut())
+        for ([lb, ub], [shared_mean, shared_m2]) in
+            spectrometer.detector_array.bounds().zip(shared.iter_mut())
         {
             let mut mean = match result {
                 Ok((pos, t)) if lb <= pos && pos < ub => t,
@@ -153,7 +146,7 @@ unsafe fn kernel<F: CudaFloat>(
                 let mut w = Welford {
                     count: prev_count,
                     mean: *shared_mean,
-                    m2: *shared_m2
+                    m2: *shared_m2,
                 };
                 w.next_sample(mean);
                 w
@@ -161,7 +154,7 @@ unsafe fn kernel<F: CudaFloat>(
                 Welford {
                     count: F::one(),
                     mean,
-                    m2: F::zero()
+                    m2: F::zero(),
                 }
             };
             share_welford(&mut welford);
@@ -203,5 +196,5 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths_f64(
     spectrometer: &Spectrometer<f64>,
     prob: *mut f64,
 ) {
-    kernel(seed, max_evals, spectrometer,  prob)
+    kernel(seed, max_evals, spectrometer, prob)
 }

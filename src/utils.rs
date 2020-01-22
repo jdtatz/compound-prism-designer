@@ -1,6 +1,4 @@
-use core::ops::{
-    Add, AddAssign, Div, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
-};
+use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign};
 #[cfg(not(target_arch = "nvptx64"))]
 use serde::{Deserialize, Serialize};
 
@@ -209,13 +207,13 @@ impl Float for f32 {
 
     fn floor(self) -> Self {
         #[cfg(target_arch = "nvptx64")]
-            {
-                unsafe { core::intrinsics::floorf32(self) }
-            }
+        {
+            unsafe { core::intrinsics::floorf32(self) }
+        }
         #[cfg(not(target_arch = "nvptx64"))]
-            {
-                self.floor()
-            }
+        {
+            self.floor()
+        }
     }
 }
 
@@ -365,13 +363,13 @@ impl Float for f64 {
 
     fn floor(self) -> Self {
         #[cfg(target_arch = "nvptx64")]
-            {
-                unsafe { core::intrinsics::floorf64(self) }
-            }
+        {
+            unsafe { core::intrinsics::floorf64(self) }
+        }
         #[cfg(not(target_arch = "nvptx64"))]
-            {
-                self.floor()
-            }
+        {
+            self.floor()
+        }
     }
 }
 

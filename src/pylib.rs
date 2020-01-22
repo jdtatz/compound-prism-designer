@@ -2,9 +2,9 @@ use crate::fitness::*;
 use crate::glasscat::*;
 use crate::optimizer::*;
 use crate::ray::{CompoundPrism, LinearDetectorArray, Spectrometer};
-use crate::utils::{Pair, Float};
+use crate::utils::{Float, Pair};
 use ndarray::prelude::{array, Array2};
-use numpy::{ToPyArray, PyArray1, PyArray2};
+use numpy::{PyArray1, PyArray2, ToPyArray};
 use pyo3::create_exception;
 use pyo3::exceptions::Exception;
 use pyo3::prelude::*;
@@ -81,12 +81,12 @@ struct PyDesignFitness {
     deviation: f64,
 }
 
-impl<F: Float> From<DesignFitness<F>> for PyDesignFitness  {
+impl<F: Float> From<DesignFitness<F>> for PyDesignFitness {
     fn from(fit: DesignFitness<F>) -> Self {
         Self {
             size: fit.size.to_f64(),
             info: fit.info.to_f64(),
-            deviation: fit.deviation.to_f64()
+            deviation: fit.deviation.to_f64(),
         }
     }
 }
@@ -435,7 +435,8 @@ impl Design {
             let cmpnd = compound_prism.into();
             let detarr = detector_array.into();
             let beam = gaussian_beam.into();
-            let fit = py.allow_threads(|| fitness(&cmpnd, &detarr, &beam))?;
+            let spec = Spectrometer::new(beam, cmpnd, detarr)?;
+            let fit = py.allow_threads(|| spec.fitness());
             Design {
                 compound_prism: compound_prism.clone(),
                 detector_array: detector_array.clone(),

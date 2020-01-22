@@ -158,8 +158,14 @@ impl<F: KernelFloat> Spectrometer<F> {
                 .iter()
                 .all(|s| s.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR)))
             {
-                let info = plog2p_p_det_l_w.iter().map(|s| s.mean).fold(F::zero(), core::ops::Add::add)
-                    - p_dets.iter().map(|s| plog2p(s.mean)).fold(F::zero(), core::ops::Add::add);
+                let info = plog2p_p_det_l_w
+                    .iter()
+                    .map(|s| s.mean)
+                    .fold(F::zero(), core::ops::Add::add)
+                    - p_dets
+                        .iter()
+                        .map(|s| plog2p(s.mean))
+                        .fold(F::zero(), core::ops::Add::add);
                 let (size, deviation) = self.size_and_deviation();
 
                 return Ok(DesignFitness {

@@ -70,13 +70,13 @@ impl DesignConfig {
         3 * self.compound_prism.max_count + 6
     }
 
-    fn array_to_params(
-        &self,
-        params: &[f64],
-    ) -> Option<Spectrometer<f64>> {
+    fn array_to_params(&self, params: &[f64]) -> Option<Spectrometer<f64>> {
         let params = Params::from_slice(params, self.compound_prism.max_count);
         let cmpnd = CompoundPrism::new(
-            params.glass_indices().map(|i| &BUNDLED_CATALOG[i].1).cloned(),
+            params
+                .glass_indices()
+                .map(|i| &BUNDLED_CATALOG[i].1)
+                .cloned(),
             &params.angles,
             &params.lengths,
             params.curvature,
@@ -122,7 +122,9 @@ impl DesignConfig {
         archive
             .into_iter()
             .map(|s| {
-                let spec = self.array_to_params(&s.params).expect("Only valid designs should result from optimization");
+                let spec = self
+                    .array_to_params(&s.params)
+                    .expect("Only valid designs should result from optimization");
                 let params = Params::from_slice(&s.params, self.compound_prism.max_count);
                 let compound_prism = CompoundPrismDesign {
                     glasses: params
@@ -263,7 +265,6 @@ impl Into<Spectrometer<f64>> for &Design {
             .expect("Only valid designs should result from optimization")
     }
 }
-
 
 #[derive(Debug, Clone)]
 struct Params<'s> {
@@ -547,13 +548,12 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
             None
         }*/
         let spec: Spectrometer<f32> = (&spec).into();
-        spec
-            .cuda_fitness()
+        spec.cuda_fitness()
             .ok()
             .map(|fit| DesignFitness {
                 size: fit.size as f64,
                 info: fit.info as f64,
-                deviation: fit.deviation as f64
+                deviation: fit.deviation as f64,
             })
             .filter(|fit| fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2)
     }

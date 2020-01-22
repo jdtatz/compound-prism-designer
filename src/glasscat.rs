@@ -226,9 +226,9 @@ impl<'g, F: Float> Into<(i32, &'g [F])> for &'g Glass<F> {
 impl<F: Float> From<&Glass<f64>> for Glass<F> {
     fn from(g: &Glass<f64>) -> Self {
         let (form, data): (i32, &[f64]) = g.into();
-        match Glass::new(form, data.iter().copied().map(|f| F::from_f64(f))) {
+        match Glass::new(form, data.iter().copied().map(F::from_f64)) {
             Ok(g) => g,
-            Err(_) => unreachable!()
+            Err(_) => unreachable!(),
         }
     }
 }

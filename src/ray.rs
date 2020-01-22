@@ -43,9 +43,7 @@ impl<F: Float> GaussianBeam<F> {
     pub fn inverse_cdf_initial_y(&self, p: F) -> F {
         use core::f64::consts::FRAC_1_SQRT_2;
         self.y_mean
-            - self.width
-                * F::from_f64(FRAC_1_SQRT_2)
-                * crate::erf::erfc_inv(F::from_f64(2.) * p)
+            - self.width * F::from_f64(FRAC_1_SQRT_2) * crate::erf::erfc_inv(F::from_f64(2.) * p)
     }
 }
 
@@ -292,7 +290,15 @@ pub struct LinearDetectorArray<F: Float> {
 }
 
 impl<F: Float> LinearDetectorArray<F> {
-    pub fn new(bin_count: u32, bin_size: F, linear_slope: F, linear_intercept: F, min_ci: F, angle: F, length: F) -> Self {
+    pub fn new(
+        bin_count: u32,
+        bin_size: F,
+        linear_slope: F,
+        linear_intercept: F,
+        min_ci: F,
+        angle: F,
+        length: F,
+    ) -> Self {
         debug_assert!(bin_count > 0);
         debug_assert!(bin_size > F::zero());
         debug_assert!(linear_slope > F::zero());
@@ -315,7 +321,7 @@ impl<F: Float> LinearDetectorArray<F> {
         }
     }
 
-    pub fn bounds<'s>(&'s self) -> impl ExactSizeIterator<Item=[F; 2]> + 's {
+    pub fn bounds<'s>(&'s self) -> impl ExactSizeIterator<Item = [F; 2]> + 's {
         (0..self.bin_count).map(move |i| {
             let i = F::from_f64(i as f64);
             let lb = self.linear_intercept + self.linear_slope * i;
@@ -731,7 +737,8 @@ impl<F: Float> Spectrometer<F> {
 
     pub(crate) fn probability_z_in_bounds(&self) -> F {
         let p_z = F::from_f64(crate::erf::erf(
-            self.compound_prism.width.to_f64() * core::f64::consts::FRAC_1_SQRT_2 / self.gaussian_beam.width.to_f64(),
+            self.compound_prism.width.to_f64() * core::f64::consts::FRAC_1_SQRT_2
+                / self.gaussian_beam.width.to_f64(),
         ));
         debug_assert!(F::zero() <= p_z && p_z <= F::one());
         p_z
@@ -759,7 +766,7 @@ impl<F: Float> From<&Surface<f64>> for Surface<F> {
         Self {
             angle: F::from_f64(s.angle),
             normal: (&s.normal).into(),
-            midpt: (&s.midpt).into()
+            midpt: (&s.midpt).into(),
         }
     }
 }
@@ -770,7 +777,7 @@ impl<F: Float> From<&CurvedSurface<f64>> for CurvedSurface<F> {
             midpt: (&s.midpt).into(),
             center: (&s.center).into(),
             radius: F::from_f64(s.radius),
-            max_dist_sq: F::from_f64(s.max_dist_sq)
+            max_dist_sq: F::from_f64(s.max_dist_sq),
         }
     }
 }
@@ -780,7 +787,7 @@ impl<F: Float> From<&GaussianBeam<f64>> for GaussianBeam<F> {
         Self {
             width: F::from_f64(b.width),
             y_mean: F::from_f64(b.y_mean),
-            w_range: (F::from_f64(b.w_range.0), F::from_f64(b.w_range.1))
+            w_range: (F::from_f64(b.w_range.0), F::from_f64(b.w_range.1)),
         }
     }
 }
@@ -806,7 +813,7 @@ impl<F: Float> From<&LinearDetectorArray<f64>> for LinearDetectorArray<F> {
             min_ci: F::from_f64(d.min_ci),
             angle: F::from_f64(d.angle),
             normal: (&d.normal).into(),
-            length: F::from_f64(d.length)
+            length: F::from_f64(d.length),
         }
     }
 }
@@ -815,7 +822,7 @@ impl<F: Float> From<&DetectorArrayPositioning<f64>> for DetectorArrayPositioning
     fn from(d: &DetectorArrayPositioning<f64>) -> Self {
         Self {
             position: (&d.position).into(),
-            direction: (&d.direction).into()
+            direction: (&d.direction).into(),
         }
     }
 }
@@ -826,7 +833,7 @@ impl<F: Float> From<&Spectrometer<f64>> for Spectrometer<F> {
             gaussian_beam: (&s.gaussian_beam).into(),
             compound_prism: (&s.compound_prism).into(),
             detector_array: (&s.detector_array).into(),
-            detector_array_position: (&s.detector_array_position).into()
+            detector_array_position: (&s.detector_array_position).into(),
         }
     }
 }
