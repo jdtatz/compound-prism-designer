@@ -9,8 +9,8 @@ offspring-size = 256
 crossover-distribution-index = 20
 mutation-distribution-index = 8
 mutation-probability = 0.05
-seed = 23895756439273
-epsilons = [2.5, 0.02, 0.05]
+seed = 564362464357
+epsilons = [2.5, 0.02, 0.1]
 
 # Compound prism design specification
 [compound-prism]

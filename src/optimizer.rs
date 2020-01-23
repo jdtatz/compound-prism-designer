@@ -25,7 +25,7 @@ pub struct OptimizationConfig {
 }
 
 #[cfg_attr(feature = "pyext", pyclass)]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CompoundPrismConfig {
     pub max_count: usize,
@@ -34,7 +34,7 @@ pub struct CompoundPrismConfig {
 }
 
 #[cfg_attr(feature = "pyext", pyclass)]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct GaussianBeamConfig {
     pub width: f64,
@@ -42,7 +42,7 @@ pub struct GaussianBeamConfig {
 }
 
 #[cfg_attr(feature = "pyext", pyclass)]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LinearDetectorArrayArrayConfig {
     pub bin_count: u32,
@@ -55,7 +55,7 @@ pub struct LinearDetectorArrayArrayConfig {
 
 /// Specification structure for the configuration of the Spectrometer Designer
 #[cfg_attr(feature = "pyext", pyclass)]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct DesignConfig {
     pub length_unit: Cow<'static, str>,
@@ -168,7 +168,7 @@ impl DesignConfig {
 }
 
 #[cfg_attr(feature="pyext", pyclass(name=CompoundPrism))]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompoundPrismDesign {
     pub glasses: Vec<(Cow<'static, str>, Glass<f64>)>,
     pub angles: Vec<f64>,
@@ -192,7 +192,7 @@ impl Into<CompoundPrism<f64>> for &CompoundPrismDesign {
 }
 
 #[cfg_attr(feature="pyext", pyclass(name=DetectorArray))]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorArrayDesign {
     pub bin_count: u32,
     pub bin_size: f64,
@@ -229,7 +229,7 @@ impl Into<DetectorArrayPositioning<f64>> for &DetectorArrayDesign {
 }
 
 #[cfg_attr(feature="pyext", pyclass(name=GaussianBeam))]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GaussianBeamDesign {
     pub wavelength_range: (f64, f64),
     pub width: f64,
@@ -247,7 +247,7 @@ impl Into<GaussianBeam<f64>> for &GaussianBeamDesign {
 }
 
 #[cfg_attr(feature = "pyext", pyclass)]
-#[derive(Constructor, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Design {
     pub compound_prism: CompoundPrismDesign,
     pub detector_array: DetectorArrayDesign,
