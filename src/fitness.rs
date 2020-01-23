@@ -1,8 +1,6 @@
-use crate::erf::erf;
 use crate::qrng::*;
 use crate::ray::*;
 use crate::utils::*;
-use core::f64::consts::*;
 
 const MAX_N: usize = 100_000;
 
