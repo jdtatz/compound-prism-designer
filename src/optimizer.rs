@@ -541,20 +541,22 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
 
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
         let spec = self.array_to_params(params)?;
-        /*let fit = spec.fitness();
-        if fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2 {
-            Some(fit)
-        } else {
-            None
-        }*/
-        let spec: Spectrometer<f32> = (&spec).into();
-        spec.cuda_fitness()
-            .ok()
-            .map(|fit| DesignFitness {
-                size: fit.size as f64,
-                info: fit.info as f64,
-                deviation: fit.deviation as f64,
-            })
-            .filter(|fit| fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2)
+        #[cfg(feature="cuda")] {
+            let spec: Spectrometer<f32> = (&spec).into();
+            spec.cuda_fitness()
+                .map(|fit| DesignFitness {
+                    size: fit.size as f64,
+                    info: fit.info as f64,
+                    deviation: fit.deviation as f64,
+                })
+                .filter(|fit| fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2)
+        } #[cfg(not(feature="cuda"))] {
+            let fit = spec.fitness();
+            if fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2 {
+                Some(fit)
+            } else {
+                None
+            }
+        }
     }
 }

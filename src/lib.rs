@@ -20,7 +20,7 @@ pub mod qrng;
 mod ray;
 #[macro_use]
 pub mod utils;
-#[cfg(not(target_arch = "nvptx64"))]
+#[cfg(all(not(target_arch = "nvptx64"), feature="cuda"))]
 pub mod cuda_fitness;
 #[cfg(not(target_arch = "nvptx64"))]
 mod fitness;

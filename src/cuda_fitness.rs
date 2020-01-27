@@ -123,19 +123,14 @@ fn plog2p<F: Float>(p: F) -> F {
     }
 }
 
-#[derive(Debug, From)]
-pub enum CudaFitnessError {
-    IntegrationAccuracyIssue,
-    Cuda(rustacuda::error::CudaError),
-}
-
 impl<F: KernelFloat> Spectrometer<F> {
-    pub fn cuda_fitness(&self) -> Result<DesignFitness<F>, CudaFitnessError> {
+    pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
         const MAX_ERR: f64 = 5e-3;
         const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
 
         let mutex = CACHED_CUDA_FITNESS_CONTEXT
-            .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))?;
+            .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))
+            .expect("Failed to initialize Cuda Fitness Context");
         let mut state = mutex.lock();
 
         let nbin = self.detector_array.bin_count as usize;
@@ -143,7 +138,8 @@ impl<F: KernelFloat> Spectrometer<F> {
         let mut plog2p_p_det_l_w = vec![Welford::new(); nbin];
 
         for &seed in SEEDS {
-            let p_dets_l_ws = state.launch_p_dets_l_ws(seed, self)?;
+            let p_dets_l_ws = state.launch_p_dets_l_ws(seed, self)
+                .expect("Failed to launch Cuda fitness kernel");
             for p_dets_l_w in p_dets_l_ws.chunks_exact(nbin) {
                 for ((p_det, stat), p) in p_dets
                     .iter_mut()
@@ -168,7 +164,7 @@ impl<F: KernelFloat> Spectrometer<F> {
                         .fold(F::zero(), core::ops::Add::add);
                 let (size, deviation) = self.size_and_deviation();
 
-                return Ok(DesignFitness {
+                return Some(DesignFitness {
                     size,
                     info,
                     deviation,
@@ -182,6 +178,6 @@ impl<F: KernelFloat> Spectrometer<F> {
             .filter(|e| e >= &MAX_ERR)
             .collect();
         eprintln!("cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}", MAX_ERR, errors);
-        Err(CudaFitnessError::IntegrationAccuracyIssue)
+        None
     }
 }
