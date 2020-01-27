@@ -3,9 +3,6 @@
 extern crate derive_more;
 #[macro_use]
 extern crate serde;
-#[cfg(not(target_arch = "nvptx64"))]
-extern crate rustacuda;
-extern crate rustacuda_derive;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -21,8 +18,9 @@ mod qrng;
 mod ray;
 #[macro_use]
 mod utils;
-mod cuda_fitness;
 mod fitness;
+#[cfg(feature="cuda")]
+mod cuda_fitness;
 
 use crate::optimizer::*;
 
