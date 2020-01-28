@@ -162,6 +162,7 @@ mod tests {
     use crate::utils::almost_eq;
     use rand::prelude::*;
     use std::ops::Deref;
+    use std::f64::consts::*;
 
     #[test]
     fn test_many() {
@@ -220,21 +221,22 @@ mod tests {
                 w_range: wavelegth_range,
             };
 
-            let detpos = match detector_array_positioning(&prism, &detarr, &beam) {
-                Ok(d) => d,
+            let spec = match Spectrometer::new(beam, prism, detarr) {
+                Ok(s) => s,
                 Err(_) => continue,
             };
+
             nvalid += 1;
             let nwlen = 25;
             for i in 0..nwlen {
                 let w = wavelegth_range.0
                     + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
-                let ps = p_dets_l_wavelength(w, &prism, &detarr, &beam, &detpos);
+                let ps = spec.p_dets_l_wavelength(w);
                 for p in ps {
                     assert!(p.is_finite() && 0. <= p && p <= 1.);
                 }
             }
-            let v = fitness(&prism, &detarr, &beam).unwrap();
+            let v = spec.fitness();
             assert!(v.size > 0.);
             assert!(0. <= v.info && v.info <= (NBIN as f64).log2());
             assert!(0. <= v.deviation && v.deviation < FRAC_PI_2);
@@ -303,7 +305,9 @@ mod tests {
             w_range: (0.5, 0.82),
         };
 
-        let v = fitness(&prism, &detarr, &beam).expect("Merit function failed");
+        let spec = Spectrometer::new(beam, prism, detarr).expect("This is a valid spectrometer design.");
+
+        let v = spec.fitness();
         assert!(
             almost_eq(v.size, 41.3241, 1e-3),
             "Size is incorrect. {} ≉ 41.3",

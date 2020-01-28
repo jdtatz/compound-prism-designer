@@ -71,7 +71,7 @@ fn create_glass_catalog(catalog_file_contents: &str) -> PyResult<Vec<PyGlass>> {
 }
 
 #[pyclass(name=DesignFitness)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct PyDesignFitness {
     #[pyo3(get)]
     size: f64,
@@ -90,6 +90,17 @@ impl<F: Float> From<DesignFitness<F>> for PyDesignFitness {
         }
     }
 }
+
+impl<F: Float> Into<DesignFitness<F>> for PyDesignFitness {
+    fn into(self) -> DesignFitness<F> {
+        DesignFitness {
+            size: F::from_f64(self.size),
+            info: F::from_f64(self.info),
+            deviation: F::from_f64(self.deviation),
+        }
+    }
+}
+
 
 #[pymethods]
 impl CompoundPrismDesign {
@@ -419,6 +430,18 @@ impl DesignConfig {
         let designs = py.allow_threads(|| self.optimize_designs(None));
         Ok(designs)
     }
+
+    fn param_bounds(&self) -> impl IntoPy<PyObject> {
+        self.parameter_bounds()
+    }
+
+    fn param_fitness(&self, params: &PyArray1<f64>) -> PyResult<PyDesignFitness> {
+        Ok(self.array_to_params(params.as_slice()?)?.fitness().into())
+    }
+
+    fn param_to_design(&self, params: &PyArray1<f64>, fitness: Option<&PyDesignFitness>) -> PyResult<Design> {
+        self.array_to_design(params.as_slice()?, fitness.cloned().map(|f| f.into())).map_err(|e| e.into())
+    }
 }
 
 #[pymethods]
@@ -442,6 +465,7 @@ impl Design {
                 detector_array: detector_array.clone(),
                 gaussian_beam: gaussian_beam.clone(),
                 fitness: fit,
+                spectrometer: spec,
             }
         });
         Ok(())
@@ -452,7 +476,7 @@ impl Design {
         wavelengths: &PyArray1<f64>,
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
-        let spec: Spectrometer<f64> = self.into();
+        let spec = &self.spectrometer;
         py.allow_threads(|| {
             wavelengths
                 .as_array()
@@ -471,7 +495,7 @@ impl Design {
         inital_y: f64,
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
-        let spec: Spectrometer<f64> = self.into();
+        let spec = &self.spectrometer;
         Ok(Array2::from(
             spec.trace_ray_path(wavelength, inital_y)
                 .map(|r| r.map(|p| [p.x, p.y]))
