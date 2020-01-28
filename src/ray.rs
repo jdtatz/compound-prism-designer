@@ -196,6 +196,7 @@ impl<F: Float> CurvedSurface<F> {
 
 /// Compound Prism Specification
 #[derive(Debug, Clone)]
+#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
 pub struct CompoundPrism<F: Float> {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
@@ -270,6 +271,7 @@ impl<F: Float> CompoundPrism<F> {
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
 #[derive(Debug, Clone)]
+#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
 pub struct LinearDetectorArray<F: Float> {
     /// The number of bins in the array
     pub(crate) bin_count: u32,
@@ -657,6 +659,7 @@ pub(crate) fn detector_array_positioning<F: Float>(
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
 pub struct Spectrometer<F: Float> {
     pub gaussian_beam: GaussianBeam<F>,
     pub compound_prism: CompoundPrism<F>,
