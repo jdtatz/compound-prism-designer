@@ -97,27 +97,25 @@ impl<F: Float> Spectrometer<F> {
     /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
     pub fn mutual_information(&self) -> F {
         let nbin = self.detector_array.bin_count as usize;
-        let mut p_dets_stats = vec![Welford::new(); nbin];
-        let mut info_stats = vec![Welford::new(); nbin];
+        // p(d=D)
+        let mut p_dets = vec![Welford::new(); nbin];
+        // -H(D|Λ)
+        let mut h_det_l_w = Welford::new();
         let qrng = Qrng::<F>::new(F::from_f64(0.5_f64));
         for u in qrng.take(MAX_N) {
             // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
             let w = self.gaussian_beam.inverse_cdf_wavelength(u);
+            // p(d=D|λ=Λ)
             let p_dets_l_w = self.p_dets_l_wavelength(w);
-            for ((dstat, istat), p_det_l_w) in p_dets_stats
-                .iter_mut()
-                .zip(info_stats.iter_mut())
-                .zip(p_dets_l_w)
-            {
+            // -H(D|λ=Λ)
+            let mut h_det_l_ws = F::zero();
+            for (dstat, p_det_l_w) in p_dets.iter_mut().zip(p_dets_l_w) {
                 debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
                 dstat.next_sample(p_det_l_w);
-                if p_det_l_w > F::zero() {
-                    istat.next_sample(p_det_l_w * p_det_l_w.log2());
-                } else {
-                    istat.next_sample(F::zero());
-                }
+                h_det_l_ws += p_det_l_w.plog2p();
             }
-            if p_dets_stats.iter().chain(info_stats.iter()).all(|stat| {
+            h_det_l_w.next_sample(h_det_l_ws);
+            if p_dets.iter().all(|stat| {
                 const MAX_ERR: f64 = 5e-3;
                 const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
                 stat.sem_le_error_threshold(F::from_f64(MAX_ERR_SQ))
@@ -125,18 +123,13 @@ impl<F: Float> Spectrometer<F> {
                 break;
             }
         }
-        let mut info: F = info_stats
-            .into_iter()
-            .map(|s| s.mean)
+        // -H(D)
+        let h_det = p_dets
+            .iter()
+            .map(|s| s.mean.plog2p())
             .fold(F::zero(), core::ops::Add::add);
-        for stat in p_dets_stats {
-            let p_det = stat.mean;
-            debug_assert!(F::zero() <= p_det && p_det <= F::one());
-            if p_det > F::zero() {
-                info -= p_det * p_det.log2();
-            }
-        }
-        info
+        // I(Λ; D) = H(D) - H(D|Λ)
+        h_det_l_w.mean - h_det
     }
 
     /// Return the fitness of the spectrometer design to be minimized by an optimizer.
@@ -158,16 +151,14 @@ impl<F: Float> Spectrometer<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::glasscat::Glass;
+    use crate::glasscat::{Glass, BUNDLED_CATALOG};
     use crate::utils::almost_eq;
     use rand::prelude::*;
-    use std::ops::Deref;
     use std::f64::consts::*;
 
     #[test]
     fn test_many() {
-        let catalog = crate::glasscat::BUNDLED_CATALOG.deref();
-        let nglass = catalog.len();
+        let nglass = BUNDLED_CATALOG.len();
         let seed = 123456;
         let mut rng = rand_xoshiro::Xoshiro256StarStar::seed_from_u64(seed);
         let ntest = 500;
@@ -184,7 +175,7 @@ mod tests {
         while nvalid < ntest {
             let nprism: usize = rng.gen_range(1, 1 + max_nprism);
             let glasses = (0..nprism)
-                .map(|_| &catalog[rng.gen_range(0, nglass)].1)
+                .map(|_| &BUNDLED_CATALOG[rng.gen_range(0, nglass)].1)
                 .cloned()
                 .collect::<Vec<_>>();
             let angles = (0..nprism + 1)
@@ -305,7 +296,8 @@ mod tests {
             w_range: (0.5, 0.82),
         };
 
-        let spec = Spectrometer::new(beam, prism, detarr).expect("This is a valid spectrometer design.");
+        let spec =
+            Spectrometer::new(beam, prism, detarr).expect("This is a valid spectrometer design.");
 
         let v = spec.fitness();
         assert!(

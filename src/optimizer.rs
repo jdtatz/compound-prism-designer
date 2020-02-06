@@ -100,7 +100,11 @@ impl DesignConfig {
         Spectrometer::new(beam, cmpnd, detarr)
     }
 
-    pub fn array_to_design(&self, params: &[f64], fitness: Option<DesignFitness<f64>>) -> Result<Design, RayTraceError> {
+    pub fn array_to_design(
+        &self,
+        params: &[f64],
+        fitness: Option<DesignFitness<f64>>,
+    ) -> Result<Design, RayTraceError> {
         let spec = self.array_to_params(params)?;
         let params = Params::from_slice(params, self.compound_prism.max_count);
         let compound_prism = CompoundPrismDesign {
@@ -138,7 +142,7 @@ impl DesignConfig {
             detector_array,
             gaussian_beam,
             fitness: fitness.unwrap_or_else(|| spec.fitness()),
-            spectrometer: spec
+            spectrometer: spec,
         })
     }
 
@@ -164,8 +168,7 @@ impl DesignConfig {
         archive
             .into_iter()
             .map(|s| {
-                self
-                    .array_to_design(s.params.as_slice(), Some(s.fitness))
+                self.array_to_design(s.params.as_slice(), Some(s.fitness))
                     .expect("Only valid designs should result from optimization")
             })
             .collect()
@@ -536,7 +539,8 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
 
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
         let spec = self.array_to_params(params).ok()?;
-        #[cfg(feature="cuda")] {
+        #[cfg(feature = "cuda")]
+        {
             let spec: Spectrometer<f32> = (&spec).into();
             spec.cuda_fitness()
                 .map(|fit| DesignFitness {
@@ -545,7 +549,9 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
                     deviation: fit.deviation as f64,
                 })
                 .filter(|fit| fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2)
-        } #[cfg(not(feature="cuda"))] {
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
             let fit = spec.fitness();
             if fit.size <= 30. * self.compound_prism.max_height && fit.info > 0.2 {
                 Some(fit)
