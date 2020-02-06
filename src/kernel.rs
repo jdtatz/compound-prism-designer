@@ -138,7 +138,7 @@ unsafe fn kernel<F: CudaFloat>(
         for ([lb, ub], [shared_mean, shared_m2]) in
             spectrometer.detector_array.bounds().zip(shared.iter_mut())
         {
-            let mut mean = match result {
+            let mean = match result {
                 Ok((pos, t)) if lb <= pos && pos < ub => t,
                 _ => F::zero(),
             };

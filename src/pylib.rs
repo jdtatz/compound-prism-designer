@@ -101,7 +101,6 @@ impl<F: Float> Into<DesignFitness<F>> for PyDesignFitness {
     }
 }
 
-
 #[pymethods]
 impl CompoundPrismDesign {
     #[new]
@@ -436,11 +435,20 @@ impl DesignConfig {
     }
 
     fn param_fitness(&self, params: &PyArray1<f64>) -> PyResult<PyDesignFitness> {
-        Ok(self.array_to_params(params.as_slice()?)?.fitness().into())
+        let spec = self.array_to_params(params.as_slice()?)?;
+        let spec: Spectrometer<f32> = (&spec).into();
+        spec.cuda_fitness()
+            .map(|f| f.into())
+            .ok_or_else(|| RayTraceError::py_err("Integration accuracy too low"))
     }
 
-    fn param_to_design(&self, params: &PyArray1<f64>, fitness: Option<&PyDesignFitness>) -> PyResult<Design> {
-        self.array_to_design(params.as_slice()?, fitness.cloned().map(|f| f.into())).map_err(|e| e.into())
+    fn param_to_design(
+        &self,
+        params: &PyArray1<f64>,
+        fitness: Option<&PyDesignFitness>,
+    ) -> PyResult<Design> {
+        self.array_to_design(params.as_slice()?, fitness.cloned().map(|f| f.into()))
+            .map_err(|e| e.into())
     }
 }
 

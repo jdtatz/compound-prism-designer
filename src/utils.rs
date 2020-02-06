@@ -1,4 +1,7 @@
-use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign};
+#![allow(clippy::needless_return)]
+use core::ops::{
+    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
+};
 #[cfg(not(target_arch = "nvptx64"))]
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +21,7 @@ pub trait Float:
     + Mul<Output = Self>
     + MulAssign
     + Div<Output = Self>
+    + DivAssign
     + Rem<Output = Self>
     + RemAssign
 {
@@ -59,6 +63,27 @@ pub trait Float:
             other
         }
     }
+    fn plog2p(self) -> Self {
+        if self > Self::zero() {
+            self * self.log2()
+        } else {
+            Self::zero()
+        }
+    }
+}
+
+macro_rules! cuda_specific {
+    ($cuda_expr:expr , $cpu_expr:expr) => {
+        #[cfg(target_arch = "nvptx64")]
+        {
+            #[allow(unused_unsafe)]
+            return unsafe { $cuda_expr };
+        };
+        #[cfg(not(target_arch = "nvptx64"))]
+        {
+            return $cpu_expr;
+        };
+    };
 }
 
 impl Float for f32 {
@@ -99,47 +124,19 @@ impl Float for f32 {
     }
 
     fn mul_add(self, a: Self, b: Self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::fmaf32(self, a, b) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.mul_add(a, b)
-        }
+        cuda_specific!(core::intrinsics::fmaf32(self, a, b), self.mul_add(a, b));
     }
 
     fn sqrt(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::sqrtf32(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.sqrt()
-        }
+        cuda_specific!(core::intrinsics::sqrtf32(self), self.sqrt());
     }
 
     fn exp(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::expf32(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.exp()
-        }
+        cuda_specific!(core::intrinsics::expf32(self), self.exp());
     }
 
     fn ln(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::logf(self)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.ln()
-        }
+        cuda_specific!(libm::logf(self), self.ln());
     }
 
     fn log2(self) -> Self {
@@ -147,36 +144,15 @@ impl Float for f32 {
     }
 
     fn powf(self, n: Self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::powf(self, n)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.powf(n)
-        }
+        cuda_specific!(libm::powf(self, n), self.powf(n));
     }
 
     fn fract(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            self - unsafe { core::intrinsics::truncf32(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.fract()
-        }
+        cuda_specific!(self - core::intrinsics::truncf32(self), self.fract());
     }
 
     fn abs(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::fabsf32(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.abs()
-        }
+        cuda_specific!(core::intrinsics::fabsf32(self), self.abs());
     }
 
     fn sincos(self) -> (Self, Self) {
@@ -184,36 +160,15 @@ impl Float for f32 {
     }
 
     fn tan(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::tanf(self)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.tan()
-        }
+        cuda_specific!(libm::tanf(self), self.tan());
     }
 
     fn asin(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::asinf(self)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.asin()
-        }
+        cuda_specific!(libm::asinf(self), self.asin());
     }
 
     fn floor(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::floorf32(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.floor()
-        }
+        cuda_specific!(core::intrinsics::floorf32(self), self.floor());
     }
 }
 
@@ -255,47 +210,19 @@ impl Float for f64 {
     }
 
     fn mul_add(self, a: Self, b: Self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::fmaf64(self, a, b) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.mul_add(a, b)
-        }
+        cuda_specific!(core::intrinsics::fmaf64(self, a, b), self.mul_add(a, b));
     }
 
     fn sqrt(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::sqrtf64(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.sqrt()
-        }
+        cuda_specific!(core::intrinsics::sqrtf64(self), self.sqrt());
     }
 
     fn exp(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::expf64(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.exp()
-        }
+        cuda_specific!(core::intrinsics::expf64(self), self.exp());
     }
 
     fn ln(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::log(self)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.ln()
-        }
+        cuda_specific!(libm::log(self), self.ln());
     }
 
     fn log2(self) -> Self {
@@ -303,36 +230,15 @@ impl Float for f64 {
     }
 
     fn powf(self, n: Self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::pow(self, n)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.powf(n)
-        }
+        cuda_specific!(libm::pow(self, n), self.powf(n));
     }
 
     fn fract(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            self - unsafe { core::intrinsics::truncf64(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.fract()
-        }
+        cuda_specific!(self - core::intrinsics::truncf64(self), self.fract());
     }
 
     fn abs(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::fabsf64(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.abs()
-        }
+        cuda_specific!(core::intrinsics::fabsf64(self), self.abs());
     }
 
     fn sincos(self) -> (Self, Self) {
@@ -340,36 +246,15 @@ impl Float for f64 {
     }
 
     fn tan(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::tan(self)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.tan()
-        }
+        cuda_specific!(libm::tan(self), self.tan());
     }
 
     fn asin(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            libm::asin(self)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.asin()
-        }
+        cuda_specific!(libm::asin(self), self.asin());
     }
 
     fn floor(self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            unsafe { core::intrinsics::floorf64(self) }
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            self.floor()
-        }
+        cuda_specific!(core::intrinsics::floorf64(self), self.floor());
     }
 }
 
@@ -496,7 +381,7 @@ impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
 #[derive(Copy, Clone)]
-pub struct Welford<F: Float> {
+pub struct Welford<F> {
     pub count: F,
     pub mean: F,
     pub m2: F,
@@ -517,14 +402,10 @@ impl<F: Float> Welford<F> {
         let delta2 = x - self.mean;
         self.m2 += delta * delta2;
     }
-    #[allow(dead_code)]
-    pub fn variance(&self) -> F {
-        self.m2 / self.count
-    }
-    #[allow(dead_code)]
     pub fn sample_variance(&self) -> F {
         self.m2 / (self.count - F::one())
     }
+    /// Standard Error of the Mean (SEM)
     pub fn sem(&self) -> F {
         (self.sample_variance() / self.count).sqrt()
     }
@@ -540,5 +421,11 @@ impl<F: Float> Welford<F> {
         self.mean = (self.count * self.mean + other.count * other.mean) / count;
         self.m2 = self.m2 + other.m2 + delta.sqr() * self.count * other.count / count;
         self.count = count;
+    }
+}
+
+impl<F: Float> Default for Welford<F> {
+    fn default() -> Self {
+        Self::new()
     }
 }

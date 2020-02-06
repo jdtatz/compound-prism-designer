@@ -115,14 +115,6 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
     Ok(())
 }
 
-fn plog2p<F: Float>(p: F) -> F {
-    if p == F::zero() {
-        F::zero()
-    } else {
-        p * p.log2()
-    }
-}
-
 impl<F: KernelFloat> Spectrometer<F> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
         const MAX_ERR: f64 = 5e-3;
@@ -134,34 +126,38 @@ impl<F: KernelFloat> Spectrometer<F> {
         let mut state = mutex.lock();
 
         let nbin = self.detector_array.bin_count as usize;
+        // p(d=D)
         let mut p_dets = vec![Welford::new(); nbin];
-        let mut plog2p_p_det_l_w = vec![Welford::new(); nbin];
+        // -H(d=D|Λ)
+        let mut h_det_l_w = Welford::new();
 
         for &seed in SEEDS {
-            let p_dets_l_ws = state.launch_p_dets_l_ws(seed, self)
+            // p(d=D|λ=Λ)
+            let p_dets_l_ws = state
+                .launch_p_dets_l_ws(seed, self)
                 .expect("Failed to launch Cuda fitness kernel");
             for p_dets_l_w in p_dets_l_ws.chunks_exact(nbin) {
-                for ((p_det, stat), p) in p_dets
-                    .iter_mut()
-                    .zip(plog2p_p_det_l_w.iter_mut())
-                    .zip(p_dets_l_w.iter().copied())
-                {
+                // -H(D|λ=Λ)
+                let mut h_det_l_ws = F::zero();
+                for (p_det, p) in p_dets.iter_mut().zip(p_dets_l_w.iter().copied()) {
                     p_det.next_sample(p);
-                    stat.next_sample(plog2p(p));
+                    h_det_l_ws += p.plog2p();
                 }
+                h_det_l_w.next_sample(h_det_l_ws);
             }
             if p_dets
                 .iter()
                 .all(|s| s.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR)))
             {
-                let info = plog2p_p_det_l_w
+                // -H(D)
+                let h_det = p_dets
                     .iter()
-                    .map(|s| s.mean)
-                    .fold(F::zero(), core::ops::Add::add)
-                    - p_dets
-                        .iter()
-                        .map(|s| plog2p(s.mean))
-                        .fold(F::zero(), core::ops::Add::add);
+                    .map(|s| s.mean.plog2p())
+                    .fold(F::zero(), core::ops::Add::add);
+                // -H(D|Λ)
+                let h_det_l_w = h_det_l_w.mean;
+                // H(D) - H(D|Λ)
+                let info = h_det_l_w - h_det;
                 let (size, deviation) = self.size_and_deviation();
 
                 return Some(DesignFitness {

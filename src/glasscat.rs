@@ -89,7 +89,6 @@ impl<F: Float> Glass<F> {
     /// # Arguments
     ///  * `w` - wavelength in micrometers
     #[allow(clippy::many_single_char_names)]
-    #[inline(never)]
     pub fn calc_n(&self, w: F) -> F {
         match self {
             Glass::Schott(cd) => {
@@ -149,7 +148,8 @@ impl<F: Float> Glass<F> {
             }
             Glass::Conrady(cd) => {
                 let &[n0, a, b] = cd;
-                n0 + a / w + b / w.powf(F::from_f64(3.5))
+                let w_3_5 = w * w * w * w.sqrt();
+                n0 + a / w + b / w_3_5
             }
             Glass::HandbookOfOptics1(cd) => {
                 let &[a, b, c, d] = cd;
@@ -201,34 +201,36 @@ impl<F: Float> Glass<F> {
     }
 }
 
-/// Break down a Glass parametrization structure
-/// into its dispersion formula number and coefficients
-impl<'g, F: Float> Into<(i32, &'g [F])> for &'g Glass<F> {
-    fn into(self) -> (i32, &'g [F]) {
-        match self {
-            Glass::Schott(cd) => (1, cd.as_ref()),
-            Glass::Sellmeier1(cd) => (2, cd.as_ref()),
-            Glass::Herzberger(cd) => (3, cd.as_ref()),
-            Glass::Sellmeier2(cd) => (4, cd.as_ref()),
-            Glass::Conrady(cd) => (5, cd.as_ref()),
-            Glass::Sellmeier3(cd) => (6, cd.as_ref()),
-            Glass::HandbookOfOptics1(cd) => (7, cd.as_ref()),
-            Glass::HandbookOfOptics2(cd) => (8, cd.as_ref()),
-            Glass::Sellmeier4(cd) => (9, cd.as_ref()),
-            Glass::Extended(cd) => (10, cd.as_ref()),
-            Glass::Sellmeier5(cd) => (11, cd.as_ref()),
-            Glass::Extended2(cd) => (12, cd.as_ref()),
-            Glass::Extended3(cd) => (13, cd.as_ref()),
-        }
-    }
+fn from_iter_to_array<F: Float, A: arrayvec::Array<Item = F>>(
+    it: &[f64],
+) -> Result<A, CatalogError> {
+    it.iter()
+        .map(|v| F::from_f64(*v))
+        .collect::<ArrayVec<_>>()
+        .into_inner()
+        .map_err(|_| CatalogError::InvalidGlassDescription)
 }
 
 impl<F: Float> From<&Glass<f64>> for Glass<F> {
     fn from(g: &Glass<f64>) -> Self {
-        let (form, data): (i32, &[f64]) = g.into();
-        match Glass::new(form, data.iter().copied().map(F::from_f64)) {
-            Ok(g) => g,
-            Err(_) => unreachable!(),
+        match g {
+            Glass::Schott(cd) => Glass::Schott(from_iter_to_array(cd).unwrap()),
+            Glass::Sellmeier1(cd) => Glass::Sellmeier1(from_iter_to_array(cd).unwrap()),
+            Glass::Sellmeier2(cd) => Glass::Sellmeier2(from_iter_to_array(cd).unwrap()),
+            Glass::Sellmeier3(cd) => Glass::Sellmeier3(from_iter_to_array(cd).unwrap()),
+            Glass::Sellmeier4(cd) => Glass::Sellmeier4(from_iter_to_array(cd).unwrap()),
+            Glass::Sellmeier5(cd) => Glass::Sellmeier5(from_iter_to_array(cd).unwrap()),
+            Glass::Herzberger(cd) => Glass::Herzberger(from_iter_to_array(cd).unwrap()),
+            Glass::Conrady(cd) => Glass::Conrady(from_iter_to_array(cd).unwrap()),
+            Glass::HandbookOfOptics1(cd) => {
+                Glass::HandbookOfOptics1(from_iter_to_array(cd).unwrap())
+            }
+            Glass::HandbookOfOptics2(cd) => {
+                Glass::HandbookOfOptics2(from_iter_to_array(cd).unwrap())
+            }
+            Glass::Extended(cd) => Glass::Extended(from_iter_to_array(cd).unwrap()),
+            Glass::Extended2(cd) => Glass::Extended2(from_iter_to_array(cd).unwrap()),
+            Glass::Extended3(cd) => Glass::Extended3(from_iter_to_array(cd).unwrap()),
         }
     }
 }
