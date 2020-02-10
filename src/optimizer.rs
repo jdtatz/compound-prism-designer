@@ -355,16 +355,27 @@ impl PM {
 }
 
 #[derive(Clone, Debug)]
-struct Soln<F> {
-    params: Vec<f64>,
-    fitness: F,
+pub struct Soln<F> {
+    pub params: Vec<f64>,
+    pub fitness: F,
 }
 
-pub trait MultiObjectiveMinimizationProblem: Send + Sync {
-    type Fitness: Clone + PartialEq + Send + Sync;
+pub enum ParetoDominance {
+    Dominates,
+    Dominated,
+}
 
-    fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64;
-    fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool>;
+pub trait MultiObjectiveFitness: Clone {
+    type Epsilons;
+
+    fn pareto_dominace(&self, other: &Self) -> Option<ParetoDominance>;
+    fn epsilon_dominance(&self, other: &Self, epsilons: &Self::Epsilons) -> Option<ParetoDominance>;
+}
+
+pub trait MultiObjectiveMinimizationProblem {
+    type Fitness: MultiObjectiveFitness;
+
+    fn epsilons(&self) -> &<Self::Fitness as MultiObjectiveFitness>::Epsilons;
     fn parameter_bounds(&self) -> Vec<(f64, f64)>;
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness>;
 }
@@ -376,12 +387,12 @@ fn add_to_archive<P: MultiObjectiveMinimizationProblem>(
 ) -> bool {
     let mut dominated = false;
     archive.retain(
-        |a| match problem.epsilon_dominance(&a.fitness, &child.fitness) {
-            Some(true) => {
+        |a| match a.fitness.epsilon_dominance(&child.fitness, problem.epsilons()) {
+            Some(ParetoDominance::Dominates) => {
                 dominated = true;
                 true
             }
-            Some(false) => false,
+            Some(ParetoDominance::Dominated) => false,
             None => true,
         },
     );
@@ -391,7 +402,7 @@ fn add_to_archive<P: MultiObjectiveMinimizationProblem>(
     !dominated
 }
 
-fn optimize<P: MultiObjectiveMinimizationProblem>(
+pub fn optimize<P: MultiObjectiveMinimizationProblem>(
     problem: &P,
     iteration_count: usize,
     population_size: usize,
@@ -463,50 +474,57 @@ fn optimize<P: MultiObjectiveMinimizationProblem>(
     archive
 }
 
-impl MultiObjectiveMinimizationProblem for DesignConfig {
-    type Fitness = DesignFitness<f64>;
+impl<F: Float> MultiObjectiveFitness for DesignFitness<F> {
+    type Epsilons = [F; 3];
 
-    fn grid_distance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> f64 {
-        let eps = &self.optimizer.epsilons;
-        let square = |x: f64| x * x;
-        (square((lhs.size - rhs.size) / eps[0])
-            + square((rhs.info - lhs.info) / eps[1])
-            + square((lhs.deviation - rhs.deviation) / eps[2]))
-        .sqrt()
-    }
-
-    fn epsilon_dominance(&self, lhs: &Self::Fitness, rhs: &Self::Fitness) -> Option<bool> {
-        let eps = &self.optimizer.epsilons;
-        let box_id = |f: &DesignFitness<f64>| {
-            [
-                (f.size / eps[0]).floor(),
-                (-f.info / eps[1]).floor(),
-                (f.deviation / eps[2]).floor(),
-            ]
-        };
-        let square = |x: f64| x * x;
-        let box_dist = |f: &DesignFitness<f64>, bid: &[f64; 3]| {
-            square(f.size - bid[0] * eps[0])
-                + square(f.info - bid[1] * eps[1])
-                + square(f.deviation - bid[2] * eps[2])
-        };
-        let l_box = box_id(lhs);
-        let r_box = box_id(rhs);
-        if l_box == r_box {
-            let l_dist = box_dist(&lhs, &l_box);
-            let r_dist = box_dist(&rhs, &r_box);
-            if l_dist <= r_dist {
-                Some(true)
-            } else {
-                Some(false)
-            }
-        } else if l_box[0] <= r_box[0] && l_box[1] <= r_box[1] && l_box[2] <= r_box[2] {
-            Some(true)
-        } else if l_box[0] >= r_box[0] && l_box[1] >= r_box[1] && l_box[2] >= r_box[2] {
-            Some(false)
+    fn pareto_dominace(&self, other: &Self) -> Option<ParetoDominance> {
+        if self.size <= other.size && self.info >= other.info && self.deviation <= other.deviation {
+            Some(ParetoDominance::Dominates)
+        } else if self.size >= other.size && self.info <= other.info && self.deviation >= other.deviation {
+            Some(ParetoDominance::Dominated)
         } else {
             None
         }
+    }
+
+    fn epsilon_dominance(&self, other: &Self, epsilons: &Self::Epsilons) -> Option<ParetoDominance> {
+        let box_id = |f: &DesignFitness<F>| {
+            [
+                (f.size / epsilons[0]).floor(),
+                (-f.info / epsilons[1]).floor(),
+                (f.deviation / epsilons[2]).floor(),
+            ]
+        };
+        let box_dist = |f: &DesignFitness<F>, bid: &[F; 3]| {
+            (f.size - bid[0] * epsilons[0]).sqr()
+                + (f.info - bid[1] * epsilons[1]).sqr()
+                + (f.deviation - bid[2] * epsilons[2]).sqr()
+        };
+        let l_box = box_id(self);
+        let r_box = box_id(other);
+        if l_box == r_box {
+            let l_dist = box_dist(&self, &l_box);
+            let r_dist = box_dist(&other, &r_box);
+            if l_dist <= r_dist {
+                Some(ParetoDominance::Dominates)
+            } else {
+                Some(ParetoDominance::Dominated)
+            }
+        } else if l_box[0] <= r_box[0] && l_box[1] <= r_box[1] && l_box[2] <= r_box[2] {
+            Some(ParetoDominance::Dominates)
+        } else if l_box[0] >= r_box[0] && l_box[1] >= r_box[1] && l_box[2] >= r_box[2] {
+            Some(ParetoDominance::Dominated)
+        } else {
+            None
+        }
+    }
+}
+
+impl MultiObjectiveMinimizationProblem for DesignConfig {
+    type Fitness = DesignFitness<f64>;
+
+    fn epsilons(&self) -> &<Self::Fitness as MultiObjectiveFitness>::Epsilons {
+        &self.optimizer.epsilons
     }
 
     fn parameter_bounds(&self) -> Vec<(f64, f64)> {

@@ -16,7 +16,7 @@ const PTX: &[u8] = concat!(
     "\0"
 )
 .as_bytes();
-const MAX_N: usize = 256;
+const MAX_N: usize = 512;
 const MAX_M: usize = 16_384;
 const NWARP: u32 = 2;
 #[allow(clippy::unreadable_literal)]
@@ -36,6 +36,21 @@ const SEEDS: &[f64] = &[
     0.5607025594,
     0.5911739281,
     0.7870769069,
+    0.5151657367,
+    0.8326684251,
+    0.4464389474,
+    0.6400765363,
+    0.2099569790,
+    0.7820379526,
+    0.7962472018,
+    0.2470681166,
+    0.0323196288,
+    0.6335551911,
+    0.8439837413,
+    0.6271321302,
+    0.3746263410,
+    0.5696117890,
+    0.8799053487,
 ];
 
 pub trait KernelFloat: Float + DeviceCopy {
@@ -117,7 +132,7 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
 
 impl<F: KernelFloat> Spectrometer<F> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
-        const MAX_ERR: f64 = 5e-3;
+        const MAX_ERR: f64 = 2e-3;
         const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
 
         let mutex = CACHED_CUDA_FITNESS_CONTEXT
