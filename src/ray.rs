@@ -53,6 +53,7 @@ pub struct Surface<F: Float> {
     angle: F,
     normal: Pair<F>,
     midpt: Pair<F>,
+    ar_coated: bool,
 }
 
 impl<F: Float> Surface<F> {
@@ -76,6 +77,7 @@ impl<F: Float> Surface<F> {
                 x: (normal.y / normal.x).abs() * height * F::from_f64(0.5),
                 y: height * F::from_f64(0.5),
             },
+            ar_coated: true
         }
     }
 
@@ -108,6 +110,7 @@ impl<F: Float> Surface<F> {
                     x: sep_dist,
                     y: F::zero(),
                 },
+            ar_coated: false
         }
     }
 
@@ -138,6 +141,7 @@ pub struct CurvedSurface<F: Float> {
     radius: F,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
     max_dist_sq: F,
+    ar_coated: bool,
 }
 
 impl<F: Float> CurvedSurface<F> {
@@ -153,6 +157,7 @@ impl<F: Float> CurvedSurface<F> {
             center,
             radius,
             max_dist_sq: sagitta * sagitta + chord_length * chord_length * F::from_f64(0.25),
+            ar_coated: true
         }
     }
 
@@ -401,6 +406,7 @@ impl<F: Float> Ray<F> {
         ci: F,
         n1: F,
         n2: F,
+        ar_coated: bool,
     ) -> Result<Self, RayTraceError> {
         debug_assert!(n1 >= F::one());
         debug_assert!(n2 >= F::one());
@@ -412,13 +418,19 @@ impl<F: Float> Ray<F> {
         }
         let cr = cr_sq.sqrt();
         let v = self.direction * r + normal * (r * ci - cr);
-        let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
-        let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
+        let (s_transmittance, p_transmittance) = if ar_coated && ci > F::from_f64(0.5) {
+            (self.s_transmittance * F::from_f64(0.99), self.p_transmittance * F::from_f64(0.99))
+        } else {
+            let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
+            let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
+            (self.s_transmittance * (F::one() - fresnel_rs.sqr()),
+             self.p_transmittance * (F::one() - fresnel_rp.sqr()))
+        };
         Ok(Self {
             origin: intersection,
             direction: v,
-            s_transmittance: self.s_transmittance * (F::one() - fresnel_rs.sqr()),
-            p_transmittance: self.p_transmittance * (F::one() - fresnel_rp.sqr()),
+            s_transmittance,
+            p_transmittance,
         })
     }
 
@@ -447,7 +459,7 @@ impl<F: Float> Ray<F> {
         if p.y <= F::zero() || prism_height <= p.y {
             return Err(RayTraceError::OutOfBounds);
         }
-        self.refract(p, plane.normal, ci, n1, n2)
+        self.refract(p, plane.normal, ci, n1, n2, plane.ar_coated)
     }
 
     /// Find the intersection point of the ray with the lens-like interface
@@ -480,7 +492,7 @@ impl<F: Float> Ray<F> {
         }
         let snorm = (lens.center - p) / lens.radius;
         debug_assert!(snorm.is_unit());
-        self.refract(p, snorm, -self.direction.dot(snorm), n1, n2)
+        self.refract(p, snorm, -self.direction.dot(snorm), n1, n2, lens.ar_coated)
     }
 
     /// Find the intersection position of the ray with the detector array
@@ -770,6 +782,7 @@ impl<F: Float> From<&Surface<f64>> for Surface<F> {
             angle: F::from_f64(s.angle),
             normal: (&s.normal).into(),
             midpt: (&s.midpt).into(),
+            ar_coated: s.ar_coated
         }
     }
 }
@@ -781,6 +794,7 @@ impl<F: Float> From<&CurvedSurface<f64>> for CurvedSurface<F> {
             center: (&s.center).into(),
             radius: F::from_f64(s.radius),
             max_dist_sq: F::from_f64(s.max_dist_sq),
+            ar_coated: s.ar_coated
         }
     }
 }
