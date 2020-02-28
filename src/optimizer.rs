@@ -31,6 +31,8 @@ pub struct CompoundPrismConfig {
     pub max_count: usize,
     pub max_height: f64,
     pub width: f64,
+    #[serde(default)]
+    pub ar_coating: bool,
 }
 
 #[cfg_attr(feature = "pyext", pyclass)]
@@ -82,6 +84,7 @@ impl DesignConfig {
             params.curvature,
             params.prism_height,
             self.compound_prism.width,
+            self.compound_prism.ar_coating,
         );
         let detarr = LinearDetectorArray::new(
             self.detector_array.bin_count,
@@ -120,6 +123,7 @@ impl DesignConfig {
             curvature: params.curvature,
             height: params.prism_height,
             width: self.compound_prism.width,
+            ar_coated: self.compound_prism.ar_coating,
         };
         let detector_array = DetectorArrayDesign {
             bin_count: self.detector_array.bin_count,
@@ -184,6 +188,8 @@ pub struct CompoundPrismDesign {
     pub curvature: f64,
     pub height: f64,
     pub width: f64,
+    #[serde(default)]
+    pub ar_coated: bool,
 }
 
 impl Into<CompoundPrism<f64>> for &CompoundPrismDesign {
@@ -195,6 +201,7 @@ impl Into<CompoundPrism<f64>> for &CompoundPrismDesign {
             self.curvature,
             self.height,
             self.width,
+            self.ar_coated,
         )
     }
 }

@@ -3,23 +3,24 @@ length-unit = "mm"
 
 # Genetic algorithm optimization properties
 [optimizer]
-iteration-count = 1024
-population-size = 512
-offspring-size = 256
-crossover-distribution-index = 20
-mutation-distribution-index = 8
+iteration-count = 256
+population-size = 128
+offspring-size = 64
+crossover-distribution-index = 4
+mutation-distribution-index = 2
 mutation-probability = 0.05
-seed = 564362464357
+seed = 5382628
 epsilons = [2.5, 0.02, 0.1]
 
 # Compound prism design specification
 [compound-prism]
 # Max number of prisms to use in design
-max-count = 4
+max-count = 6
 # Max height of the prisms in [length-unit]
 max-height = 25
 # Width of the prisms in [length-unit]
 width = 7
+ar-coating = true
 
 # Incoming gaussian beam properties
 [gaussian-beam]

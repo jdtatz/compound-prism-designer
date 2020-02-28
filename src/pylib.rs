@@ -5,7 +5,7 @@ use crate::ray::{CompoundPrism, LinearDetectorArray, Spectrometer};
 use crate::utils::{Float, Pair};
 use ndarray::prelude::{array, Array2};
 use numpy::{PyArray1, PyArray2, ToPyArray};
-use pyo3::create_exception;
+use pyo3::{create_exception, PyObjectProtocol};
 use pyo3::exceptions::Exception;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
@@ -57,6 +57,17 @@ impl PyGlass {
     }
 }
 
+#[pyproto]
+impl PyObjectProtocol for PyGlass {
+    fn __str__(&self) -> PyResult<String> {
+        Ok(format!("{}: {:?}", self.name, self.glass))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("Glass {{ {}: {:?} }}", self.name, self.glass))
+    }
+}
+
 #[pyfunction]
 fn create_glass_catalog(catalog_file_contents: &str) -> PyResult<Vec<PyGlass>> {
     new_catalog(catalog_file_contents)
@@ -79,6 +90,13 @@ struct PyDesignFitness {
     info: f64,
     #[pyo3(get)]
     deviation: f64,
+}
+
+#[pyproto]
+impl PyObjectProtocol for PyDesignFitness {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
+    }
 }
 
 impl<F: Float> From<DesignFitness<F>> for PyDesignFitness {
@@ -112,6 +130,7 @@ impl CompoundPrismDesign {
         curvature: f64,
         height: f64,
         width: f64,
+        ar_coated: bool,
     ) {
         obj.init({
             CompoundPrismDesign {
@@ -125,6 +144,7 @@ impl CompoundPrismDesign {
                 curvature,
                 height,
                 width,
+                ar_coated
             }
         })
     }

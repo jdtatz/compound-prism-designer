@@ -14,42 +14,28 @@ The last prism is the union of a Trapezoidal prism and a Horizontal Cylindrical 
 face of the prism
 
 \section{System Parametrization}\label{sec:system-parametrization}
-$N$ = prism count
-
-${\theta_1, \dots \theta_N }$ =  angle of deviation from x-axis for each inter-media planar prism surface
-
-$\theta_c$ =  angle of deviation from x-axis for the chord of the lens-like inter-media prism surface
-
-${\ell_1, \dots \ell_N }$ = extension length for each prism
-
-$h$ = prism height
-
-$\ell_z$  = prism width
-
-$\ell_a$  = detector array length
-
-$\vec{p}_a$ = detector array position vector
-
-$\hat{v}_a$ = detector array direction unit vector
-
-$\hat{n}_a$ = detector array normal unit vector
-
-$\mu_b$ = mean beam position on y-axis
-
-$w_b = 1 / e^2$ {beam width}
-
-$D$ = set of detection bins composing the detector array
-
-$\forall d \in D, [lb_d, ub_d) \equiv$ bounds of the detection bin, $d$
-
-$0 \leq lb_1 < ub_1 \leq lb_2 < ... < ub_{|D|} \leq \ell_a $
-
-$\Lambda \sim \mathcal{U}(\lambda_{min}, \lambda_{max}) $
-
-$Y \sim \mathcal {N}(\mu=\mu_b, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [0, h] $
-
-$Z \sim \mathcal {N}(\mu=0, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [-\ell_z / 2, \ell_z / 2]$
-
+\begin{itemize}
+\item $N$ = prism count
+\item ${\theta_1, \dots \theta_N }$ =  angle of deviation from x-axis for each inter-media planar prism surface
+\item $\theta_c$ =  angle of deviation from x-axis for the chord of the lens-like inter-media prism surface
+\item ${\ell_1, \dots \ell_N }$ = extension length for each prism
+\item $h$ = prism height
+\item $\ell_z$  = prism width
+\item $\ell_a$  = detector array length
+\item $\vec{p}_a$ = detector array position vector
+\item $\hat{v}_a$ = detector array direction unit vector
+\item $\hat{n}_a$ = detector array normal unit vector
+\item $\mu_b$ = mean beam position on y-axis
+\item $w_b = 1 / e^2$ {beam width}
+\item $D$ = set of detection bins composing the detector array
+\item $\forall d \in D, [lb_d, ub_d) \equiv$ bounds of the detection bin, $d$
+\begin{itemize}
+\item[\textasteriskcentered] $0 \leq lb_1 < ub_1 \leq lb_2 < ... < ub_{|D|} \leq \ell_a $
+\end{itemize}
+\item $\Lambda \sim \mathcal{U}(\lambda_{min}, \lambda_{max}) $
+\item $Y \sim \mathcal {N}(\mu=\mu_b, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [0, h] $
+\item $Z \sim \mathcal {N}(\mu=0, \sigma^2=(\frac{1}{2}w_b)^2) \subseteq [-\ell_z / 2, \ell_z / 2]$
+\end{itemize}
 \section{Ray Propagation}\label{sec:ray-propagation}
 $\hat{n}_i = R(\theta_i) \cdot -\hat{x}$ = normal unit vector for planar inter-media surface $i$
 

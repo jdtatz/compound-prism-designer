@@ -1,22 +1,37 @@
 use crate::fitness::DesignFitness;
 use crate::ray::Spectrometer;
 use crate::utils::{Float, Welford};
-use once_cell::sync::OnceCell;
+use once_cell::sync::{OnceCell, Lazy};
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
 use rustacuda::memory::{DeviceBox, DeviceBuffer, DeviceCopy};
 use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
-use std::ffi::CStr;
+use std::ffi::{CString, CStr};
 
 unsafe impl<F: Float + DeviceCopy> DeviceCopy for Spectrometer<F> {}
 
-const PTX: &[u8] = concat!(
-    include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx"),
-    "\0"
-)
-.as_bytes();
-const MAX_N: usize = 512;
+const PTX_STR: &str = include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
+
+// post-processed generated ptx
+const PTX: Lazy<CString> = Lazy::new(|| {
+    let bytes: Vec<u8> = PTX_STR
+        .lines()
+        // skip invalid ptx and/or comments
+        .skip_while(|l| l.starts_with(".version"))
+        // switch from slow division into fast but still very accurate division
+        // and flushes subnormal values to 0
+        .flat_map(|l| {
+            let mut line = l.replace("div.rn.f32", "div.approx.ftz.f32");
+            // re-add newlines
+            line.push('\n');
+            line.into_bytes()
+        })
+        .collect();
+    unsafe { CString::from_vec_unchecked(bytes) }
+});
+
+const MAX_N: usize = 256;
 const MAX_M: usize = 16_384;
 const NWARP: u32 = 2;
 #[allow(clippy::unreadable_literal)]
@@ -74,7 +89,7 @@ struct CudaFitnessContext {
 impl CudaFitnessContext {
     fn new(ctxt: Context) -> rustacuda::error::CudaResult<Self> {
         ContextStack::push(&ctxt)?;
-        let module = Module::load_from_string(unsafe { CStr::from_bytes_with_nul_unchecked(PTX) })?;
+        let module = Module::load_from_string(PTX.as_c_str())?;
         let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
         Ok(Self {
             ctxt,
@@ -132,7 +147,7 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
 
 impl<F: KernelFloat> Spectrometer<F> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
-        const MAX_ERR: f64 = 2e-3;
+        const MAX_ERR: f64 = 5e-3;
         const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
 
         let mutex = CACHED_CUDA_FITNESS_CONTEXT
