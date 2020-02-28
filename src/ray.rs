@@ -57,7 +57,7 @@ pub struct Surface<F: Float> {
 }
 
 impl<F: Float> Surface<F> {
-    fn first_surface(angle: F, height: F) -> Self {
+    fn first_surface(angle: F, height: F, ar_coated: bool) -> Self {
         let normal = rotate(
             angle,
             Pair {
@@ -77,7 +77,7 @@ impl<F: Float> Surface<F> {
                 x: (normal.y / normal.x).abs() * height * F::from_f64(0.5),
                 y: height * F::from_f64(0.5),
             },
-            ar_coated: true
+            ar_coated
         }
     }
 
@@ -157,7 +157,7 @@ impl<F: Float> CurvedSurface<F> {
             center,
             radius,
             max_dist_sq: sagitta * sagitta + chord_length * chord_length * F::from_f64(0.25),
-            ar_coated: true
+            ar_coated: chord.ar_coated
         }
     }
 
@@ -224,6 +224,7 @@ impl<F: Float> CompoundPrism<F> {
     ///  * `curvature` - Lens Curvature of last surface of compound prism
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
+    ///  * `coat` - Coat the outer compound prism surfaces with anti-reflective coating
     pub fn new<I: IntoIterator<Item = Glass<F>>>(
         glasses: I,
         angles: &[F],
@@ -231,6 +232,7 @@ impl<F: Float> CompoundPrism<F> {
         curvature: F,
         height: F,
         width: F,
+        coat: bool,
     ) -> Self
     where
         I::IntoIter: ExactSizeIterator,
@@ -240,12 +242,13 @@ impl<F: Float> CompoundPrism<F> {
         debug_assert!(angles.len() - 1 == glasses.len());
         debug_assert!(lengths.len() == glasses.len());
         let mut prisms = arrayvec::ArrayVec::new();
-        let mut last_surface = Surface::first_surface(angles[0], height);
+        let mut last_surface = Surface::first_surface(angles[0], height, coat);
         for ((g, a), l) in glasses.zip(&angles[1..]).zip(lengths) {
             let next = last_surface.next_surface(height, *a, *l);
             prisms.push((g, last_surface));
             last_surface = next;
         }
+        last_surface.ar_coated = coat;
         let lens = CurvedSurface::new(curvature, height, last_surface);
         Self {
             prisms,

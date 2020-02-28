@@ -43,7 +43,7 @@ class Interactive:
         self.violin_ax = fig.add_subplot(gs[:, 3])
         self.prism_ax.axis('off')
 
-        self.waves = np.linspace(*spec.gaussian_beam.wavelength_range, 100)
+        self.waves = np.linspace(*spec.gaussian_beam.wavelength_range, 200)
         self.selected_design = None
         fig.canvas.mpl_connect('pick_event', self.pick_design)
 
