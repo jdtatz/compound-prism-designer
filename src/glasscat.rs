@@ -31,8 +31,7 @@ impl Into<&'static str> for CatalogError {
 ///
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Glass<F: Float> {
     Schott([F; 6]),
     Sellmeier1([F; 6]),

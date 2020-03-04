@@ -30,12 +30,6 @@ use std::f64::consts::*;
 use crate::fitness::DesignFitness;
 use crate::ray::RayTraceError;
 
-#[derive(serde::Serialize)]
-struct DesignOutput {
-    specification: DesignConfig,
-    designs: Vec<Design>,
-}
-
 const epsilons: [f64; 3] = [2.5, 0.02, 0.1];
 
 struct DynamicTest(Vec<Glass<f64>>);
