@@ -24,8 +24,7 @@ impl Into<&'static str> for RayTraceError {
 }
 
 /// Collimated Polychromatic Gaussian Beam
-#[derive(Debug, Clone)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GaussianBeam<F: Float> {
     /// 1/e^2 beam width
     pub width: F,
@@ -47,8 +46,7 @@ impl<F: Float> GaussianBeam<F> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Surface<F: Float> {
     angle: F,
     normal: Pair<F>,
@@ -130,8 +128,7 @@ impl<F: Float> Surface<F> {
 }
 
 /// A Curved Surface, parameterized as a circular segment
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CurvedSurface<F: Float> {
     /// The midpt of the Curved Surface / circular segment
     midpt: Pair<F>,
@@ -200,8 +197,7 @@ impl<F: Float> CurvedSurface<F> {
 }
 
 /// Compound Prism Specification
-#[derive(Debug, Clone)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompoundPrism<F: Float> {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
@@ -278,8 +274,7 @@ impl<F: Float> CompoundPrism<F> {
 /// for i in 0..bin_count
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
-#[derive(Debug, Clone)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinearDetectorArray<F: Float> {
     /// The number of bins in the array
     pub(crate) bin_count: u32,
@@ -347,9 +342,7 @@ impl<F: Float> LinearDetectorArray<F> {
 }
 
 /// Positioning of detector array
-#[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct DetectorArrayPositioning<F: Float> {
     /// Position vector of array
     pub position: Pair<F>,
@@ -673,8 +666,7 @@ pub(crate) fn detector_array_positioning<F: Float>(
     })
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spectrometer<F: Float> {
     pub gaussian_beam: GaussianBeam<F>,
     pub compound_prism: CompoundPrism<F>,

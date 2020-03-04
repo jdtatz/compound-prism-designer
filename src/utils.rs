@@ -2,8 +2,6 @@
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
-#[cfg(not(target_arch = "nvptx64"))]
-use serde::{Deserialize, Serialize};
 
 pub trait Float:
     'static
@@ -297,8 +295,7 @@ macro_rules! debug_assert_almost_eq {
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div)]
-#[cfg_attr(not(target_arch = "nvptx64"), derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
 pub struct Pair<F: Float> {
     pub x: F,
     pub y: F,

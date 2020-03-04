@@ -481,10 +481,13 @@ impl Design {
             let detarr = detector_array.into();
             let beam = gaussian_beam.into();
             let spec = Spectrometer::new(beam, cmpnd, detarr)?;
-            let fit = py.allow_threads(|| spec.fitness());
+            let fit = py.allow_threads(|| spec.cuda_fitness().unwrap_or_else(|| spec.fitness()));
+            let mut det_arr_design = detector_array.clone();
+            det_arr_design.position = spec.detector_array_position.position;
+            det_arr_design.direction = spec.detector_array_position.direction;
             Design {
                 compound_prism: compound_prism.clone(),
-                detector_array: detector_array.clone(),
+                detector_array: det_arr_design,
                 gaussian_beam: gaussian_beam.clone(),
                 fitness: fit,
                 spectrometer: spec,
