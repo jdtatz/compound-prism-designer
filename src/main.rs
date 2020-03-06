@@ -14,6 +14,7 @@ use std::{
 mod erf;
 mod glasscat;
 mod optimizer;
+mod designer;
 mod qrng;
 mod ray;
 #[macro_use]
@@ -24,6 +25,7 @@ mod fitness;
 
 use crate::glasscat::{BUNDLED_CATALOG, Glass};
 use crate::optimizer::*;
+use crate::designer::*;
 use crate::ray::{CompoundPrism, GaussianBeam, LinearDetectorArray, Spectrometer};
 use rand::{Rng, SeedableRng};
 use std::f64::consts::*;
@@ -32,6 +34,7 @@ use crate::ray::RayTraceError;
 
 const epsilons: [f64; 3] = [2.5, 0.02, 0.1];
 
+#[derive(Debug, Clone)]
 struct DynamicTest(Vec<Glass<f64>>);
 
 #[derive(Clone, Copy)]

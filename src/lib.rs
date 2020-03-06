@@ -13,6 +13,8 @@ pub mod erf;
 mod glasscat;
 #[cfg(not(target_arch = "nvptx64"))]
 pub mod optimizer;
+#[cfg(not(target_arch = "nvptx64"))]
+pub mod designer;
 #[cfg(all(not(target_arch = "nvptx64"), feature = "pyext"))]
 mod pylib;
 pub mod qrng;

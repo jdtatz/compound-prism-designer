@@ -14,7 +14,7 @@ unsafe impl<F: Float + DeviceCopy> DeviceCopy for Spectrometer<F> {}
 const PTX_STR: &str = include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
 
 // post-processed generated ptx
-const PTX: Lazy<CString> = Lazy::new(|| {
+static PTX: Lazy<CString> = Lazy::new(|| {
     let bytes: Vec<u8> = PTX_STR
         .lines()
         // skip invalid ptx and/or comments
