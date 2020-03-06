@@ -41,7 +41,7 @@ criterion = "0.3"
 cpuprofiler = "0.0.4"
 
 [features]
-default = ["cuda"]
+default = ["cuda", "serde_cbor/std"]
 binary = ["flate2", "serde_cbor/std"]
 cuda = ["rustacuda", "once_cell", "parking_lot"]
 pyext = ["pyo3", "numpy", "ndarray", "serde_cbor/std"]
