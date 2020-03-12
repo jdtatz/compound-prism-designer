@@ -1,6 +1,7 @@
 use crate::fitness::*;
 use crate::glasscat::*;
 use crate::optimizer::*;
+use crate::designer::*;
 use crate::ray::{CompoundPrism, LinearDetectorArray, Spectrometer};
 use crate::utils::{Float, Pair};
 use ndarray::prelude::{array, Array2};
