@@ -124,30 +124,26 @@ impl<F: Float> Into<DesignFitness<F>> for PyDesignFitness {
 impl CompoundPrismDesign {
     #[new]
     fn create(
-        obj: &PyRawObject,
-        glasses: Vec<&PyGlass>,
+        glasses: Vec<PyGlass>,
         angles: Vec<f64>,
         lengths: Vec<f64>,
         curvature: f64,
         height: f64,
         width: f64,
         ar_coated: bool,
-    ) {
-        obj.init({
-            CompoundPrismDesign {
-                glasses: glasses
-                    .into_iter()
-                    .cloned()
-                    .map(|pg| (pg.name.into(), pg.glass))
-                    .collect(),
-                angles,
-                lengths,
-                curvature,
-                height,
-                width,
-                ar_coated
-            }
-        })
+    ) -> Self {
+        CompoundPrismDesign {
+            glasses: glasses
+                .into_iter()
+                .map(|pg| (pg.name.into(), pg.glass))
+                .collect(),
+            angles,
+            lengths,
+            curvature,
+            height,
+            width,
+            ar_coated
+        }
     }
 
     #[getter]
@@ -216,7 +212,6 @@ impl CompoundPrismDesign {
 impl DetectorArrayDesign {
     #[new]
     fn create(
-        obj: &PyRawObject,
         bin_count: u32,
         bin_size: f64,
         linear_slope: f64,
@@ -226,20 +221,18 @@ impl DetectorArrayDesign {
         length: f64,
         max_incident_angle: f64,
         angle: f64,
-    ) {
-        obj.init({
-            DetectorArrayDesign {
-                bin_count,
-                bin_size,
-                linear_slope,
-                linear_intercept,
-                position,
-                direction,
-                length,
-                max_incident_angle,
-                angle,
-            }
-        });
+    ) -> Self {
+        DetectorArrayDesign {
+            bin_count,
+            bin_size,
+            linear_slope,
+            linear_intercept,
+            position,
+            direction,
+            length,
+            max_incident_angle,
+            angle,
+        }
     }
 
     #[getter]
@@ -277,14 +270,12 @@ impl DetectorArrayDesign {
 #[pymethods]
 impl GaussianBeamDesign {
     #[new]
-    fn create(obj: &PyRawObject, wavelength_range: (f64, f64), width: f64, y_mean: f64) {
-        obj.init({
-            GaussianBeamDesign {
-                wavelength_range,
-                width,
-                y_mean,
-            }
-        })
+    fn create(wavelength_range: (f64, f64), width: f64, y_mean: f64) -> Self {
+        GaussianBeamDesign {
+            wavelength_range,
+            width,
+            y_mean,
+        }
     }
 
     #[getter]
@@ -471,30 +462,26 @@ impl DesignConfig {
 impl Design {
     #[new]
     fn create(
-        obj: &PyRawObject,
         compound_prism: &CompoundPrismDesign,
         detector_array: &DetectorArrayDesign,
         gaussian_beam: &GaussianBeamDesign,
         py: Python,
-    ) -> PyResult<()> {
-        obj.init({
-            let cmpnd = compound_prism.into();
-            let detarr = detector_array.into();
-            let beam = gaussian_beam.into();
-            let spec = Spectrometer::new(beam, cmpnd, detarr)?;
-            let fit = py.allow_threads(|| spec.cuda_fitness().unwrap_or_else(|| spec.fitness()));
-            let mut det_arr_design = detector_array.clone();
-            det_arr_design.position = spec.detector_array_position.position;
-            det_arr_design.direction = spec.detector_array_position.direction;
-            Design {
-                compound_prism: compound_prism.clone(),
-                detector_array: det_arr_design,
-                gaussian_beam: gaussian_beam.clone(),
-                fitness: fit,
-                spectrometer: spec,
-            }
-        });
-        Ok(())
+    ) -> PyResult<Self> {
+        let cmpnd = compound_prism.into();
+        let detarr = detector_array.into();
+        let beam = gaussian_beam.into();
+        let spec = Spectrometer::new(beam, cmpnd, detarr)?;
+        let fit = py.allow_threads(|| spec.cuda_fitness().unwrap_or_else(|| spec.fitness()));
+        let mut det_arr_design = detector_array.clone();
+        det_arr_design.position = spec.detector_array_position.position;
+        det_arr_design.direction = spec.detector_array_position.direction;
+        Ok(Design {
+            compound_prism: compound_prism.clone(),
+            detector_array: det_arr_design,
+            gaussian_beam: gaussian_beam.clone(),
+            fitness: fit,
+            spectrometer: spec,
+        })
     }
 
     pub fn transmission_probability<'p>(
@@ -535,7 +522,7 @@ impl Design {
 fn serialize_results<'p>(
     py: Python<'p>,
     design_config: &DesignConfig,
-    designs: Vec<&Design>,
+    designs: Vec<Design>,
 ) -> PyResult<&'p PyBytes> {
     serde_cbor::to_vec(&(design_config, designs))
         .map_err(|e| pyo3::exceptions::TypeError::py_err(e.to_string()))

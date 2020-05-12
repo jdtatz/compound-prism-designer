@@ -95,6 +95,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         0.21,
         2.5,
         2.,
+        false,
     );
 
     const NBIN: usize = 32;

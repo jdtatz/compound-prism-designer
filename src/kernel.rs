@@ -29,19 +29,42 @@ extern "C" {
 
     #[link_name = "llvm.nvvm.shfl.sync.bfly.i32"]
     fn shfl_bfly_sync_i32(mask: u32, val: i32, lane_mask: u32, packing: u32) -> i32;
+
+    #[link_name = "llvm.nvvm.vote.ballot.sync"]
+    fn vote_ballot_sync(lane_mask: u32, pred: bool) -> u32;
 }
 
-trait CudaFloat: Float {
+unsafe fn warp_ballot(pred: bool) -> u32 {
+    vote_ballot_sync(0xFFFFFFFFu32, pred).count_ones()
+}
+
+trait Shareable: 'static + Copy + Sized + Send {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self;
 }
 
-impl CudaFloat for f32 {
+trait CudaFloat: Shareable + Float { }
+
+impl<T: Shareable + Float> CudaFloat for T {}
+
+impl Shareable for i32 {
+    unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
+        shfl_bfly_sync_i32(0xFFFFFFFFu32, self, lane_mask, 0x1F)
+    }
+}
+
+impl Shareable for u32 {
+    unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
+        core::mem::transmute(shfl_bfly_sync_i32(0xFFFFFFFFu32, core::mem::transmute(self), lane_mask, 0x1F))
+    }
+}
+
+impl Shareable for f32 {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
         shfl_bfly_sync_f32(0xFFFFFFFFu32, self, lane_mask, 0x1F)
     }
 }
 
-impl CudaFloat for f64 {
+impl Shareable for f64 {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
         /*let out: f64;
         asm!(concat!("{ .reg .b32 lo, hi;",
@@ -56,6 +79,13 @@ impl CudaFloat for f64 {
         let hi = shfl_bfly_sync_i32(0xFFFFFFFFu32, hi, lane_mask, 0x1F);
         core::mem::transmute([lo, hi])
     }
+}
+
+unsafe fn warp_fold<F: Shareable, Op: Fn(F, F) -> F>(mut val: F, fold: Op) -> F {
+    for xor in [16, 8, 4, 2, 1].iter().copied() {
+        val = fold(val, val.shfl_bfly_sync(xor));
+    }
+    val
 }
 
 unsafe fn share_welford<F: CudaFloat>(welford: &mut Welford<F>) {
@@ -105,77 +135,81 @@ unsafe fn kernel<F: CudaFloat>(
     let ptr: *mut u8 = ptr_shared_to_gen(0 as _) as _;
     let spec_ptr = ptr;
     let prob_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<F>>());
-    let ptr = prob_ptr as *mut [F; 2];
+    let ptr = prob_ptr as *mut Welford<F>;
 
     let spectrometer = cuda_memcpy_1d(spec_ptr, spectrometer);
     _syncthreads();
     let nbin = spectrometer.detector_array.bin_count;
     let shared = from_raw_parts_mut(ptr.add((warpid * nbin) as usize), nbin as usize);
-    if laneid == 0 {
-        for [mean, m2] in shared.iter_mut() {
-            *mean = F::zero();
-            *m2 = F::zero();
-        }
+    let mut i = laneid;
+    while i < nbin {
+        shared[i as usize] = Welford::new();
+        i += 32;
     }
 
     let id = (_block_idx_x() as u32) * nwarps + warpid;
 
-    let u = (F::from_f64(id as f64))
+    let u = (F::from_u32(id))
         .mul_add(F::from_f64(ALPHA), seed)
         .fract();
     let wavelength = spectrometer.gaussian_beam.inverse_cdf_wavelength(u);
 
     let mut count = F::zero();
     let mut index = laneid;
-    let mut qrng_n = F::from_f64(laneid as f64);
+    let mut qrng_n = F::from_u32(laneid);
     let max_evals = max_evals - (max_evals % 32);
     while index < max_evals {
         let u = qrng_n.mul_add(F::from_f64(ALPHA), seed).fract();
         let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
-        let result = spectrometer.propagate(wavelength, y0);
-        let prev_count = count;
-        let mut finished = true;
-        for ([lb, ub], [shared_mean, shared_m2]) in
-            spectrometer.detector_array.bounds().zip(shared.iter_mut())
-        {
-            let mean = match result {
-                Ok((pos, t)) if lb <= pos && pos < ub => t,
-                _ => F::zero(),
-            };
+        let (mut bin_index, t) = if let Ok((pos, t)) = spectrometer.propagate(wavelength, y0) {
+            (spectrometer.detector_array.bin_index(pos), t)
+        } else {
+            (None, F::zero())
+        };
+        let mut det_count = warp_ballot(bin_index.is_some());
+        let mut finished = det_count > 0;
+        while det_count > 0 {
+            let min_index = warp_fold(bin_index.unwrap_or(nbin), core::cmp::min);
+            if min_index >= nbin {
+                core::hint::unreachable_unchecked()
+            }
+            det_count -= warp_ballot(bin_index.map_or(false, |i| i == min_index));
+            let bin_t = if bin_index.map_or(false, |i| i == min_index) { t } else { F::zero() };
             let mut welford = if laneid == 0 {
-                let mut w = Welford {
-                    count: prev_count,
-                    mean: *shared_mean,
-                    m2: *shared_m2,
-                };
-                w.next_sample(mean);
+                let mut w = shared[min_index as usize];
+                w.skip(count);
+                w.next_sample(bin_t);
                 w
             } else {
                 Welford {
                     count: F::one(),
-                    mean,
+                    mean: bin_t,
                     m2: F::zero(),
                 }
             };
             share_welford(&mut welford);
             if laneid == 0 {
-                count = welford.count;
-                *shared_mean = welford.mean;
-                *shared_m2 = welford.m2;
+                shared[min_index as usize] = welford;
             }
             finished = finished && welford.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR));
+            if bin_index.map_or(false, |i| i == min_index) {
+                drop(bin_index.take());
+            }
         }
         if finished {
             break;
         }
         index += 32;
+        count += F::from_f64(32.);
         qrng_n += F::from_f64(32.);
     }
     let prob = from_raw_parts_mut(prob.add((nbin * id) as usize), nbin as usize);
-    if laneid == 0 {
-        for (p, [mean, _m2]) in prob.iter_mut().zip(shared.iter().copied()) {
-            *p = mean;
-        }
+    let mut i = laneid;
+    while i < nbin {
+        let w = &mut shared[i as usize];
+        w.skip(count);
+        prob[i as usize] = w.mean;
+        i += 32;
     }
 }
 

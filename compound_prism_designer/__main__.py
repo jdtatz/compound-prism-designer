@@ -43,15 +43,15 @@ class Interactive:
         self.violin_ax = fig.add_subplot(gs[:, 3])
         self.prism_ax.axis('off')
 
-        self.waves = np.linspace(*spec.gaussian_beam.wavelength_range, 200)
         self.selected_design = None
         fig.canvas.mpl_connect('pick_event', self.pick_design)
 
     def pick_design(self, event):
         design = self.selected_design = sorted((self.designs[i] for i in event.ind), key=lambda s: -s.fitness.info)[0]
+        waves = np.linspace(*design.gaussian_beam.wavelength_range, 200)
 
-        transmission = design.transmission_probability(self.waves)
-        p_det = transmission.sum(axis=0) * (1 / len(self.waves))
+        transmission = design.transmission_probability(waves)
+        p_det = transmission.sum(axis=0) * (1 / len(waves))
         p_w_l_D = transmission.sum(axis=1)
         zemax_design, zemax_file = create_zmx(design.compound_prism, design.detector_array, design.gaussian_beam)
         print(zemax_design)
@@ -79,7 +79,7 @@ class Interactive:
 
         vpstats = [
             {
-                "coords": self.waves,
+                "coords": waves,
                 "vals": t,
                 "mean": None,
                 "median": None,
@@ -91,9 +91,9 @@ class Interactive:
         parts = self.violin_ax.violin(vpstats, showextrema=False, widths=1)
         for pc in parts['bodies']:
             pc.set_facecolor('black')
-        self.violin_ax.plot([1, len(p_det)], self.spec.gaussian_beam.wavelength_range, 'k--')
+        self.violin_ax.plot([1, len(p_det)], design.gaussian_beam.wavelength_range, 'k--')
         self.det_ax.scatter(1 + np.arange(len(p_det)), p_det * 100, color='k')
-        self.trans_ax.plot(self.waves, p_w_l_D * 100, 'k')
+        self.trans_ax.plot(waves, p_w_l_D * 100, 'k')
         self.trans_ax.axhline(np.mean(p_w_l_D) * 100, color='k', linestyle='--')
 
         self.det_ax.set_xlabel("detector bins")
@@ -140,7 +140,6 @@ class Interactive:
             return zemax_design
 
 
-print(Design, dir(DesignConfig))
 fig = plt.figure()
 manager = plt.get_current_fig_manager()
 manager.set_window_title("Compound Prism Spectrometer Designer")

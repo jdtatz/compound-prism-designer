@@ -112,7 +112,7 @@ impl CudaFitnessContext {
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
         let dynamic_shared_mem = std::mem::size_of::<Spectrometer<F>>() as u32
-            + nbin as u32 * NWARP * std::mem::size_of::<[F; 2]>() as u32;
+            + nbin as u32 * NWARP * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
             launch!(function<<<(MAX_N as u32) / NWARP, 32 * NWARP, dynamic_shared_mem, stream>>>(
@@ -137,7 +137,7 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
     if let Some(mutex) = CACHED_CUDA_FITNESS_CONTEXT.get() {
         let mut guard = mutex.lock();
         let new_state = CudaFitnessContext::new(ctxt)?;
-        std::mem::replace(&mut *guard, new_state);
+        *guard = new_state;
     } else {
         CACHED_CUDA_FITNESS_CONTEXT
             .get_or_try_init(|| CudaFitnessContext::new(ctxt).map(Mutex::new))?;
@@ -201,7 +201,7 @@ impl<F: KernelFloat> Spectrometer<F> {
         let errors: Vec<_> = p_dets
             .iter()
             .map(|s| s.sem().to_f64())
-            .filter(|e| e >= &MAX_ERR)
+            .filter(|e| !e.is_finite() || e >= &MAX_ERR)
             .collect();
         eprintln!("cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}", MAX_ERR, errors);
         None
