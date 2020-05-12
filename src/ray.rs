@@ -326,6 +326,16 @@ impl<F: Float> LinearDetectorArray<F> {
         }
     }
 
+    pub fn bin_index(&self, pos: F) -> Option<u32> {
+        let (bin, bin_pos) = (pos - self.linear_intercept).euclid_dev_rem(self.linear_slope);
+        let bin = bin.to_u32();
+        if bin < self.bin_count && bin_pos < self.bin_size {
+            Some(bin)
+        } else {
+            None
+        }
+    }
+
     pub fn bounds<'s>(&'s self) -> impl ExactSizeIterator<Item = [F; 2]> + 's {
         (0..self.bin_count).map(move |i| {
             let i = F::from_f64(i as f64);

@@ -24,7 +24,9 @@ pub trait Float:
     + RemAssign
 {
     fn from_f64(v: f64) -> Self;
+    fn from_u32(v: u32) -> Self;
     fn to_f64(self) -> f64;
+    fn to_u32(self) -> u32;
     fn zero() -> Self;
     fn one() -> Self;
     fn infinity() -> Self;
@@ -41,7 +43,17 @@ pub trait Float:
     fn ln(self) -> Self;
     fn log2(self) -> Self;
     fn powf(self, n: Self) -> Self;
+    fn trunc(self) -> Self;
     fn fract(self) -> Self;
+    fn euclid_dev_rem(self, rhs: Self) -> (Self, Self) {
+        let q = (self / rhs).trunc();
+        let r = self - q * rhs;
+        if r < Self::zero() {
+            (if rhs > Self::zero() { q - Self::one() } else { q + Self::one() }, r + rhs.abs())
+        } else {
+            (q, r)
+        }
+    }
     fn abs(self) -> Self;
     fn sincos(self) -> (Self, Self);
     fn tan(self) -> Self;
@@ -89,8 +101,16 @@ impl Float for f32 {
         v as f32
     }
 
+    fn from_u32(v: u32) -> Self {
+        v as f32
+    }
+
     fn to_f64(self) -> f64 {
         self as f64
+    }
+
+    fn to_u32(self) -> u32 {
+        self as u32
     }
 
     fn zero() -> Self {
@@ -145,6 +165,10 @@ impl Float for f32 {
         cuda_specific!(libm::powf(self, n), self.powf(n));
     }
 
+    fn trunc(self) -> Self {
+        cuda_specific!(core::intrinsics::truncf32(self), self.fract());
+    }
+
     fn fract(self) -> Self {
         cuda_specific!(self - core::intrinsics::truncf32(self), self.fract());
     }
@@ -175,8 +199,16 @@ impl Float for f64 {
         v
     }
 
+    fn from_u32(v: u32) -> Self {
+        v as f64
+    }
+
     fn to_f64(self) -> f64 {
         self
+    }
+
+    fn to_u32(self) -> u32 {
+        self as u32
     }
 
     fn zero() -> Self {
@@ -229,6 +261,10 @@ impl Float for f64 {
 
     fn powf(self, n: Self) -> Self {
         cuda_specific!(libm::pow(self, n), self.powf(n));
+    }
+
+    fn trunc(self) -> Self {
+        cuda_specific!(core::intrinsics::truncf64(self), self.fract());
     }
 
     fn fract(self) -> Self {
@@ -398,6 +434,15 @@ impl<F: Float> Welford<F> {
         self.mean += delta / self.count;
         let delta2 = x - self.mean;
         self.m2 += delta * delta2;
+    }
+    pub fn skip(&mut self, new_count: F) {
+        if self.count < new_count {
+            let zero_count = new_count - self.count;
+            let count = new_count;
+            self.mean = (self.count * self.mean) / count;
+            self.m2 = self.m2 + self.mean.sqr() * self.count * zero_count / count;
+            self.count = count;
+        }
     }
     pub fn sample_variance(&self) -> F {
         self.m2 / (self.count - F::one())
