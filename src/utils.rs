@@ -2,6 +2,35 @@
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
+use arrayvec::{Array, ArrayVec};
+
+pub trait LossyInto<T>: Sized {
+    fn into(self) -> T;
+}
+
+impl LossyInto<f32> for f64 {
+    fn into(self) -> f32 {
+        self as f32
+    }
+}
+
+impl LossyInto<f64> for f32 {
+    fn into(self) -> f64 {
+        self as f64
+    }
+}
+
+impl<U1, U2, T1: LossyInto<U1>, T2: LossyInto<U2>> LossyInto<(U1, U2)> for (T1, T2) {
+    fn into(self) -> (U1, U2) {
+        (self.0.into(), self.1.into())
+    }
+}
+
+impl<A1: Array, A2: Array> LossyInto<ArrayVec<A2>> for ArrayVec<A1> where A1::Item: LossyInto<A2::Item> {
+    fn into(self) -> ArrayVec<A2> {
+        self.into_iter().map(LossyInto::into).collect()
+    }
+}
 
 pub trait Float:
     'static
@@ -327,89 +356,6 @@ macro_rules! debug_assert_almost_eq {
             $crate::assert_almost_eq!($($inner)*)
         }
     };
-}
-
-/// vector in R^2 represented as a 2-tuple
-#[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
-pub struct Pair<F: Float> {
-    pub x: F,
-    pub y: F,
-}
-
-impl<F: Float> Pair<F> {
-    /// dot product of two vectors, a • b
-    pub fn dot(self, other: Self) -> F {
-        self.x * other.x + self.y * other.y
-    }
-
-    /// square of the vector norm, ||v||^2
-    pub fn norm_squared(self) -> F {
-        self.dot(self)
-    }
-
-    /// vector norm, ||v||
-    pub fn norm(self) -> F {
-        self.norm_squared().sqrt()
-    }
-
-    /// is it a unit vector, ||v|| ≅? 1
-    pub fn is_unit(self) -> bool {
-        almost_eq(self.norm().to_f64(), 1_f64, 1e-3)
-    }
-
-    /// Fused multiply add of two vectors with a scalar, (self * a) + b
-    pub fn mul_add(self, a: F, b: Self) -> Self {
-        Pair {
-            x: self.x.mul_add(a, b.x),
-            y: self.y.mul_add(a, b.y),
-        }
-    }
-}
-
-/// rotate `vector` by `angle` CCW
-#[inline(always)]
-pub fn rotate<F: Float>(angle: F, vector: Pair<F>) -> Pair<F> {
-    let (s, c) = angle.sincos();
-    Pair {
-        x: c * vector.x - s * vector.y,
-        y: s * vector.x + c * vector.y,
-    }
-}
-
-/// Matrix in R^(2x2) in row major order
-#[derive(Debug, Clone, Copy)]
-pub struct Mat2<F: Float>([F; 4]);
-
-impl<F: Float> Mat2<F> {
-    /// New Matrix from the two given columns
-    pub fn new_from_cols(col1: Pair<F>, col2: Pair<F>) -> Self {
-        Self([col1.x, col2.x, col1.y, col2.y])
-    }
-
-    /// Matrix inverse if it exists
-    pub fn inverse(self) -> Option<Self> {
-        let [a, b, c, d] = self.0;
-        let det = a * d - b * c;
-        if det == F::zero() {
-            None
-        } else {
-            Some(Self([d / det, -b / det, -c / det, a / det]))
-        }
-    }
-}
-
-impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
-    type Output = Pair<F>;
-
-    /// Matrix x Vector -> Vector multiplication
-    fn mul(self, rhs: Pair<F>) -> Self::Output {
-        let [a, b, c, d] = self.0;
-        Pair {
-            x: a * rhs.x + b * rhs.y,
-            y: c * rhs.x + d * rhs.y,
-        }
-    }
 }
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm

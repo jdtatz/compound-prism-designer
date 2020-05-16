@@ -192,6 +192,7 @@ mod tests {
                 curvature,
                 prism_height,
                 prism_width,
+                false
             );
 
             let detarr_angle = rng.gen_range(-PI, PI);
@@ -275,6 +276,7 @@ mod tests {
             0.21,
             2.5,
             2.,
+            false
         );
 
         const NBIN: usize = 32;

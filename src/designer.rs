@@ -3,6 +3,7 @@ use crate::glasscat::Glass;
 use crate::glasscat::BUNDLED_CATALOG;
 use crate::ray::*;
 use crate::utils::*;
+use crate::geom::*;
 #[cfg(feature = "pyext")]
 use pyo3::prelude::{pyclass, PyObject};
 use std::borrow::Cow;
@@ -398,7 +399,7 @@ impl MultiObjectiveMinimizationProblem for DesignConfig {
         let spec = self.array_to_params(params).ok()?;
         #[cfg(feature = "cuda")]
             {
-                let spec: Spectrometer<f32> = (&spec).into();
+                let spec: Spectrometer<f32> = LossyInto::into(spec);
                 spec.cuda_fitness()
                     .map(|fit| DesignFitness {
                         size: fit.size as f64,

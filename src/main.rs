@@ -17,6 +17,7 @@ mod optimizer;
 mod designer;
 mod qrng;
 mod ray;
+mod geom;
 #[macro_use]
 mod utils;
 #[cfg(feature = "cuda")]
@@ -85,9 +86,9 @@ impl DynamicTest {
         let angles: Vec<_> = params.sine_angles.iter().map(|a| a.asin()).collect();
         let lengths: Vec<_> = params.lengths.iter().copied().map(|x| (params.height / 9.0) * x / (1.0 - x)).collect();
         let beam = GaussianBeam {
-            width: 3.2,
+            width: 2.0,
             y_mean: params.normalized_y_mean * params.height,
-            w_range: (0.5, 0.82),
+            w_range: (0.48, 1.0),
         };
         let cmpnd = CompoundPrism::<f64>::new(
             self.0.iter().cloned(),
@@ -95,19 +96,20 @@ impl DynamicTest {
             &lengths,
             params.curvature,
             params.height,
-            7.,
+            6.6,
             true,
         );
         let detarr =
             LinearDetectorArray::new(
-                32,
-                0.8,
-                1.,
-                0.1,
+                128,
+                0.208,
+                0.208,
+                0.0,
                 (45_f64).to_radians().cos(),
                 params.detector_array_angle,
-                32.);
-        Spectrometer::new(beam, cmpnd, detarr)
+                26.6);
+        let r = Spectrometer::new(beam, cmpnd, detarr);
+        r
     }
 }
 
@@ -155,11 +157,13 @@ impl MultiObjectiveMinimizationProblem for DynamicTest {
 fn main() -> Result<(), Box<dyn Error>> {
     // const glass_names: &'static [&'static str] = &["N-LAF21", "N-SF11", "N-SSK2", "N-FK5"];
     // const glass_names: &'static [&'static str] = &["N-LAF21", "N-SF11", "N-SSK2"];
-    const glass_names: &'static [&'static str] = &["N-SF11", "N-SSK2"];
+    // const glass_names: &'static [&'static str] = &["N-SF11", "N-SSK2"];
+    const glass_names: &'static [&'static str] = &["N-SF66", "N-SF14", "N-BAF4"];
     let glasses = glass_names.iter().map(|name|
         BUNDLED_CATALOG.iter().find(|(n, _)| n == name).unwrap().1.clone())
         .collect::<Vec<_>>();
     let problem = DynamicTest(glasses);
+    dbg!(&problem);
     let solns = optimize(
         &problem,
         128,
@@ -170,10 +174,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         12.,
         0.08,
     );
+    let mut designs = vec![];
     for soln in solns {
         let params = problem.slice_into_params(soln.params.as_slice());
         let spec = problem.params_into_spectrometer(params).unwrap();
-        if soln.fitness.info > 3.7 {
+        if soln.fitness.info / (spec.detector_array.bin_count as f64).log2() > 0.8 {
             println!("{:.4?}\n{:.4?}\n{:.4?}\n{:.4?}\n",
                      spec,
                      params,
@@ -181,7 +186,45 @@ fn main() -> Result<(), Box<dyn Error>> {
                      soln.fitness,
             );
         }
+        let d = Design {
+            compound_prism: CompoundPrismDesign {
+                glasses: glass_names.iter().zip(problem.0.iter())
+                    .map(|(n, g)| (std::borrow::Cow::Borrowed(*n), g.clone()))
+                .collect(),
+                angles: params.sine_angles.iter().map(|s| s.asin()).collect(),
+                lengths: params.lengths.to_vec(),
+                curvature: params.curvature,
+                height: params.height,
+                width: 6.6,
+                ar_coated: true
+            },
+            detector_array: DetectorArrayDesign {
+                bin_count: 128,
+                bin_size: 0.208,
+                linear_slope: 0.208,
+                linear_intercept: 0.0,
+                position: spec.detector_array_position.position,
+                direction: spec.detector_array_position.direction,
+                length: 26.6,
+                max_incident_angle: 45_f64,
+                angle: params.detector_array_angle
+            },
+            gaussian_beam: GaussianBeamDesign {
+                wavelength_range: (0.48, 1.0),
+                width: 2.0,
+                y_mean: params.normalized_y_mean * params.height
+            },
+            fitness: soln.fitness,
+            spectrometer: spec.clone()
+        };
+        designs.push(d);
     }
+
+    let out: (Option<DesignConfig>, Vec<Design>) = (None, designs);
+    let file = File::create("results.cbor.gz")?;
+    let gz = GzEncoder::new(file, Compression::default());
+    serde_cbor::to_writer(gz, &out)?;
+
     return Ok(());
     // iDus 420  Bx-DD; 1024 x 256 pixels; 26 x 26 μm pixel size; 26.6 x 6.6 mm height
 
@@ -218,6 +261,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     return Ok(());*/
 
+    /*
     let file = read("design_config.toml")?;
     let config: DesignConfig = toml::from_slice(file.as_ref())?;
     let designs = config.optimize_designs(None);
@@ -234,6 +278,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+    */
 }
 
 /*
