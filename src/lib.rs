@@ -19,6 +19,7 @@ pub mod designer;
 mod pylib;
 pub mod qrng;
 mod ray;
+mod geom;
 #[macro_use]
 pub mod utils;
 #[cfg(all(not(target_arch = "nvptx64"), feature = "cuda"))]

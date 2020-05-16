@@ -93,29 +93,74 @@ mod tests {
 }
 */
 
-pub struct Qrng<T> {
-    state: T,
-    alpha: T,
-}
-
 #[allow(clippy::unreadable_literal, clippy::excessive_precision)]
 const PHI_1: f64 = 1.61803398874989484820458683436563;
+const ALPHA_1: f64 = 1_f64 / PHI_1;
+#[allow(clippy::unreadable_literal, clippy::excessive_precision)]
+const PHI_2: f64 = 1.3247179572447460259609088544780973;
+const ALPHA_2: [f64; 2] = [1_f64 / PHI_2, 1_f64 / (PHI_2 * PHI_2)];
 
-impl<F: Float> Qrng<F> {
-    pub fn new(seed: F) -> Self {
-        const ALPHA: f64 = 1_f64 / PHI_1;
-        Self {
-            state: seed,
-            alpha: F::from_f64(ALPHA),
-        }
+pub trait QuasiRandom: Copy {
+    fn alpha() -> Self;
+    fn iadd_mod_1(&mut self, rhs: Self);
+    fn mul_by_int(self, rhs: u32) -> Self;
+}
+
+impl<F: Float> QuasiRandom for F {
+    fn alpha() -> Self {
+        F::from_f64(ALPHA_1)
+    }
+
+    fn iadd_mod_1(&mut self, rhs: Self) {
+        *self = (*self + rhs).fract();
+    }
+
+    fn mul_by_int(self, rhs: u32) -> Self {
+        self * F::from_f64(rhs as f64)
     }
 }
 
-impl<F: Float> Iterator for Qrng<F> {
-    type Item = F;
+impl<F: Float> QuasiRandom for [F; 2] {
+    fn alpha() -> Self {
+        [F::from_f64(ALPHA_2[0]), F::from_f64(ALPHA_2[1])]
+    }
+
+    fn iadd_mod_1(&mut self, rhs: Self) {
+        self[0] = (self[0] + rhs[0]).fract();
+        self[1] = (self[1] + rhs[1]).fract();
+    }
+
+    fn mul_by_int(self, rhs: u32) -> Self {
+        let rhs = F::from_f64(rhs as f64);
+        [self[0] * rhs, self[1] * rhs]
+    }
+}
+
+
+pub struct Qrng<Q: QuasiRandom> {
+    state: Q,
+    alpha: Q,
+}
+
+impl<Q: QuasiRandom> Qrng<Q> {
+    pub fn new(seed: Q) -> Self {
+        Self {
+            state: seed,
+            alpha: Q::alpha(),
+        }
+    }
+
+    pub fn next_by(&mut self, step: u32) -> Q {
+        self.state.iadd_mod_1(self.alpha.mul_by_int(step));
+        self.state
+    }
+}
+
+impl<Q: QuasiRandom> Iterator for Qrng<Q> {
+    type Item = Q;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.state = (self.state + self.alpha).fract();
+        self.state.iadd_mod_1(self.alpha);
         Some(self.state)
     }
 }

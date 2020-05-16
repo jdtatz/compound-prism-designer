@@ -1,4 +1,4 @@
-use crate::utils::Float;
+use crate::utils::{LossyInto, Float};
 use arrayvec::ArrayVec;
 use core::str::FromStr;
 
@@ -200,19 +200,19 @@ impl<F: Float> Glass<F> {
     }
 }
 
-fn from_iter_to_array<F: Float, A: arrayvec::Array<Item = F>>(
-    it: &[f64],
+fn from_iter_to_array<F1: Float + LossyInto<F2>, F2: Float, A: arrayvec::Array<Item = F2>>(
+    it: &[F1],
 ) -> Result<A, CatalogError> {
     it.iter()
-        .map(|v| F::from_f64(*v))
+        .map(|v| (*v).into())
         .collect::<ArrayVec<_>>()
         .into_inner()
         .map_err(|_| CatalogError::InvalidGlassDescription)
 }
 
-impl<F: Float> From<&Glass<f64>> for Glass<F> {
-    fn from(g: &Glass<f64>) -> Self {
-        match g {
+impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Glass<F2>> for Glass<F1> {
+    fn into(self) -> Glass<F2> {
+        match &self {
             Glass::Schott(cd) => Glass::Schott(from_iter_to_array(cd).unwrap()),
             Glass::Sellmeier1(cd) => Glass::Sellmeier1(from_iter_to_array(cd).unwrap()),
             Glass::Sellmeier2(cd) => Glass::Sellmeier2(from_iter_to_array(cd).unwrap()),
@@ -233,6 +233,7 @@ impl<F: Float> From<&Glass<f64>> for Glass<F> {
         }
     }
 }
+
 
 struct CatalogIter<'s, F: Float + FromStr> {
     file_lines: core::str::Lines<'s>,

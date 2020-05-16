@@ -34,7 +34,7 @@ class Interactive:
         sc = self.pareto_ax.scatter(x, y, c=c, cmap=cm.cmap.reversed(), norm=cm.norm, picker=True)
         clb = fig.colorbar(sc)
         clb.ax.set_ylabel("deviation (deg)")
-        self.pareto_ax.set_xlabel(f"size ({spec.length_unit})")
+        self.pareto_ax.set_xlabel(f"size ({'a.u.' if spec is None else spec.length_unit})")
         self.pareto_ax.set_ylabel("mutual information (bits)")
 
         self.prism_ax = fig.add_subplot(gs[0, 1:3])

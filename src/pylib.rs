@@ -3,7 +3,8 @@ use crate::glasscat::*;
 use crate::optimizer::*;
 use crate::designer::*;
 use crate::ray::{CompoundPrism, LinearDetectorArray, Spectrometer};
-use crate::utils::{Float, Pair};
+use crate::utils::{LossyInto, Float};
+use crate::geom::Pair;
 use ndarray::prelude::{array, Array2};
 use numpy::{PyArray1, PyArray2, ToPyArray};
 use pyo3::{create_exception, PyObjectProtocol};
@@ -442,7 +443,7 @@ impl DesignConfig {
 
     fn param_fitness(&self, params: &PyArray1<f64>) -> PyResult<PyDesignFitness> {
         let spec = self.array_to_params(params.as_slice()?)?;
-        let spec: Spectrometer<f32> = (&spec).into();
+        let spec: Spectrometer<f32> = LossyInto::into(spec);
         spec.cuda_fitness()
             .map(|f| f.into())
             .ok_or_else(|| RayTraceError::py_err("Integration accuracy too low"))
@@ -521,7 +522,7 @@ impl Design {
 #[pyfunction]
 fn serialize_results<'p>(
     py: Python<'p>,
-    design_config: &DesignConfig,
+    design_config: Option<&DesignConfig>,
     designs: Vec<Design>,
 ) -> PyResult<&'p PyBytes> {
     serde_cbor::to_vec(&(design_config, designs))
@@ -530,7 +531,7 @@ fn serialize_results<'p>(
 }
 
 #[pyfunction]
-fn deserialize_results(bytes: &[u8]) -> PyResult<(DesignConfig, Vec<Design>)> {
+fn deserialize_results(bytes: &[u8]) -> PyResult<(Option<DesignConfig>, Vec<Design>)> {
     serde_cbor::from_slice(bytes).map_err(|e| pyo3::exceptions::TypeError::py_err(e.to_string()))
 }
 
