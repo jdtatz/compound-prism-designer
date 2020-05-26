@@ -363,7 +363,6 @@ impl<F: Float> Ray<F> {
         cmpnd: &CompoundPrism<F>,
         wavelength: F,
     ) -> Result<Self, RayTraceError> {
-        dbg!(cmpnd);
         let (ray, n1) =
             cmpnd
                 .prisms
@@ -371,15 +370,13 @@ impl<F: Float> Ray<F> {
                 .try_fold((self, F::one()), |(ray, n1), (glass, plane)| {
                     let n2 = glass.calc_n(wavelength);
                     debug_assert!(n2 >= F::one());
-                    dbg!(ray);
                     let (p, normal) = plane.intersection((ray.origin, ray.direction)).ok_or(RayTraceError::NoSurfaceIntersection)?;
-                    let ray = self.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                    let ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
                     Ok((ray, n2))
                 })?;
         let n2 = F::one();
         let (p, normal) = cmpnd.lens.intersection((ray.origin, ray.direction)).ok_or(RayTraceError::NoSurfaceIntersection)?;
-        dbg!(ray);
-        self.refract(p, normal, n1, n2, cmpnd.ar_coated)
+        ray.refract(p, normal, n1, n2, cmpnd.ar_coated)
     }
 
     /// Propagate a ray of `wavelength` through the compound prism and
