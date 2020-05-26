@@ -154,6 +154,7 @@ pub(crate) fn create_joined_trapezoids<'s, F: Float>(height: F, angles: &'s [F],
     debug_assert!(angles.len() == sep_lengths.len() + 1);
     let h2 = height * F::from_f64(0.5);
     let normal = -Pair::angled(angles[0]);
+    debug_assert_eq!(normal, rotate(angles[0], Pair { x: -F::one(), y: F::zero() }));
     debug_assert_almost_eq!(
             (normal.y / normal.x).abs().to_f64(),
             angles[0].tan().abs().to_f64(),
@@ -221,6 +222,8 @@ pub(crate) struct CurvedPlane<F: Float> {
 
 impl<F: Float> CurvedPlane<F> {
     pub(crate) fn new(curvature: F, height: F, chord: Plane<F>) -> Self {
+        debug_assert!(F::one() >= curvature && curvature > F::zero());
+        debug_assert!(height > F::zero());
         let chord_length = height / chord.normal.x.abs();
         let radius = chord_length * F::from_f64(0.5) / curvature;
         let apothem = (radius * radius - chord_length * chord_length * F::from_f64(0.25)).sqrt();
@@ -236,8 +239,7 @@ impl<F: Float> CurvedPlane<F> {
     }
 
     fn is_along_arc(&self, pt: Pair<F>) -> bool {
-        debug_assert!((pt - self.center).norm() < self.radius * F::from_f64(1.01));
-        debug_assert!((pt - self.center).norm() > self.radius * F::from_f64(0.99));
+        debug_assert_almost_eq!((pt - self.center).norm().to_f64(), self.radius.to_f64(), 1e-6);
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
 
@@ -286,17 +288,24 @@ impl<F: Float> Surface for CurvedPlane<F> {
         if discriminant <= F::zero() {
             return None;
         }
-        let d = -ud + discriminant.sqrt();
-        if d <= F::zero() {
+        let dl = -ud - discriminant.sqrt();
+        let dr = -ud + discriminant.sqrt();
+        if dl <= F::zero() && dr <= F::zero(){
             return None;
         }
-        let p = direction.mul_add(d, origin);
-        if self.is_along_arc(p) {
-            None
-        } else {
-            let snorm = (self.center - p) / self.radius;
+        let pl = direction.mul_add(dl, origin);
+        let pr = direction.mul_add(dr, origin);
+        if self.is_along_arc(pl) {
+            debug_assert!(!self.is_along_arc(pr));
+            let snorm = (self.center - pl) / self.radius;
             debug_assert!(snorm.is_unit());
-            Some((p, snorm))
+            Some((pl, snorm))
+        } else if self.is_along_arc(pr) {
+            let snorm = (self.center - pr) / self.radius;
+            debug_assert!(snorm.is_unit());
+            Some((pr, snorm))
+        } else {
+           None
         }
     }
 }
@@ -309,5 +318,19 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<CurvedPlane<F2>> for Curved
             radius: self.radius.into(),
             max_dist_sq: self.max_dist_sq.into(),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::almost_eq;
+    use rand::prelude::*;
+    use std::f64::consts::*;
+
+    #[test]
+    fn test_many() {
+
     }
 }
