@@ -13,7 +13,6 @@ use pyo3::prelude::*;
 use pyo3::types::PyAny;
 use pyo3::types::PyBytes;
 use pyo3::wrap_pyfunction;
-use pyo3::ObjectProtocol;
 
 create_exception!(compound_prism_designer, GlassCatalogError, Exception);
 create_exception!(compound_prism_designer, RayTraceError, Exception);
@@ -491,9 +490,9 @@ impl Design {
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
         let spec = &self.spectrometer;
+        let wavelengths_array = wavelengths.as_array();
         py.allow_threads(|| {
-            wavelengths
-                .as_array()
+            wavelengths_array
                 .into_iter()
                 .flat_map(|w| spec.p_dets_l_wavelength(*w))
                 .collect::<Vec<_>>()

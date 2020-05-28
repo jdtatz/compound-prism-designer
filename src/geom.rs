@@ -218,23 +218,28 @@ pub(crate) struct CurvedPlane<F: Float> {
     pub(crate) radius: F,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
     max_dist_sq: F,
+    direction: bool
 }
 
 impl<F: Float> CurvedPlane<F> {
-    pub(crate) fn new(curvature: F, height: F, chord: Plane<F>) -> Self {
-        debug_assert!(F::one() >= curvature && curvature > F::zero());
+    pub(crate) fn new(signed_curvature: F, height: F, chord: Plane<F>) -> Self {
+        debug_assert!(F::one() >= signed_curvature.abs() && signed_curvature.abs() > F::zero());
         debug_assert!(height > F::zero());
         let chord_length = height / chord.normal.x.abs();
-        let radius = chord_length * F::from_f64(0.5) / curvature;
+        let radius = chord_length * F::from_f64(0.5) / signed_curvature.abs();
         let apothem = (radius * radius - chord_length * chord_length * F::from_f64(0.25)).sqrt();
         let sagitta = radius - apothem;
-        let center = chord.midpt + chord.normal * apothem;
-        let midpt = chord.midpt - chord.normal * sagitta;
+        let (center, midpt) = if signed_curvature.is_sign_positive() {
+            (chord.midpt + chord.normal * apothem, chord.midpt - chord.normal * sagitta)
+        } else {
+            (chord.midpt - chord.normal * apothem, chord.midpt + chord.normal * sagitta)
+        };
         Self {
             midpt,
             center,
             radius,
             max_dist_sq: sagitta * sagitta + chord_length * chord_length * F::from_f64(0.25),
+            direction: signed_curvature.is_sign_positive()
         }
     }
 
@@ -288,22 +293,15 @@ impl<F: Float> Surface for CurvedPlane<F> {
         if discriminant <= F::zero() {
             return None;
         }
-        let dl = -ud - discriminant.sqrt();
-        let dr = -ud + discriminant.sqrt();
-        if dl <= F::zero() && dr <= F::zero(){
+        let d = if self.direction { -ud + discriminant.sqrt() } else { -ud - discriminant.sqrt() };
+        if d <= F::zero() {
             return None;
         }
-        let pl = direction.mul_add(dl, origin);
-        let pr = direction.mul_add(dr, origin);
-        if self.is_along_arc(pl) {
-            debug_assert!(!self.is_along_arc(pr));
-            let snorm = (self.center - pl) / self.radius;
+        let p = direction.mul_add(d, origin);
+        if self.is_along_arc(p) {
+            let snorm = (self.center - p) / self.radius;
             debug_assert!(snorm.is_unit());
-            Some((pl, snorm))
-        } else if self.is_along_arc(pr) {
-            let snorm = (self.center - pr) / self.radius;
-            debug_assert!(snorm.is_unit());
-            Some((pr, snorm))
+            Some((p, snorm))
         } else {
            None
         }
@@ -317,6 +315,7 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<CurvedPlane<F2>> for Curved
             center: LossyInto::into(self.center),
             radius: self.radius.into(),
             max_dist_sq: self.max_dist_sq.into(),
+            direction: self.direction
         }
     }
 }
