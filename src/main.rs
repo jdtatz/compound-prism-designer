@@ -24,6 +24,7 @@ mod utils;
 mod cuda_fitness;
 mod fitness;
 
+use crate::utils::LossyInto;
 use crate::glasscat::{BUNDLED_CATALOG, Glass};
 use crate::optimizer::*;
 use crate::designer::*;
@@ -143,7 +144,7 @@ impl MultiObjectiveMinimizationProblem for DynamicTest {
     fn evaluate(&self, params: &[f64]) -> Option<Self::Fitness> {
         let params = self.slice_into_params(params);
         let spec = self.params_into_spectrometer(params).ok()?;
-        let spec: Spectrometer<f32> = (&spec).into();
+        let spec: Spectrometer<f32> = LossyInto::into(spec);
         spec.cuda_fitness()
             .map(|fit| DesignFitness {
                 size: fit.size as f64,
