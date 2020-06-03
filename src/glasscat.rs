@@ -1,4 +1,4 @@
-use crate::utils::{LossyInto, Float};
+use crate::utils::{Float, LossyInto};
 use arrayvec::ArrayVec;
 use core::str::FromStr;
 
@@ -198,6 +198,24 @@ impl<F: Float> Glass<F> {
             }
         }
     }
+
+    pub fn decompose(&self) -> (&'static str, &[F]) {
+        match self {
+            Glass::Schott(cd) => ("Schott", cd),
+            Glass::Sellmeier1(cd) => ("Sellmeier1", cd),
+            Glass::Sellmeier2(cd) => ("Sellmeier2", cd),
+            Glass::Sellmeier3(cd) => ("Sellmeier3", cd),
+            Glass::Sellmeier4(cd) => ("Sellmeier4", cd),
+            Glass::Sellmeier5(cd) => ("Sellmeier5", cd),
+            Glass::Herzberger(cd) => ("Herzberger", cd),
+            Glass::Conrady(cd) => ("Conrady", cd),
+            Glass::HandbookOfOptics1(cd) => ("HandbookOfOptics1", cd),
+            Glass::HandbookOfOptics2(cd) => ("HandbookOfOptics2", cd),
+            Glass::Extended(cd) => ("Extended", cd),
+            Glass::Extended2(cd) => ("Extended2", cd),
+            Glass::Extended3(cd) => ("Extended3", cd),
+        }
+    }
 }
 
 fn from_iter_to_array<F1: Float + LossyInto<F2>, F2: Float, A: arrayvec::Array<Item = F2>>(
@@ -233,7 +251,6 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Glass<F2>> for Glass<F1> {
         }
     }
 }
-
 
 struct CatalogIter<'s, F: Float + FromStr> {
     file_lines: core::str::Lines<'s>,

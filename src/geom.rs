@@ -1,4 +1,7 @@
-use crate::{debug_assert_almost_eq, utils::{LossyInto, Float, almost_eq}};
+use crate::{
+    debug_assert_almost_eq,
+    utils::{almost_eq, Float, LossyInto},
+};
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
@@ -48,7 +51,7 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Pair<F2>> for Pair<F1> {
     fn into(self) -> Pair<F2> {
         Pair {
             x: self.x.into(),
-            y: self.y.into()
+            y: self.y.into(),
         }
     }
 }
@@ -101,7 +104,10 @@ impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
 pub trait Surface {
     type Point;
     type UnitVector;
-    fn intersection(&self, ray: (Self::Point, Self::UnitVector)) -> Option<(Self::Point, Self::UnitVector)>;
+    fn intersection(
+        &self,
+        ray: (Self::Point, Self::UnitVector),
+    ) -> Option<(Self::Point, Self::UnitVector)>;
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -111,8 +117,8 @@ pub struct Plane<F: Float> {
     height: F,
 }
 
+#[cfg(not(target_arch = "nvptx64"))]
 impl<F: Float> Plane<F> {
-    #[cfg(not(target_arch = "nvptx64"))]
     pub(crate) fn end_points(&self, height: F) -> (Pair<F>, Pair<F>) {
         let dx = self.normal.y / self.normal.x * height * F::from_f64(0.5);
         let ux = self.midpt.x - dx;
@@ -131,7 +137,10 @@ impl<F: Float> Surface for Plane<F> {
     type Point = Pair<F>;
     type UnitVector = Pair<F>;
 
-    fn intersection(&self, ray: (Self::Point, Self::UnitVector)) -> Option<(Self::Point, Self::UnitVector)> {
+    fn intersection(
+        &self,
+        ray: (Self::Point, Self::UnitVector),
+    ) -> Option<(Self::Point, Self::UnitVector)> {
         let (origin, direction) = ray;
         debug_assert!(direction.is_unit());
         let ci = -direction.dot(self.normal);
@@ -148,18 +157,30 @@ impl<F: Float> Surface for Plane<F> {
     }
 }
 
-pub(crate) fn create_joined_trapezoids<'s, F: Float>(height: F, angles: &'s [F], sep_lengths: &'s [F])
-    -> (Plane<F>, impl 's + ExactSizeIterator<Item=Plane<F>>) {
+pub(crate) fn create_joined_trapezoids<'s, F: Float>(
+    height: F,
+    angles: &'s [F],
+    sep_lengths: &'s [F],
+) -> (Plane<F>, impl 's + ExactSizeIterator<Item = Plane<F>>) {
     debug_assert!(angles.len() >= 2);
     debug_assert!(angles.len() == sep_lengths.len() + 1);
     let h2 = height * F::from_f64(0.5);
     let normal = -Pair::angled(angles[0]);
-    debug_assert_eq!(normal, rotate(angles[0], Pair { x: -F::one(), y: F::zero() }));
+    debug_assert_eq!(
+        normal,
+        rotate(
+            angles[0],
+            Pair {
+                x: -F::one(),
+                y: F::zero()
+            }
+        )
+    );
     debug_assert_almost_eq!(
-            (normal.y / normal.x).abs().to_f64(),
-            angles[0].tan().abs().to_f64(),
-            1e-10
-        );
+        (normal.y / normal.x).abs().to_f64(),
+        angles[0].tan().abs().to_f64(),
+        1e-10
+    );
     let first = Plane {
         height,
         normal,
@@ -171,26 +192,27 @@ pub(crate) fn create_joined_trapezoids<'s, F: Float>(height: F, angles: &'s [F],
     let mut prev_sign = normal.y.is_sign_positive();
     let mut d1 = first.midpt.x;
     let mut mx = first.midpt.x;
-    let rest = angles[1..].iter().copied().zip(sep_lengths.iter().copied())
+    let rest = angles[1..]
+        .iter()
+        .copied()
+        .zip(sep_lengths.iter().copied())
         .map(move |(angle, sep_len)| {
             let normal = -Pair::angled(angle);
             let sign = normal.y.is_sign_positive();
             let d2 = (normal.y / normal.x).abs() * h2;
-            let sep_dist = sep_len + if prev_sign != sign {
-                d1 + d2
-            } else {
-                (d1 - d2).abs()
-            };
+            let sep_dist = sep_len
+                + if prev_sign != sign {
+                    d1 + d2
+                } else {
+                    (d1 - d2).abs()
+                };
             prev_sign = sign;
             d1 = d2;
             mx += sep_dist;
             Plane {
                 height,
                 normal,
-                midpt: Pair {
-                    x: mx,
-                    y: h2,
-                },
+                midpt: Pair { x: mx, y: h2 },
             }
         });
     (first, rest)
@@ -206,8 +228,6 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Plane<F2>> for Plane<F1> {
     }
 }
 
-
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct CurvedPlane<F: Float> {
     /// The midpt of the Curved Surface / circular segment
@@ -218,7 +238,7 @@ pub(crate) struct CurvedPlane<F: Float> {
     pub(crate) radius: F,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
     max_dist_sq: F,
-    direction: bool
+    direction: bool,
 }
 
 impl<F: Float> CurvedPlane<F> {
@@ -230,21 +250,31 @@ impl<F: Float> CurvedPlane<F> {
         let apothem = (radius * radius - chord_length * chord_length * F::from_f64(0.25)).sqrt();
         let sagitta = radius - apothem;
         let (center, midpt) = if signed_curvature.is_sign_positive() {
-            (chord.midpt + chord.normal * apothem, chord.midpt - chord.normal * sagitta)
+            (
+                chord.midpt + chord.normal * apothem,
+                chord.midpt - chord.normal * sagitta,
+            )
         } else {
-            (chord.midpt - chord.normal * apothem, chord.midpt + chord.normal * sagitta)
+            (
+                chord.midpt - chord.normal * apothem,
+                chord.midpt + chord.normal * sagitta,
+            )
         };
         Self {
             midpt,
             center,
             radius,
-            max_dist_sq: sagitta * sagitta + chord_length * chord_length * F::from_f64(0.25),
-            direction: signed_curvature.is_sign_positive()
+            max_dist_sq: sagitta * sagitta + chord_length * chord_length * F::from_u32_ratio(1, 4),
+            direction: signed_curvature.is_sign_positive(),
         }
     }
 
     fn is_along_arc(&self, pt: Pair<F>) -> bool {
-        debug_assert_almost_eq!((pt - self.center).norm().to_f64(), self.radius.to_f64(), 1e-6);
+        debug_assert_almost_eq!(
+            (pt - self.center).norm().to_f64(),
+            self.radius.to_f64(),
+            1e-6
+        );
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
 
@@ -284,7 +314,10 @@ impl<F: Float> Surface for CurvedPlane<F> {
     type Point = Pair<F>;
     type UnitVector = Pair<F>;
 
-    fn intersection(&self, ray: (Self::Point, Self::UnitVector)) -> Option<(Self::Point, Self::UnitVector)> {
+    fn intersection(
+        &self,
+        ray: (Self::Point, Self::UnitVector),
+    ) -> Option<(Self::Point, Self::UnitVector)> {
         let (origin, direction) = ray;
         debug_assert!(direction.is_unit());
         let delta = origin - self.center;
@@ -293,7 +326,11 @@ impl<F: Float> Surface for CurvedPlane<F> {
         if discriminant <= F::zero() {
             return None;
         }
-        let d = if self.direction { -ud + discriminant.sqrt() } else { -ud - discriminant.sqrt() };
+        let d = if self.direction {
+            -ud + discriminant.sqrt()
+        } else {
+            -ud - discriminant.sqrt()
+        };
         if d <= F::zero() {
             return None;
         }
@@ -303,7 +340,7 @@ impl<F: Float> Surface for CurvedPlane<F> {
             debug_assert!(snorm.is_unit());
             Some((p, snorm))
         } else {
-           None
+            None
         }
     }
 }
@@ -315,21 +352,17 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<CurvedPlane<F2>> for Curved
             center: LossyInto::into(self.center),
             radius: self.radius.into(),
             max_dist_sq: self.max_dist_sq.into(),
-            direction: self.direction
+            direction: self.direction,
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::utils::almost_eq;
-    use rand::prelude::*;
     use std::f64::consts::*;
 
     #[test]
-    fn test_many() {
-
-    }
+    fn test_many() {}
 }

@@ -136,7 +136,6 @@ impl<F: Float> QuasiRandom for [F; 2] {
     }
 }
 
-
 pub struct Qrng<Q: QuasiRandom> {
     state: Q,
     alpha: Q,

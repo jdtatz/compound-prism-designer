@@ -1,6 +1,6 @@
+use crate::geom::*;
 use crate::glasscat::Glass;
 use crate::utils::*;
-use crate::geom::*;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -76,7 +76,7 @@ pub struct CompoundPrism<F: Float> {
     /// Width of compound prism
     pub(crate) width: F,
     /// Are the inter-media surfaces coated(anti-reflective)?
-    ar_coated: bool
+    ar_coated: bool,
 }
 
 impl<F: Float> CompoundPrism<F> {
@@ -118,7 +118,7 @@ impl<F: Float> CompoundPrism<F> {
             lens,
             height,
             width,
-            ar_coated: coat
+            ar_coated: coat,
         }
     }
 
@@ -315,8 +315,10 @@ impl<F: Float> Ray<F> {
         } else {
             let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
             let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
-            (self.s_transmittance * (F::one() - fresnel_rs.sqr()),
-             self.p_transmittance * (F::one() - fresnel_rp.sqr()))
+            (
+                self.s_transmittance * (F::one() - fresnel_rs.sqr()),
+                self.p_transmittance * (F::one() - fresnel_rp.sqr()),
+            )
         };
         Ok(Self {
             origin: intersection,
@@ -370,12 +372,17 @@ impl<F: Float> Ray<F> {
                 .try_fold((self, F::one()), |(ray, n1), (glass, plane)| {
                     let n2 = glass.calc_n(wavelength);
                     debug_assert!(n2 >= F::one());
-                    let (p, normal) = plane.intersection((ray.origin, ray.direction)).ok_or(RayTraceError::NoSurfaceIntersection)?;
+                    let (p, normal) = plane
+                        .intersection((ray.origin, ray.direction))
+                        .ok_or(RayTraceError::NoSurfaceIntersection)?;
                     let ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
                     Ok((ray, n2))
                 })?;
         let n2 = F::one();
-        let (p, normal) = cmpnd.lens.intersection((ray.origin, ray.direction)).ok_or(RayTraceError::NoSurfaceIntersection)?;
+        let (p, normal) = cmpnd
+            .lens
+            .intersection((ray.origin, ray.direction))
+            .ok_or(RayTraceError::NoSurfaceIntersection)?;
         ray.refract(p, normal, n1, n2, cmpnd.ar_coated)
     }
 
@@ -425,16 +432,21 @@ impl<F: Float> Ray<F> {
             match prisms.next() {
                 Some((glass, plane)) => {
                     let n2 = glass.calc_n(wavelength);
-                    let (p, normal) = plane.intersection((ray.origin, ray.direction)).ok_or(RayTraceError::NoSurfaceIntersection)?;
-                    ray = self.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                    let (p, normal) = plane
+                        .intersection((ray.origin, ray.direction))
+                        .ok_or(RayTraceError::NoSurfaceIntersection)?;
+                    ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
                     n1 = n2;
                     Ok(Some(ray.origin))
                 }
                 None if !done && internal => {
                     internal = false;
                     let n2 = F::one();
-                    let (p, normal) = cmpnd.lens.intersection((ray.origin, ray.direction)).ok_or(RayTraceError::NoSurfaceIntersection)?;
-                    ray = self.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                    let (p, normal) = cmpnd
+                        .lens
+                        .intersection((ray.origin, ray.direction))
+                        .ok_or(RayTraceError::NoSurfaceIntersection)?;
+                    ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
                     Ok(Some(ray.origin))
                 }
                 None if !done && !internal => {
@@ -623,7 +635,9 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<CompoundPrism<F2>> for Comp
     }
 }
 
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<LinearDetectorArray<F2>> for LinearDetectorArray<F1> {
+impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<LinearDetectorArray<F2>>
+    for LinearDetectorArray<F1>
+{
     fn into(self) -> LinearDetectorArray<F2> {
         LinearDetectorArray {
             bin_count: self.bin_count.into(),
@@ -638,7 +652,9 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<LinearDetectorArray<F2>> fo
     }
 }
 
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<DetectorArrayPositioning<F2>> for DetectorArrayPositioning<F1> {
+impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<DetectorArrayPositioning<F2>>
+    for DetectorArrayPositioning<F1>
+{
     fn into(self) -> DetectorArrayPositioning<F2> {
         DetectorArrayPositioning {
             position: LossyInto::into(self.position),
