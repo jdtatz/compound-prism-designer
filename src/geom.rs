@@ -35,7 +35,7 @@ impl<F: Float> Pair<F> {
 
     /// is it a unit vector, ||v|| ≅? 1
     pub fn is_unit(self) -> bool {
-        almost_eq(self.norm().to_f64(), 1_f64, 1e-3)
+        almost_eq(self.norm(), F::one(), F::from_u32_ratio(1, 1000))
     }
 
     /// Fused multiply add of two vectors with a scalar, (self * a) + b
@@ -120,7 +120,7 @@ pub struct Plane<F: Float> {
 #[cfg(not(target_arch = "nvptx64"))]
 impl<F: Float> Plane<F> {
     pub(crate) fn end_points(&self, height: F) -> (Pair<F>, Pair<F>) {
-        let dx = self.normal.y / self.normal.x * height * F::from_f64(0.5);
+        let dx = self.normal.y / self.normal.x * height * F::from_u32_ratio(1, 2);
         let ux = self.midpt.x - dx;
         let lx = self.midpt.x + dx;
         (
@@ -164,7 +164,7 @@ pub(crate) fn create_joined_trapezoids<'s, F: Float>(
 ) -> (Plane<F>, impl 's + ExactSizeIterator<Item = Plane<F>>) {
     debug_assert!(angles.len() >= 2);
     debug_assert!(angles.len() == sep_lengths.len() + 1);
-    let h2 = height * F::from_f64(0.5);
+    let h2 = height * F::from_u32_ratio(1, 2);
     let normal = -Pair::angled(angles[0]);
     debug_assert_eq!(
         normal,
@@ -246,8 +246,8 @@ impl<F: Float> CurvedPlane<F> {
         debug_assert!(F::one() >= signed_curvature.abs() && signed_curvature.abs() > F::zero());
         debug_assert!(height > F::zero());
         let chord_length = height / chord.normal.x.abs();
-        let radius = chord_length * F::from_f64(0.5) / signed_curvature.abs();
-        let apothem = (radius * radius - chord_length * chord_length * F::from_f64(0.25)).sqrt();
+        let radius = chord_length * F::from_u32_ratio(1, 2) / signed_curvature.abs();
+        let apothem = (radius * radius - chord_length * chord_length * F::from_u32_ratio(1, 4)).sqrt();
         let sagitta = radius - apothem;
         let (center, midpt) = if signed_curvature.is_sign_positive() {
             (
@@ -281,24 +281,24 @@ impl<F: Float> CurvedPlane<F> {
     #[cfg(not(target_arch = "nvptx64"))]
     pub(crate) fn end_points(&self, height: F) -> (Pair<F>, Pair<F>) {
         let theta_2 =
-            F::from_f64(2.) * (self.max_dist_sq.sqrt() / (F::from_f64(2.) * self.radius)).asin();
+            F::from_u32(2) * (self.max_dist_sq.sqrt() / (F::from_u32(2) * self.radius)).asin();
         let r = self.midpt - self.center;
         let u = self.center + rotate(theta_2, r);
         let l = self.center + rotate(-theta_2, r);
         debug_assert!(
-            (u.y - height).abs() < F::from_f64(1e-4),
+            (u.y - height).abs() < F::from_u32_ratio(1, 10000),
             "{:?} {}",
             u,
             height
         );
-        debug_assert!(l.y.abs() < F::from_f64(1e-4), "{:?}", l);
+        debug_assert!(l.y.abs() < F::from_u32_ratio(1, 10000), "{:?}", l);
         debug_assert!(
             ((u - r).norm_squared() - self.max_dist_sq).abs() / self.max_dist_sq
-                < F::from_f64(1e-4)
+                < F::from_u32_ratio(1, 10000)
         );
         debug_assert!(
             ((l - r).norm_squared() - self.max_dist_sq).abs() / self.max_dist_sq
-                < F::from_f64(1e-4)
+                < F::from_u32_ratio(1, 10000)
         );
         (
             Pair { x: u.x, y: height },

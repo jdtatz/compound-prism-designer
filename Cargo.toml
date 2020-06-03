@@ -39,6 +39,7 @@ ndarray = { version="0.13", optional = true }
 [dev-dependencies]
 criterion = "0.3"
 cpuprofiler = "0.0.4"
+statrs = "0.12"
 
 [features]
 default = ["cuda", "serde_cbor/std"]
