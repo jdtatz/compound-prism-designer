@@ -10,6 +10,7 @@ extern crate derive_more;
 extern crate serde;
 
 pub mod erf;
+mod geom;
 mod glasscat;
 #[cfg(not(target_arch = "nvptx64"))]
 pub mod optimizer;
@@ -19,7 +20,6 @@ pub mod designer;
 mod pylib;
 pub mod qrng;
 mod ray;
-mod geom;
 #[macro_use]
 pub mod utils;
 #[cfg(all(not(target_arch = "nvptx64"), feature = "cuda"))]

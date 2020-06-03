@@ -42,7 +42,7 @@ trait Shareable: 'static + Copy + Sized + Send {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self;
 }
 
-trait CudaFloat: Shareable + Float { }
+trait CudaFloat: Shareable + Float {}
 
 impl<T: Shareable + Float> CudaFloat for T {}
 
@@ -54,7 +54,12 @@ impl Shareable for i32 {
 
 impl Shareable for u32 {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
-        core::mem::transmute(shfl_bfly_sync_i32(0xFFFFFFFFu32, core::mem::transmute(self), lane_mask, 0x1F))
+        core::mem::transmute(shfl_bfly_sync_i32(
+            0xFFFFFFFFu32,
+            core::mem::transmute(self),
+            lane_mask,
+            0x1F,
+        ))
     }
 }
 
@@ -81,6 +86,16 @@ impl Shareable for f64 {
     }
 }
 
+impl<F: CudaFloat> Shareable for Welford<F> {
+    unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
+        Self {
+            count: self.count.shfl_bfly_sync(lane_mask),
+            mean: self.mean.shfl_bfly_sync(lane_mask),
+            m2: self.m2.shfl_bfly_sync(lane_mask),
+        }
+    }
+}
+
 unsafe fn warp_fold<F: Shareable, Op: Fn(F, F) -> F>(mut val: F, fold: Op) -> F {
     for xor in [16, 8, 4, 2, 1].iter().copied() {
         val = fold(val, val.shfl_bfly_sync(xor));
@@ -88,22 +103,10 @@ unsafe fn warp_fold<F: Shareable, Op: Fn(F, F) -> F>(mut val: F, fold: Op) -> F 
     val
 }
 
-unsafe fn share_welford<F: CudaFloat>(welford: &mut Welford<F>) {
-    for xor in [16, 8, 4, 2, 1].iter().copied() {
-        let other = Welford {
-            count: welford.count.shfl_bfly_sync(xor),
-            mean: welford.mean.shfl_bfly_sync(xor),
-            m2: welford.m2.shfl_bfly_sync(xor),
-        };
-        welford.combine(other);
-    }
-}
-
 unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     let dest = dest as *mut u32;
     let src = src as *const T as *const u32;
     let count = (core::mem::size_of::<T>() / core::mem::size_of::<u32>()) as u32;
-    // let count = (core::mem::size_of::<T>()) as u32;
     let mut id = _thread_idx_x() as u32;
     while id < count {
         dest.add(id as usize)
@@ -149,9 +152,7 @@ unsafe fn kernel<F: CudaFloat>(
 
     let id = (_block_idx_x() as u32) * nwarps + warpid;
 
-    let u = (F::from_u32(id))
-        .mul_add(F::from_f64(ALPHA), seed)
-        .fract();
+    let u = (F::from_u32(id)).mul_add(F::from_f64(ALPHA), seed).fract();
     let wavelength = spectrometer.gaussian_beam.inverse_cdf_wavelength(u);
 
     let mut count = F::zero();
@@ -174,8 +175,12 @@ unsafe fn kernel<F: CudaFloat>(
                 core::hint::unreachable_unchecked()
             }
             det_count -= warp_ballot(bin_index.map_or(false, |i| i == min_index));
-            let bin_t = if bin_index.map_or(false, |i| i == min_index) { t } else { F::zero() };
-            let mut welford = if laneid == 0 {
+            let bin_t = if bin_index.map_or(false, |i| i == min_index) {
+                t
+            } else {
+                F::zero()
+            };
+            let welford = if laneid == 0 {
                 let mut w = shared[min_index as usize];
                 w.skip(count);
                 w.next_sample(bin_t);
@@ -187,7 +192,10 @@ unsafe fn kernel<F: CudaFloat>(
                     m2: F::zero(),
                 }
             };
-            share_welford(&mut welford);
+            let welford = warp_fold(welford, |mut w1, w2| {
+                w1.combine(w2);
+                w1
+            });
             if laneid == 0 {
                 shared[min_index as usize] = welford;
             }

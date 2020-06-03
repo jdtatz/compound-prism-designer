@@ -1,8 +1,8 @@
 #![allow(clippy::needless_return)]
+use arrayvec::{Array, ArrayVec};
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
-use arrayvec::{Array, ArrayVec};
 
 pub trait LossyInto<T>: Sized {
     fn into(self) -> T;
@@ -26,7 +26,10 @@ impl<U1, U2, T1: LossyInto<U1>, T2: LossyInto<U2>> LossyInto<(U1, U2)> for (T1, 
     }
 }
 
-impl<A1: Array, A2: Array> LossyInto<ArrayVec<A2>> for ArrayVec<A1> where A1::Item: LossyInto<A2::Item> {
+impl<A1: Array, A2: Array> LossyInto<ArrayVec<A2>> for ArrayVec<A1>
+where
+    A1::Item: LossyInto<A2::Item>,
+{
     fn into(self) -> ArrayVec<A2> {
         self.into_iter().map(LossyInto::into).collect()
     }
@@ -36,6 +39,7 @@ pub trait Float:
     'static
     + Sized
     + Copy
+    + Clone
     + core::fmt::Debug
     + core::fmt::Display
     + PartialEq
@@ -78,7 +82,14 @@ pub trait Float:
         let q = (self / rhs).trunc();
         let r = self - q * rhs;
         if r < Self::zero() {
-            (if rhs > Self::zero() { q - Self::one() } else { q + Self::one() }, r + rhs.abs())
+            (
+                if rhs > Self::zero() {
+                    q - Self::one()
+                } else {
+                    q + Self::one()
+                },
+                r + rhs.abs(),
+            )
         } else {
             (q, r)
         }
@@ -321,11 +332,11 @@ impl Float for f64 {
     }
 }
 
-pub fn almost_eq(a: f64, b: f64, acc: f64) -> bool {
+pub fn almost_eq<F: Float>(a: F, b: F, acc: F) -> bool {
     // only true if a and b are infinite with same
     // sign
     if a.is_infinite() && b.is_infinite() {
-        return a == b;
+        return a.is_sign_positive() == b.is_sign_positive();
     }
     // NANs are never equal
     if a.is_nan() || b.is_nan() {

@@ -1,17 +1,18 @@
 use crate::fitness::DesignFitness;
 use crate::ray::Spectrometer;
 use crate::utils::{Float, Welford};
-use once_cell::sync::{OnceCell, Lazy};
+use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
 use rustacuda::memory::{DeviceBox, DeviceBuffer, DeviceCopy};
 use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
-use std::ffi::{CString, CStr};
+use std::ffi::{CStr, CString};
 
 unsafe impl<F: Float + DeviceCopy> DeviceCopy for Spectrometer<F> {}
 
-const PTX_STR: &str = include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
+const PTX_STR: &str =
+    include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
 
 // post-processed generated ptx
 static PTX: Lazy<CString> = Lazy::new(|| {
