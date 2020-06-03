@@ -58,6 +58,7 @@ pub trait Float:
 {
     fn from_f64(v: f64) -> Self;
     fn from_u32(v: u32) -> Self;
+    fn from_u32_ratio(n: u32, d: u32) -> Self;
     fn to_f64(self) -> f64;
     fn to_u32(self) -> u32;
     fn zero() -> Self;
@@ -67,6 +68,7 @@ pub trait Float:
     fn is_infinite(self) -> bool;
     fn is_nan(self) -> bool;
     fn is_sign_positive(self) -> bool;
+    fn copy_sign(self, sign: Self) -> Self;
     fn mul_add(self, a: Self, b: Self) -> Self;
     fn sqr(self) -> Self {
         self * self
@@ -75,7 +77,7 @@ pub trait Float:
     fn exp(self) -> Self;
     fn ln(self) -> Self;
     fn log2(self) -> Self;
-    fn powf(self, n: Self) -> Self;
+    // fn powf(self, n: Self) -> Self;
     fn trunc(self) -> Self;
     fn fract(self) -> Self;
     fn euclid_dev_rem(self, rhs: Self) -> (Self, Self) {
@@ -145,6 +147,10 @@ impl Float for f32 {
         v as f32
     }
 
+    fn from_u32_ratio(n: u32, d: u32) -> Self {
+        (n as f32) / (d as f32)
+    }
+
     fn to_f64(self) -> f64 {
         self as f64
     }
@@ -181,6 +187,10 @@ impl Float for f32 {
         self.is_sign_positive()
     }
 
+    fn copy_sign(self, sign: Self) -> Self {
+        cuda_specific!(core::intrinsics::copysignf32(self, sign), self.copysign(sign));
+    }
+
     fn mul_add(self, a: Self, b: Self) -> Self {
         cuda_specific!(core::intrinsics::fmaf32(self, a, b), self.mul_add(a, b));
     }
@@ -201,9 +211,9 @@ impl Float for f32 {
         libm::log2f(self)
     }
 
-    fn powf(self, n: Self) -> Self {
+    /*fn powf(self, n: Self) -> Self {
         cuda_specific!(libm::powf(self, n), self.powf(n));
-    }
+    }*/
 
     fn trunc(self) -> Self {
         cuda_specific!(core::intrinsics::truncf32(self), self.fract());
@@ -243,6 +253,10 @@ impl Float for f64 {
         v as f64
     }
 
+    fn from_u32_ratio(n: u32, d: u32) -> Self {
+        (n as f64) / (d as f64)
+    }
+
     fn to_f64(self) -> f64 {
         self
     }
@@ -279,6 +293,10 @@ impl Float for f64 {
         self.is_sign_positive()
     }
 
+    fn copy_sign(self, sign: Self) -> Self {
+        cuda_specific!(core::intrinsics::copysignf64(self, sign), self.copysign(sign));
+    }
+
     fn mul_add(self, a: Self, b: Self) -> Self {
         cuda_specific!(core::intrinsics::fmaf64(self, a, b), self.mul_add(a, b));
     }
@@ -299,9 +317,9 @@ impl Float for f64 {
         libm::log2(self)
     }
 
-    fn powf(self, n: Self) -> Self {
+    /*fn powf(self, n: Self) -> Self {
         cuda_specific!(libm::pow(self, n), self.powf(n));
-    }
+    }*/
 
     fn trunc(self) -> Self {
         cuda_specific!(core::intrinsics::truncf64(self), self.fract());

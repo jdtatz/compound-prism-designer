@@ -148,8 +148,9 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
 
 impl<F: KernelFloat> Spectrometer<F> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
-        const MAX_ERR: f64 = 5e-3;
-        const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
+        let max_err = F::from_u32_ratio(5, 1000);
+        let max_err_sq = max_err * max_err;
+
 
         let mutex = CACHED_CUDA_FITNESS_CONTEXT
             .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))
@@ -178,7 +179,7 @@ impl<F: KernelFloat> Spectrometer<F> {
             }
             if p_dets
                 .iter()
-                .all(|s| s.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR)))
+                .all(|s| s.sem_le_error_threshold(max_err_sq))
             {
                 // -H(D)
                 let h_det = p_dets
@@ -201,10 +202,10 @@ impl<F: KernelFloat> Spectrometer<F> {
 
         let errors: Vec<_> = p_dets
             .iter()
-            .map(|s| s.sem().to_f64())
-            .filter(|e| !e.is_finite() || e >= &MAX_ERR)
+            .map(|s| s.sem())
+            .filter(|e| !e.is_finite() || e >= &max_err)
             .collect();
-        eprintln!("cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}", MAX_ERR, errors);
+        eprintln!("cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}", max_err, errors);
         None
     }
 }

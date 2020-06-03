@@ -16,7 +16,7 @@ where
 {
     let max_err_squared = max_err * max_err;
     let mut stats = vec![Welford::new(); vec_len];
-    let qrng = Qrng::<V>::new(V::from_f64(0.5_f64));
+    let qrng = Qrng::<V>::new(V::from_u32_ratio(1, 2));
     for u in qrng.take(MAX_N) {
         if let Some(vec) = vector_fn(u) {
             for (v, w) in vec.zip(stats.iter_mut()) {
@@ -54,7 +54,7 @@ impl<F: Float> Spectrometer<F> {
         let p_z = self.probability_z_in_bounds();
         debug_assert!(F::zero() <= p_z && p_z <= F::one());
         let nbin = self.detector_array.bin_count as usize;
-        vector_quasi_monte_carlo_integration(F::from_f64(5e-3), nbin, move |u: F| {
+        vector_quasi_monte_carlo_integration(F::from_u32_ratio(5, 1000), nbin, move |u: F| {
             // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
             let y = self.gaussian_beam.inverse_cdf_initial_y(u);
             if y <= F::zero() || self.compound_prism.height <= y {
@@ -101,7 +101,7 @@ impl<F: Float> Spectrometer<F> {
         let mut p_dets = vec![Welford::new(); nbin];
         // -H(D|Λ)
         let mut h_det_l_w = Welford::new();
-        let qrng = Qrng::<F>::new(F::from_f64(0.5_f64));
+        let qrng = Qrng::<F>::new(F::from_u32_ratio(1, 2));
         for u in qrng.take(MAX_N) {
             // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
             let w = self.gaussian_beam.inverse_cdf_wavelength(u);
@@ -116,9 +116,9 @@ impl<F: Float> Spectrometer<F> {
             }
             h_det_l_w.next_sample(h_det_l_ws);
             if p_dets.iter().all(|stat| {
-                const MAX_ERR: f64 = 5e-3;
-                const MAX_ERR_SQ: f64 = MAX_ERR * MAX_ERR;
-                stat.sem_le_error_threshold(F::from_f64(MAX_ERR_SQ))
+                const MAX_ERR_N: u32 = 5;
+                const MAX_ERR_D: u32 = 1000;
+                stat.sem_le_error_threshold(F::from_u32_ratio(MAX_ERR_N*MAX_ERR_N, MAX_ERR_D*MAX_ERR_D))
             }) {
                 break;
             }

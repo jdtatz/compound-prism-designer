@@ -116,7 +116,7 @@ impl<F: Float> QuasiRandom for F {
     }
 
     fn mul_by_int(self, rhs: u32) -> Self {
-        self * F::from_f64(rhs as f64)
+        self * F::from_u32(rhs)
     }
 }
 
@@ -131,7 +131,7 @@ impl<F: Float> QuasiRandom for [F; 2] {
     }
 
     fn mul_by_int(self, rhs: u32) -> Self {
-        let rhs = F::from_f64(rhs as f64);
+        let rhs = F::from_u32(rhs);
         [self[0] * rhs, self[1] * rhs]
     }
 }

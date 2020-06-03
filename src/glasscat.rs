@@ -141,7 +141,7 @@ impl<F: Float> Glass<F> {
                 let w2 = w * w;
                 let w4 = w2 * w2;
                 let w6 = w2 * w4;
-                let l = F::one() / (w2 - F::from_f64(0.028_f64));
+                let l = F::one() / (w2 - F::from_u32_ratio(28, 1000));
                 let l2 = l * l;
                 a + b * l + c * l2 + d * w2 + e * w4 + f * w6
             }

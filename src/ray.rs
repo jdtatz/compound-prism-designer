@@ -1,6 +1,7 @@
 use crate::geom::*;
 use crate::glasscat::Glass;
 use crate::utils::*;
+use crate::erf::norminv;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -40,9 +41,7 @@ impl<F: Float> GaussianBeam<F> {
     }
 
     pub fn inverse_cdf_initial_y(&self, p: F) -> F {
-        use core::f64::consts::FRAC_1_SQRT_2;
-        self.y_mean
-            - self.width * F::from_f64(FRAC_1_SQRT_2) * crate::erf::erfc_inv(F::from_f64(2.) * p)
+        self.y_mean - self.width * norminv(p)
     }
 
     pub fn inverse_cdf_ray(&self, p: F) -> Ray<F> {
@@ -206,7 +205,7 @@ impl<F: Float> LinearDetectorArray<F> {
 
     pub fn bounds<'s>(&'s self) -> impl ExactSizeIterator<Item = [F; 2]> + 's {
         (0..self.bin_count).map(move |i| {
-            let i = F::from_f64(i as f64);
+            let i = F::from_u32(i);
             let lb = self.linear_intercept + self.linear_slope * i;
             let ub = lb + self.bin_size;
             [lb, ub]
@@ -279,7 +278,7 @@ impl<F: Float> Ray<F> {
 
     /// The average of the S & P Polarizations transmittance's
     fn average_transmittance(self) -> F {
-        (self.s_transmittance + self.p_transmittance) * F::from_f64(0.5)
+        (self.s_transmittance + self.p_transmittance) * F::from_u32_ratio(1, 2)
     }
 
     /// Refract ray through interface of two different media
@@ -310,8 +309,11 @@ impl<F: Float> Ray<F> {
         }
         let cr = cr_sq.sqrt();
         let v = self.direction * r + normal * (r * ci - cr);
-        let (s_transmittance, p_transmittance) = if ar_coated && ci > F::from_f64(0.5) {
-            (self.s_transmittance * F::from_f64(0.99), self.p_transmittance * F::from_f64(0.99))
+        let (s_transmittance, p_transmittance) = if ar_coated && ci > F::from_u32_ratio(1, 2) {
+            (
+                self.s_transmittance * F::from_u32_ratio(99, 100),
+                self.p_transmittance * F::from_u32_ratio(99, 100),
+            )
         } else {
             let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
             let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
@@ -480,8 +482,8 @@ pub(crate) fn detector_array_positioning<F: Float>(
     let (wmin, wmax) = beam.w_range;
     let lower_ray = ray.propagate_internal(cmpnd, wmin)?;
     let upper_ray = ray.propagate_internal(cmpnd, wmax)?;
-    if lower_ray.average_transmittance() <= F::from_f64(1e-3)
-        || upper_ray.average_transmittance() <= F::from_f64(1e-3)
+    if lower_ray.average_transmittance() <= F::from_u32_ratio(1, 1000)
+        || upper_ray.average_transmittance() <= F::from_u32_ratio(1, 1000)
     {
         return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
     }
@@ -586,7 +588,7 @@ impl<F: Float> Spectrometer<F> {
         let deviation_vector = self.detector_array_position.position
             + self.detector_array_position.direction
                 * self.detector_array.length
-                * F::from_f64(0.5)
+                * F::from_u32_ratio(1, 2)
             - Pair {
                 x: F::zero(),
                 y: self.gaussian_beam.y_mean,
@@ -597,7 +599,7 @@ impl<F: Float> Spectrometer<F> {
     }
 
     pub(crate) fn probability_z_in_bounds(&self) -> F {
-        let p_z = F::from_f64(crate::erf::erf(
+        let p_z = F::from_f64(libm::erf(
             self.compound_prism.width.to_f64() * core::f64::consts::FRAC_1_SQRT_2
                 / self.gaussian_beam.width.to_f64(),
         ));
