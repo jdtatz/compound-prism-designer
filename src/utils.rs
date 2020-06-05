@@ -77,7 +77,6 @@ pub trait Float:
     fn exp(self) -> Self;
     fn ln(self) -> Self;
     fn log2(self) -> Self;
-    // fn powf(self, n: Self) -> Self;
     fn trunc(self) -> Self;
     fn fract(self) -> Self;
     fn euclid_dev_rem(self, rhs: Self) -> (Self, Self) {
@@ -100,6 +99,7 @@ pub trait Float:
     fn sincos(self) -> (Self, Self);
     fn tan(self) -> Self;
     fn asin(self) -> Self;
+    fn erf(self) -> Self;
     fn floor(self) -> Self;
     fn min(self, other: Self) -> Self {
         if self <= other {
@@ -204,16 +204,12 @@ impl Float for f32 {
     }
 
     fn ln(self) -> Self {
-        cuda_specific!(libm::logf(self), self.ln());
+        libm::logf(self)
     }
 
     fn log2(self) -> Self {
         libm::log2f(self)
     }
-
-    /*fn powf(self, n: Self) -> Self {
-        cuda_specific!(libm::powf(self, n), self.powf(n));
-    }*/
 
     fn trunc(self) -> Self {
         cuda_specific!(core::intrinsics::truncf32(self), self.fract());
@@ -237,6 +233,10 @@ impl Float for f32 {
 
     fn asin(self) -> Self {
         cuda_specific!(libm::asinf(self), self.asin());
+    }
+
+    fn erf(self) -> Self {
+        libm::erff(self)
     }
 
     fn floor(self) -> Self {
@@ -310,16 +310,12 @@ impl Float for f64 {
     }
 
     fn ln(self) -> Self {
-        cuda_specific!(libm::log(self), self.ln());
+        libm::log(self)
     }
 
     fn log2(self) -> Self {
         libm::log2(self)
     }
-
-    /*fn powf(self, n: Self) -> Self {
-        cuda_specific!(libm::pow(self, n), self.powf(n));
-    }*/
 
     fn trunc(self) -> Self {
         cuda_specific!(core::intrinsics::truncf64(self), self.fract());
@@ -343,6 +339,10 @@ impl Float for f64 {
 
     fn asin(self) -> Self {
         cuda_specific!(libm::asin(self), self.asin());
+    }
+
+    fn erf(self) -> Self {
+        libm::erf(self)
     }
 
     fn floor(self) -> Self {

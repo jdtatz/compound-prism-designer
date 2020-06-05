@@ -58,7 +58,6 @@ pub fn norminv<F: Float>(x: F) -> F {
     let v = -(F::from_u32(2) * u).ln();
     let p = polynomial(v, SHAW_P);
     let q = polynomial(v, SHAW_Q);
-    dbg!((x, v, p, q));
     (v * p / q).copy_sign(x - F::from_u32_ratio(1, 2))
 }
 
