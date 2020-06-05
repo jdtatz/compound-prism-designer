@@ -12,10 +12,6 @@ extern crate serde;
 pub mod erf;
 mod geom;
 mod glasscat;
-#[cfg(not(target_arch = "nvptx64"))]
-pub mod optimizer;
-#[cfg(not(target_arch = "nvptx64"))]
-pub mod designer;
 #[cfg(all(not(target_arch = "nvptx64"), feature = "pyext"))]
 mod pylib;
 pub mod qrng;

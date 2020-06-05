@@ -10,12 +10,6 @@ name = "compound_prism_designer"
 bench = false
 crate-type = ["rlib", "cdylib"]
 
-[[bin]]
-name = "compound_prism_designer"
-path = "src/main.rs"
-bench = false
-required-features = ["binary"]
-
 [dependencies]
 derive_more = "0.99"
 arrayvec = { version = "0.5", default-features = false, features = ["serde"] }
@@ -24,11 +18,6 @@ serde = { version="1", default-features = false, features=["derive"] }
 serde_cbor = { version = "0.11", default-features = false }
 
 [target.'cfg(not(target_arch ="nvptx64"))'.dependencies]
-rand = "0.7"
-rand_xoshiro ="0.4"
-rand_distr = "0.2"
-toml ="0.5"
-flate2 = { version = "1.0", optional = true }
 rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update", optional = true }
 once_cell = { version="1.3", features=["parking_lot"], optional = true }
 parking_lot = { version = "0.10",optional = true }
@@ -37,13 +26,14 @@ numpy = { version="0.9", optional = true }
 ndarray = { version="0.13", optional = true }
 
 [dev-dependencies]
+rand = "0.7"
+rand_xoshiro = "0.4"
 criterion = "0.3"
 cpuprofiler = "0.0.4"
 statrs = "0.12"
 
 [features]
 default = ["cuda", "serde_cbor/std"]
-binary = ["flate2", "serde_cbor/std"]
 cuda = ["rustacuda", "once_cell", "parking_lot"]
 pyext = ["pyo3", "numpy", "ndarray", "serde_cbor/std"]
 
