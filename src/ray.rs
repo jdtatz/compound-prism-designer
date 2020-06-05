@@ -599,10 +599,7 @@ impl<F: Float> Spectrometer<F> {
     }
 
     pub(crate) fn probability_z_in_bounds(&self) -> F {
-        let p_z = F::from_f64(libm::erf(
-            self.compound_prism.width.to_f64() * core::f64::consts::FRAC_1_SQRT_2
-                / self.gaussian_beam.width.to_f64(),
-        ));
+        let p_z = (self.compound_prism.width * F::from_f64(core::f64::consts::FRAC_1_SQRT_2) / self.gaussian_beam.width).erf();
         debug_assert!(F::zero() <= p_z && p_z <= F::one());
         p_z
     }
