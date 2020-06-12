@@ -1,45 +1,5 @@
 import numpy as np
-from itertools import count
-# from compound_prism_designer import Spectrometer
-from typing import NamedTuple, Sequence, Tuple, Optional
-
-
-class Glass(NamedTuple):
-    name: str
-
-
-class CompoundPrism(NamedTuple):
-    glasses: Sequence[Glass]
-    angles: Sequence[float]
-    lengths: Sequence[float]
-    curvature: float
-    height: float
-    width: float
-    ar_coated: bool
-
-
-class LinearDetectorArray(NamedTuple):
-    bin_count: int
-    bin_size: float
-    linear_slope: float
-    linear_intercept: float
-    length: float
-    max_incident_angle: float
-    angle: float
-
-
-class GaussianBeam(NamedTuple):
-    wavelength_range: Tuple[float, float]
-    width: float
-    y_mean: float
-
-
-class Spectrometer(NamedTuple):
-    compound_prism: CompoundPrism
-    detector_array: LinearDetectorArray
-    gaussian_beam: GaussianBeam
-    position: Tuple[float, float]
-    direction: Tuple[float, float]
+from .type_hints import Spectrometer
 
 
 def create_asap_macro(spectrometer: Spectrometer) -> str:
@@ -59,7 +19,7 @@ OBJECT
     det_midpt = np.asarray(spectrometer.position) + np.asarray(spectrometer.direction) * spectrometer.detector_array.length / 2
     wi, wf = spectrometer.gaussian_beam.wavelength_range
     wm = (wi + wf) / 2
-    media = "\n".join(f"    {g(wi)} {g(wm)} {g(wf)} '{g.name}'" for g in set(spectrometer.compound_prism.glasses))
+    media = "\n".join(f"    {g(wi)} {g(wm)} {g(wf)} '{g.name.replace('-', '_')}'" for g in set(spectrometer.compound_prism.glasses))
     return f"""\
 SYSTEM NEW
 RESET
@@ -70,8 +30,8 @@ MEDIA
 {media}
 
 COATING PROPERTIES
-    0 1 'AR'
-    0 0 'ASB'
+    0 1 0 1 0 1 'AR'
+    0 0 0 0 0 0 'ASB'
 
 {planes}
 
@@ -113,4 +73,9 @@ $VIEW
 $PLOT NORM
 $IO PLOT
 $IO INPUT CLOSE
+
+WINDOW Z Y
+IRRADIANCE Z
+AXIS LOCAL 'DETECTOR'
+SPOTS POSITION EVERY 1000
 """
