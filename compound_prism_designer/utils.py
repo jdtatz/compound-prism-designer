@@ -3,7 +3,8 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.path
 import matplotlib.patches
-from .compound_prism_designer import Spectrometer, RayTraceError
+from .compound_prism_designer import RayTraceError
+from .type_hints import Spectrometer
 
 
 def draw_spectrometer(ax, spectrometer: Spectrometer, draw_wavelengths: Iterable[Tuple[float, str]], starting_ys: Sequence[float]):

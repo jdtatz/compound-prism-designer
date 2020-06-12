@@ -1,37 +1,18 @@
 #!/usr/bin/env python3
-import pathlib
-import gzip
+import itertools
+from typing import Union, Sequence, Tuple, NamedTuple
 import numpy as np
-import matplotlib as mpl
-mpl.rcParams["backend"] = "qt5agg"
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-try:
-    from PySide2.QtWidgets import QFileDialog
-except ImportError:
-    from PyQt5.QtWidgets import QFileDialog
-plt.switch_backend("qt5agg")
-
-
-from compound_prism_designer import GlassCatalogError, RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
-    DetectorArray, GaussianBeam, Spectrometer, DesignFitness, draw_spectrometer, create_asap_macro
 from pymoo.model.problem import Problem
 from pymoo.factory import get_reference_directions
 from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
 from pymoo.algorithms.nsga2 import NSGA2
 from pymoo.algorithms.nsga3 import NSGA3
+from pymoo.algorithms.unsga3 import UNSGA3
 from pymoo.algorithms.moead import MOEAD
 from pymoo.optimize import minimize
-import numpy as np
-from pickle import dump
-import matplotlib.pyplot as plt
-import itertools
-from typing import Union, Sequence, Tuple, NamedTuple
-
-
-class Design(NamedTuple):
-    spectrometer: Spectrometer
-    fitness: DesignFitness
+from compound_prism_designer import RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
+    DetectorArray, GaussianBeam, Spectrometer
+from compound_prism_designer.interactive import interactive_show, Design
 
 
 class CompoundPrismSpectrometerProblemConfig(NamedTuple):
@@ -61,8 +42,6 @@ class CompoundPrismSpectrometerProblem(Problem):
         len_bounds = (0, 10)
 
         if isinstance(nglass_or_const_glasses, int):
-            # nglass = nglass_or_const_glasses
-            # self._numpy_dtype = np.dtype([])
             nglass = nglass_or_const_glasses
             self._glasses = None
             self._numpy_dtype = np.dtype([
@@ -151,10 +130,10 @@ class CompoundPrismSpectrometerProblem(Problem):
             fit = spectrometer.gpu_fitness()
             if fit is None:
                 fit = spectrometer.cpu_fitness()
-            out["F"] = (fit.size, np.log2(32) - fit.info, fit.deviation)
+            out["F"] = fit.size, np.log2(self.config.bin_count) - fit.info, fit.deviation
             out["feasible"] = fit.size < 800
         except RayTraceError:
-            out["F"] = (1e4, np.log2(32), 1)
+            out["F"] = 1e4, np.log2(self.config.bin_count), 1
             out["feasible"] = False
 
 
@@ -184,13 +163,14 @@ bch_config = CompoundPrismSpectrometerProblemConfig(
     beam_width=2,
     ar_coated=True,
 )
-glass_cat = {g.name: g for g in BUNDLED_CATALOG}
-glass_names = "N-SF66", "N-SF14", "N-BAF4"
-glasses = [glass_cat[n] for n in glass_names]
-problem = CompoundPrismSpectrometerProblem(3, spring_config)
+# glass_cat = {g.name: g for g in BUNDLED_CATALOG}
+# glass_names = "N-SF66", "N-SF14", "N-BAF4"
+# glasses = [glass_cat[n] for n in glass_names]
+# ndim = len(glasses)
+problem = CompoundPrismSpectrometerProblem(3, bch_config)
 
-ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=3, n_points=90).do()
-algorithm = NSGA2(pop_size=100)
+ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()
+algorithm = UNSGA3(ref_dirs, pop_size=100)
 
 result = minimize(
     problem,
@@ -201,126 +181,11 @@ result = minimize(
 
 
 def create_designs():
-    for x in result.X:
-        spec = problem.create_spectrometer(x)
-        yield Design(spectrometer=spec, fitness=spec.cpu_fitness())
+    for x, f in zip(result.X, result.opt.get("feasible")):
+        if f:
+            spec = problem.create_spectrometer(x)
+            yield Design(spectrometer=spec, fitness=spec.cpu_fitness())
 
 
 designs = list(create_designs())
-
-
-class Interactive:
-    def __init__(self, fig: Figure, designs: Sequence[Design]):
-        self.fig = fig
-        self.designs = designs
-        nrows, ncols = 2, 4
-        gs = fig.add_gridspec(nrows, ncols)
-        self.pareto_ax = fig.add_subplot(gs[:, 0])
-
-        x, y, c = np.array([(design.fitness.size, design.fitness.info, design.fitness.deviation)
-                            for design in self.designs]).T
-        c = np.rad2deg(np.arcsin(c))
-
-        cm = mpl.cm.ScalarMappable(mpl.colors.Normalize(0, 90, clip=True), 'PuRd')
-        sc = self.pareto_ax.scatter(x, y, c=c, cmap=cm.cmap.reversed(), norm=cm.norm, picker=True)
-        clb = fig.colorbar(sc)
-        clb.ax.set_ylabel("deviation (deg)")
-        self.pareto_ax.set_xlabel(f"size (a.u.)")
-        self.pareto_ax.set_ylabel("mutual information (bits)")
-
-        self.prism_ax = fig.add_subplot(gs[0, 1:3])
-        self.det_ax = fig.add_subplot(gs[1, 1])
-        self.trans_ax = fig.add_subplot(gs[1, 2])
-        self.violin_ax = fig.add_subplot(gs[:, 3])
-        self.prism_ax.axis('off')
-
-        self.selected_design = None
-        fig.canvas.mpl_connect('pick_event', self.pick_design)
-
-    def pick_design(self, event):
-        design = self.selected_design = sorted((self.designs[i] for i in event.ind), key=lambda s: -s.fitness.info)[0]
-        spectrometer = design.spectrometer
-        print("[Spectrometer]")
-        print(create_asap_macro(spectrometer))
-        waves = np.linspace(*spectrometer.gaussian_beam.wavelength_range, 200)
-
-        transmission = spectrometer.transmission_probability(waves)
-        p_det = transmission.sum(axis=0) * (1 / len(waves))
-        p_w_l_D = transmission.sum(axis=1)
-
-        # Draw Spectrometer
-        beam = spectrometer.gaussian_beam
-        wmin, wmax = beam.wavelength_range
-        draw_spectrometer(
-            self.prism_ax,
-            spectrometer,
-            zip((wmin, (wmin + wmax) / 2, wmax), ('r', 'g', 'b')),
-            (beam.y_mean - beam.width, beam.y_mean, beam.y_mean + beam.width)
-        )
-
-        # Plot Design Results
-        self.det_ax.clear()
-        self.trans_ax.cla()
-        self.violin_ax.cla()
-
-        vpstats = [
-            {
-                "coords": waves,
-                "vals": t,
-                "mean": None,
-                "median": None,
-                "min": None,
-                "max": None,
-            }
-            for t in transmission.T
-        ]
-        parts = self.violin_ax.violin(vpstats, showextrema=False, widths=1)
-        for pc in parts['bodies']:
-            pc.set_facecolor('black')
-        self.violin_ax.plot([1, len(p_det)], spectrometer.gaussian_beam.wavelength_range, 'k--')
-        self.det_ax.scatter(1 + np.arange(len(p_det)), p_det * 100, color='k')
-        self.trans_ax.plot(waves, p_w_l_D * 100, 'k')
-        self.trans_ax.axhline(np.mean(p_w_l_D) * 100, color='k', linestyle='--')
-
-        self.det_ax.set_xlabel("detector bins")
-        self.trans_ax.set_xlabel("wavelength (μm)")
-        self.violin_ax.set_xlabel("detector bins")
-        self.det_ax.set_ylabel("p (%)")
-        self.trans_ax.set_ylabel("p (%)")
-        self.violin_ax.set_ylabel("wavelength (μm)")
-        self.det_ax.set_title("p(D=d|Λ)")
-        self.trans_ax.set_title("p(D|Λ=λ)")
-        self.violin_ax.set_title("p(D=d|Λ=λ) as a Pseudo Violin Plot")
-        self.trans_ax.set_ylim(0, 100)
-        self.det_ax.set_ylim(bottom=0)
-
-        self.fig.tight_layout()
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
-
-    def save_designs(self):
-        filename, _ = QFileDialog.getSaveFileName(caption="Export saved designs", filter="Saved results (*.pkl)")
-        path = pathlib.Path(filename)
-        if path.is_dir():
-            print(f"Warning: given '{path}' is not a file, using default")
-            path = pathlib.Path.cwd().joinpath("results")
-
-        with open(path.with_suffix('.pkl'), "wb") as f:
-            dump(self.designs, f)
-
-
-fig = plt.figure()
-manager = plt.get_current_fig_manager()
-manager.set_window_title("Compound Prism Spectrometer Designer")
-
-interactive = Interactive(fig, designs)
-
-mbar = manager.window.menuBar()
-
-save_action = mbar.addAction("Save Designs")
-save_action.triggered.connect(interactive.save_designs)
-
-# export_action = mbar.addAction("Export Design as .zmx")
-# export_action.triggered.connect(interactive.export_zemax)
-
-plt.show()
+interactive_show(designs)

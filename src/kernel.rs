@@ -208,8 +208,8 @@ unsafe fn kernel<F: CudaFloat>(
             break;
         }
         index += 32;
-        count += F::from_f64(32.);
-        qrng_n += F::from_f64(32.);
+        count += F::from_u32(32);
+        qrng_n += F::from_u32(32);
     }
     let prob = from_raw_parts_mut(prob.add((nbin * id) as usize), nbin as usize);
     let mut i = laneid;
