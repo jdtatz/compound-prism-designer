@@ -158,19 +158,17 @@ impl<F: Float> QuasiRandom for [F; 3] {
 
 pub struct Qrng<Q: QuasiRandom> {
     state: Q,
-    alpha: Q,
 }
 
 impl<Q: QuasiRandom> Qrng<Q> {
     pub fn new(seed: Q) -> Self {
         Self {
             state: seed,
-            alpha: Q::alpha(),
         }
     }
 
     pub fn next_by(&mut self, step: u32) -> Q {
-        self.state.iadd_mod_1(self.alpha.mul_by_int(step));
+        self.state.iadd_mod_1(Q::alpha().mul_by_int(step));
         self.state
     }
 }
@@ -179,7 +177,7 @@ impl<Q: QuasiRandom> Iterator for Qrng<Q> {
     type Item = Q;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.state.iadd_mod_1(self.alpha);
+        self.state.iadd_mod_1(Q::alpha());
         Some(self.state)
     }
 }

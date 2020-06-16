@@ -1,9 +1,13 @@
-from typing import NamedTuple, Sequence, Tuple, Callable, type_check_only
+from typing import NamedTuple, Sequence, Tuple
 import numpy as np
+try:
+    from typing import type_check_only
+except ImportError:
+    type_check_only = lambda x: None
 
 
 @type_check_only
-class Glass(NamedTuple, Callable):
+class Glass(NamedTuple):
     name: str
 
     def __call__(self, wavelength: float) -> float:

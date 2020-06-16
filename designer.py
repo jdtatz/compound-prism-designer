@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 import itertools
-from typing import Union, Sequence, Tuple, NamedTuple
+from typing import Union, Sequence, Tuple, NamedTuple, Callable
 import numpy as np
 from pymoo.model.problem import Problem
-from pymoo.factory import get_reference_directions
+from pymoo.factory import get_algorithm, get_crossover, get_mutation, get_sampling
 from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
-from pymoo.algorithms.nsga2 import NSGA2
-from pymoo.algorithms.nsga3 import NSGA3
-from pymoo.algorithms.unsga3 import UNSGA3
-from pymoo.algorithms.moead import MOEAD
 from pymoo.optimize import minimize
 from compound_prism_designer import RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
     DetectorArray, GaussianBeam, Spectrometer
@@ -91,7 +87,7 @@ class CompoundPrismSpectrometerProblem(Problem):
         super().__init__(
             n_var=bounds.shape[1],
             n_obj=3,
-            n_constr=0,
+            n_constr=1,
             xl=bounds[0],
             xu=bounds[1],
             elementwise_evaluation=True,
@@ -132,9 +128,28 @@ class CompoundPrismSpectrometerProblem(Problem):
                 fit = spectrometer.cpu_fitness()
             out["F"] = fit.size, np.log2(self.config.bin_count) - fit.info, fit.deviation
             out["feasible"] = fit.size < 800
+            out["G"] = 0 if fit.size < 800 else 1
         except RayTraceError:
             out["F"] = 1e4, np.log2(self.config.bin_count), 1
             out["feasible"] = False
+            out["G"] = 1
+
+
+class MetaCompoundPrismSpectrometerProblem(Problem):
+    def __init__(self, max_nglass: int, minimizer: Callable[[CompoundPrismSpectrometerProblem], Sequence[Design]], config: CompoundPrismSpectrometerProblemConfig):
+        self.minimizer = minimizer
+        self.config = config
+        super().__init__(
+            n_var=max_nglass,
+            n_obj=3,
+            n_constr=0,
+            xl=0,
+            xu=1,
+            elementwise_evaluation=True,
+        )
+
+    def _evaluate(self, x, out, *args, **kwargs):
+        pass
 
 
 spring_config = CompoundPrismSpectrometerProblemConfig(
@@ -170,7 +185,8 @@ bch_config = CompoundPrismSpectrometerProblemConfig(
 problem = CompoundPrismSpectrometerProblem(3, bch_config)
 
 ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()
-algorithm = UNSGA3(ref_dirs, pop_size=100)
+# 'ga', 'brkga', 'de', 'nelder-mead', 'pattern-search', 'cmaes', 'nsga2', 'rnsga2', 'nsga3', 'unsga3', 'rnsga3', 'moead'
+algorithm = get_algorithm("unsga3", ref_dirs, pop_size=100)
 
 result = minimize(
     problem,
