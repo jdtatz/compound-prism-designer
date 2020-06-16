@@ -121,6 +121,26 @@ struct PyDesignFitness {
     deviation: f64,
 }
 
+#[pymethods]
+impl PyDesignFitness {
+    #[new]
+    fn create(
+        size: f64,
+        info: f64,
+        deviation: f64,
+    ) -> Self {
+        Self {
+            size,
+            info,
+            deviation,
+        }
+    }
+
+    fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
+        (self.size, self.info, self.deviation)
+    }
+}
+
 #[pyproto]
 impl PyObjectProtocol for PyDesignFitness {
     fn __repr__(&self) -> PyResult<String> {

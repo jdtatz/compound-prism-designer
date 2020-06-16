@@ -1,5 +1,6 @@
 use crate::utils::{Float, Welford};
 use crate::Spectrometer;
+use crate::qrng::Qrng;
 use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
 
 #[panic_handler]
@@ -157,10 +158,11 @@ unsafe fn kernel<F: CudaFloat>(
 
     let mut count = F::zero();
     let mut index = laneid;
-    let mut qrng_n = F::from_u32(laneid);
+    let mut qrng = Qrng::new(seed);
+    qrng.next_by(laneid);
     let max_evals = max_evals - (max_evals % 32);
     while index < max_evals {
-        let u = qrng_n.mul_add(F::from_f64(ALPHA), seed).fract();
+        let u = qrng.next_by(32);
         let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
         let (mut bin_index, t) = if let Ok((pos, t)) = spectrometer.propagate(wavelength, y0) {
             (spectrometer.detector_array.bin_index(pos), t)
@@ -209,7 +211,6 @@ unsafe fn kernel<F: CudaFloat>(
         }
         index += 32;
         count += F::from_u32(32);
-        qrng_n += F::from_u32(32);
     }
     let prob = from_raw_parts_mut(prob.add((nbin * id) as usize), nbin as usize);
     let mut i = laneid;
