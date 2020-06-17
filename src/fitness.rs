@@ -5,35 +5,31 @@ use crate::utils::*;
 
 const MAX_N: usize = 100_000;
 
-fn vector_quasi_monte_carlo_integration<V, I, F>(
+fn vector_quasi_monte_carlo_integration<V, F>(
     max_err: V,
     vec_len: usize,
     vector_fn: F,
 ) -> Vec<Welford<V>>
 where
     V: Float,
-    I: ExactSizeIterator<Item = V>,
-    F: Fn(V) -> Option<I>,
+    F: Fn(V) -> Option<(usize, V)>,
 {
     let max_err_squared = max_err * max_err;
+    let mut count = V::zero();
     let mut stats = vec![Welford::new(); vec_len];
     let qrng = Qrng::<V>::new(V::from_u32_ratio(1, 2));
     for u in qrng.take(MAX_N) {
-        if let Some(vec) = vector_fn(u) {
-            for (v, w) in vec.zip(stats.iter_mut()) {
-                w.next_sample(v);
-            }
-        } else {
-            for w in stats.iter_mut() {
-                w.next_sample(V::zero());
+        count += V::one();
+        if let Some((idx, v)) = vector_fn(u) {
+            stats[idx].skip(count);
+            stats[idx].next_sample(v);
+            if stats[idx].sem_le_error_threshold(max_err_squared) {
+                break
             }
         }
-        if stats
-            .iter()
-            .all(|stat| stat.sem_le_error_threshold(max_err_squared))
-        {
-            break;
-        }
+    }
+    for w in stats.iter_mut() {
+        w.skip(count);
     }
     stats
 }
@@ -75,13 +71,7 @@ impl<V: Vector> Spectrometer<V> {
                     // the pdf(y) is cancelled, so.
                     // pdf_t = p_z * t;
                     let pdf_t = p_z * t;
-                    Some((0..self.detector_array.bin_count).map(move |i| {
-                        if i == bin_idx {
-                            pdf_t
-                        } else {
-                            V::Scalar::zero()
-                        }
-                    }))
+                    Some((bin_idx as usize, pdf_t))
                 } else {
                     None
                 }
