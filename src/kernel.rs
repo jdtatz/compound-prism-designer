@@ -1,8 +1,8 @@
+use crate::geom::{Pair, Vector};
+use crate::qrng::Qrng;
 use crate::utils::{Float, Welford};
 use crate::Spectrometer;
-use crate::qrng::Qrng;
 use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
-use crate::geom::{Vector, Pair};
 
 #[panic_handler]
 unsafe fn panic_handle(p: &PanicInfo) -> ! {
@@ -118,7 +118,7 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
-unsafe fn kernel<F: CudaFloat, V: Vector<Scalar=F>>(
+unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>>(
     seed: F,
     max_evals: u32,
     spectrometer: &Spectrometer<V>,
@@ -165,7 +165,9 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar=F>>(
     while index < max_evals {
         let u = qrng.next_by(32);
         let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
-        let (mut bin_index, t) = spectrometer.propagate(wavelength, y0).unwrap_or((nbin, F::zero()));
+        let (mut bin_index, t) = spectrometer
+            .propagate(wavelength, y0)
+            .unwrap_or((nbin, F::zero()));
         let mut det_count = warp_ballot(bin_index < nbin);
         let mut finished = det_count > 0;
         while det_count > 0 {
@@ -174,11 +176,7 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar=F>>(
                 core::hint::unreachable_unchecked()
             }
             det_count -= warp_ballot(bin_index == min_index);
-            let bin_t = if bin_index == min_index {
-                t
-            } else {
-                F::zero()
-            };
+            let bin_t = if bin_index == min_index { t } else { F::zero() };
             let welford = if laneid == 0 {
                 let mut w = shared[min_index as usize];
                 w.skip(count);

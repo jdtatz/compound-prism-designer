@@ -1,7 +1,7 @@
+use crate::geom::Vector;
 use crate::qrng::*;
 use crate::ray::*;
 use crate::utils::*;
-use crate::geom::Vector;
 
 const MAX_N: usize = 100_000;
 
@@ -56,33 +56,37 @@ impl<V: Vector> Spectrometer<V> {
         let p_z = self.probability_z_in_bounds();
         debug_assert!(V::Scalar::zero() <= p_z && p_z <= V::Scalar::one());
         let nbin = self.detector_array.bin_count as usize;
-        vector_quasi_monte_carlo_integration(V::Scalar::from_u32_ratio(5, 1000), nbin, move |u: V::Scalar| {
-            // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
-            let y = self.gaussian_beam.inverse_cdf_initial_y(u);
-            if y <= V::Scalar::zero() || self.compound_prism.height <= y {
-                return None;
-            }
-            if let Ok((bin_idx, t)) = self.propagate(wavelength, y) {
-                debug_assert!(t.is_finite());
-                debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
-                // What is actually being integrated is
-                // pdf_t = p_z * t * pdf(y);
-                // But because of importance sampling using the same distribution
-                // pdf_t /= pdf(y);
-                // the pdf(y) is cancelled, so.
-                // pdf_t = p_z * t;
-                let pdf_t = p_z * t;
-                Some((0..self.detector_array.bin_count).map(move |i| {
-                    if i == bin_idx {
-                        pdf_t
-                    } else {
-                        V::Scalar::zero()
-                    }
-                }))
-            } else {
-                None
-            }
-        })
+        vector_quasi_monte_carlo_integration(
+            V::Scalar::from_u32_ratio(5, 1000),
+            nbin,
+            move |u: V::Scalar| {
+                // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
+                let y = self.gaussian_beam.inverse_cdf_initial_y(u);
+                if y <= V::Scalar::zero() || self.compound_prism.height <= y {
+                    return None;
+                }
+                if let Ok((bin_idx, t)) = self.propagate(wavelength, y) {
+                    debug_assert!(t.is_finite());
+                    debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
+                    // What is actually being integrated is
+                    // pdf_t = p_z * t * pdf(y);
+                    // But because of importance sampling using the same distribution
+                    // pdf_t /= pdf(y);
+                    // the pdf(y) is cancelled, so.
+                    // pdf_t = p_z * t;
+                    let pdf_t = p_z * t;
+                    Some((0..self.detector_array.bin_count).map(move |i| {
+                        if i == bin_idx {
+                            pdf_t
+                        } else {
+                            V::Scalar::zero()
+                        }
+                    }))
+                } else {
+                    None
+                }
+            },
+        )
         .into_iter()
         .map(|w| w.mean)
     }
@@ -118,7 +122,10 @@ impl<V: Vector> Spectrometer<V> {
             if p_dets.iter().all(|stat| {
                 const MAX_ERR_N: u32 = 5;
                 const MAX_ERR_D: u32 = 1000;
-                stat.sem_le_error_threshold(V::Scalar::from_u32_ratio(MAX_ERR_N*MAX_ERR_N, MAX_ERR_D*MAX_ERR_D))
+                stat.sem_le_error_threshold(V::Scalar::from_u32_ratio(
+                    MAX_ERR_N * MAX_ERR_N,
+                    MAX_ERR_D * MAX_ERR_D,
+                ))
             }) {
                 break;
             }
@@ -151,9 +158,9 @@ impl<V: Vector> Spectrometer<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::Pair;
     use crate::glasscat::{Glass, BUNDLED_CATALOG};
     use crate::utils::almost_eq;
-    use crate::geom::Pair;
     use rand::prelude::*;
     use std::f64::consts::*;
 

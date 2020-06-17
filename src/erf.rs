@@ -18,7 +18,7 @@ const SHAW_P: &[f64] = &[
     3.0333178251950406994,
     2.3884158540184385711,
     0.73176759583280610539,
-    0.085838533424158257377 ,
+    0.085838533424158257377,
     0.0034424140686962222423,
     0.000036313870818023761224,
     4.3304513840364031401e-8,
@@ -34,7 +34,6 @@ const SHAW_Q: &[f64] = &[
     0.00030617264753008793976,
     1.3141263119543315917e-6,
 ];
-
 
 /// Fast Non-branching Standard Normal inverse CDF
 /// To transform into a normal distribution with stddev=a and mean=b
@@ -65,7 +64,7 @@ pub fn norminv<F: Float>(x: F) -> F {
 mod test {
     use super::*;
     use crate::assert_almost_eq;
-    use statrs::distribution::{Normal, InverseCDF};
+    use statrs::distribution::{InverseCDF, Normal};
 
     #[test]
     fn test_shaw() {
