@@ -165,20 +165,16 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar=F>>(
     while index < max_evals {
         let u = qrng.next_by(32);
         let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
-        let (mut bin_index, t) = if let Ok((idx, t)) = spectrometer.propagate(wavelength, y0) {
-            (Some(idx), t)
-        } else {
-            (None, F::zero())
-        };
-        let mut det_count = warp_ballot(bin_index.is_some());
+        let (mut bin_index, t) = spectrometer.propagate(wavelength, y0).unwrap_or((nbin, F::zero()));
+        let mut det_count = warp_ballot(bin_index < nbin);
         let mut finished = det_count > 0;
         while det_count > 0 {
-            let min_index = warp_fold(bin_index.unwrap_or(nbin), core::cmp::min);
+            let min_index = warp_fold(bin_index, core::cmp::min);
             if min_index >= nbin {
                 core::hint::unreachable_unchecked()
             }
-            det_count -= warp_ballot(bin_index.map_or(false, |i| i == min_index));
-            let bin_t = if bin_index.map_or(false, |i| i == min_index) {
+            det_count -= warp_ballot(bin_index == min_index);
+            let bin_t = if bin_index == min_index {
                 t
             } else {
                 F::zero()
@@ -203,8 +199,8 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar=F>>(
                 shared[min_index as usize] = welford;
             }
             finished = finished && welford.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR));
-            if bin_index.map_or(false, |i| i == min_index) {
-                drop(bin_index.take());
+            if bin_index == min_index {
+                bin_index = nbin;
             }
         }
         if finished {
