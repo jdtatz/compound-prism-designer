@@ -1,7 +1,7 @@
 use crate::fitness::DesignFitness;
+use crate::geom::Vector;
 use crate::ray::Spectrometer;
 use crate::utils::{Float, Welford};
-use crate::geom::Vector;
 use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
@@ -10,7 +10,7 @@ use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::{CStr, CString};
 
-unsafe impl<F: Float + DeviceCopy, V: Vector<Scalar=F>> DeviceCopy for Spectrometer<V> {}
+unsafe impl<F: Float + DeviceCopy, V: Vector<Scalar = F>> DeviceCopy for Spectrometer<V> {}
 
 const PTX_STR: &str =
     include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
@@ -100,7 +100,7 @@ impl CudaFitnessContext {
         })
     }
 
-    fn launch_p_dets_l_ws<F: KernelFloat, V: Vector<Scalar=F>>(
+    fn launch_p_dets_l_ws<F: KernelFloat, V: Vector<Scalar = F>>(
         &mut self,
         seed: f64,
         spec: &Spectrometer<V>,
@@ -147,11 +147,10 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
     Ok(())
 }
 
-impl<F: KernelFloat, V: Vector<Scalar=F>> Spectrometer<V> {
+impl<F: KernelFloat, V: Vector<Scalar = F>> Spectrometer<V> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
         let max_err = F::from_u32_ratio(5, 1000);
         let max_err_sq = max_err * max_err;
-
 
         let mutex = CACHED_CUDA_FITNESS_CONTEXT
             .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))
@@ -178,10 +177,7 @@ impl<F: KernelFloat, V: Vector<Scalar=F>> Spectrometer<V> {
                 }
                 h_det_l_w.next_sample(h_det_l_ws);
             }
-            if p_dets
-                .iter()
-                .all(|s| s.sem_le_error_threshold(max_err_sq))
-            {
+            if p_dets.iter().all(|s| s.sem_le_error_threshold(max_err_sq)) {
                 // -H(D)
                 let h_det = p_dets
                     .iter()

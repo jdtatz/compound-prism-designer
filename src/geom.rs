@@ -3,21 +3,21 @@ use crate::{
     utils::{almost_eq, Float, LossyInto},
 };
 use core::fmt::Debug;
-use core::ops::{Neg, Add, Sub, Mul, Div};
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
 pub trait Vector:
-'static
-+ Copy
-+ Clone
-+ Debug
-+ serde::Serialize
-+ serde::de::DeserializeOwned
-+ PartialEq
-+ Neg<Output=Self>
-+ Add<Self, Output=Self>
-+ Sub<Self, Output=Self>
-+ Mul<<Self as Vector>::Scalar, Output=Self>
-+ Div<<Self as Vector>::Scalar, Output=Self>
+    'static
+    + Copy
+    + Clone
+    + Debug
+    + serde::Serialize
+    + serde::de::DeserializeOwned
+    + PartialEq
+    + Neg<Output = Self>
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Mul<<Self as Vector>::Scalar, Output = Self>
+    + Div<<Self as Vector>::Scalar, Output = Self>
 {
     type Scalar: Copy + Float;
 
@@ -65,7 +65,11 @@ pub trait Vector:
 
     /// is it a unit vector, ||v|| ≅? 1
     fn check_unit(self) -> bool {
-        almost_eq(self.norm(), Self::Scalar::one(), Self::Scalar::from_u32_ratio(1, 1000))
+        almost_eq(
+            self.norm(),
+            Self::Scalar::one(),
+            Self::Scalar::from_u32_ratio(1, 1000),
+        )
     }
 
     /// Fused multiply add of two vectors with a scalar, (self * a) + b
@@ -167,7 +171,7 @@ impl<F: Float> Vector for Pair<F> {
 }
 
 impl<F: Float> Pair<F> {
-    pub fn from_vector<V: Vector<Scalar=F>>(vector: V) -> Self {
+    pub fn from_vector<V: Vector<Scalar = F>>(vector: V) -> Self {
         Pair {
             x: vector.x(),
             y: vector.y(),
@@ -209,13 +213,21 @@ impl<F: Float> Vector for Triplet<F> {
     }
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
-        Self { x, y, z: Self::Scalar::zero() }
+        Self {
+            x,
+            y,
+            z: Self::Scalar::zero(),
+        }
     }
 
     /// unit vector at angle `theta` relative to the x axis.
     fn angled_xy(theta: F) -> Self {
         let (sin, cos) = theta.sincos();
-        Self { x: cos, y: sin, z: F::zero() }
+        Self {
+            x: cos,
+            y: sin,
+            z: F::zero(),
+        }
     }
 
     fn rotate_xy(self, theta: Self::Scalar) -> Self {
@@ -223,7 +235,7 @@ impl<F: Float> Vector for Triplet<F> {
         Self {
             x: c * self.x - s * self.y,
             y: s * self.x + c * self.y,
-            z: self.z
+            z: self.z,
         }
     }
 
@@ -266,7 +278,6 @@ impl<F: Float> Vector for Triplet<F> {
     fn cot_xy(self) -> Self::Scalar {
         self.x / self.y
     }
-
 
     /// dot product of two vectors, a • b
     fn dot(self, other: Self) -> F {
@@ -370,10 +381,7 @@ impl<V: Vector> Plane<V> {
         let dx = self.normal.tan_xy() * height * V::Scalar::from_u32_ratio(1, 2);
         let ux = self.midpt.x() - dx;
         let lx = self.midpt.x() + dx;
-        (
-            V::from_xy(ux, height),
-            V::from_xy(lx, V::Scalar::zero()),
-        )
+        (V::from_xy(ux, height), V::from_xy(lx, V::Scalar::zero()))
     }
 }
 
@@ -422,7 +430,7 @@ pub(crate) fn create_joined_trapezoids<'s, V: Vector>(
     let first = Plane {
         height,
         normal,
-        midpt: V::from_xy(normal.tan_xy().abs() * h2, h2)
+        midpt: V::from_xy(normal.tan_xy().abs() * h2, h2),
     };
     let mut prev_sign = normal.y().is_sign_positive();
     let mut d1 = first.midpt.x();
@@ -454,7 +462,8 @@ pub(crate) fn create_joined_trapezoids<'s, V: Vector>(
 }
 
 impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<Plane<V2>> for Plane<V1>
-    where V1::Scalar: LossyInto<V2::Scalar>
+where
+    V1::Scalar: LossyInto<V2::Scalar>,
 {
     fn lossy_into(self) -> Plane<V2> {
         Plane {
@@ -481,11 +490,16 @@ pub(crate) struct CurvedPlane<V: Vector> {
 
 impl<V: Vector> CurvedPlane<V> {
     pub(crate) fn new(signed_curvature: V::Scalar, height: V::Scalar, chord: Plane<V>) -> Self {
-        debug_assert!(V::Scalar::one() >= signed_curvature.abs() && signed_curvature.abs() > V::Scalar::zero());
+        debug_assert!(
+            V::Scalar::one() >= signed_curvature.abs()
+                && signed_curvature.abs() > V::Scalar::zero()
+        );
         debug_assert!(height > V::Scalar::zero());
         let chord_length = chord.normal.sec_xy(height).abs();
         let radius = chord_length * V::Scalar::from_u32_ratio(1, 2) / signed_curvature.abs();
-        let apothem = (radius * radius - chord_length * chord_length * V::Scalar::from_u32_ratio(1, 4)).sqrt();
+        let apothem = (radius * radius
+            - chord_length * chord_length * V::Scalar::from_u32_ratio(1, 4))
+        .sqrt();
         let sagitta = radius - apothem;
         let (center, midpt) = if signed_curvature.is_sign_positive() {
             (
@@ -502,7 +516,8 @@ impl<V: Vector> CurvedPlane<V> {
             midpt,
             center,
             radius,
-            max_dist_sq: sagitta * sagitta + chord_length * chord_length * V::Scalar::from_u32_ratio(1, 4),
+            max_dist_sq: sagitta * sagitta
+                + chord_length * chord_length * V::Scalar::from_u32_ratio(1, 4),
             direction: signed_curvature.is_sign_positive(),
         }
     }
@@ -518,8 +533,8 @@ impl<V: Vector> CurvedPlane<V> {
 
     #[cfg(not(target_arch = "nvptx64"))]
     pub(crate) fn end_points(&self, height: V::Scalar) -> (V, V) {
-        let theta_2 =
-            V::Scalar::from_u32(2) * (self.max_dist_sq.sqrt() / (V::Scalar::from_u32(2) * self.radius)).asin();
+        let theta_2 = V::Scalar::from_u32(2)
+            * (self.max_dist_sq.sqrt() / (V::Scalar::from_u32(2) * self.radius)).asin();
         let r = self.midpt - self.center;
         let u = self.center + r.rotate_xy(theta_2);
         let l = self.center + r.rotate_xy(-theta_2);
@@ -581,7 +596,8 @@ impl<V: Vector> Surface for CurvedPlane<V> {
 }
 
 impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<CurvedPlane<V2>> for CurvedPlane<V1>
-    where V1::Scalar: LossyInto<V2::Scalar>
+where
+    V1::Scalar: LossyInto<V2::Scalar>,
 {
     fn lossy_into(self) -> CurvedPlane<V2> {
         CurvedPlane {

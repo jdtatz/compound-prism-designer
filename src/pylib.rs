@@ -124,11 +124,7 @@ struct PyDesignFitness {
 #[pymethods]
 impl PyDesignFitness {
     #[new]
-    fn create(
-        size: f64,
-        info: f64,
-        deviation: f64,
-    ) -> Self {
+    fn create(size: f64, info: f64, deviation: f64) -> Self {
         Self {
             size,
             info,
@@ -425,8 +421,16 @@ impl PySpectrometer {
     ) -> PyResult<Self> {
         let spectrometer = Spectrometer::new(
             gaussian_beam.as_ref(py).try_borrow()?.gaussian_beam.clone(),
-            compound_prism.as_ref(py).try_borrow()?.compound_prism.clone(),
-            detector_array.as_ref(py).try_borrow()?.detector_array.clone(),
+            compound_prism
+                .as_ref(py)
+                .try_borrow()?
+                .compound_prism
+                .clone(),
+            detector_array
+                .as_ref(py)
+                .try_borrow()?
+                .detector_array
+                .clone(),
         )?;
         Ok(PySpectrometer {
             compound_prism,

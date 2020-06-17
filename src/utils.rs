@@ -82,7 +82,7 @@ pub trait Float:
     fn log2(self) -> Self;
     fn trunc(self) -> Self;
     fn fract(self) -> Self;
-    fn euclid_dev_rem(self, rhs: Self) -> (Self, Self) {
+    fn euclid_div_rem(self, rhs: Self) -> (Self, Self) {
         let q = (self / rhs).trunc();
         let r = self - q * rhs;
         if r < Self::zero() {
@@ -191,7 +191,10 @@ impl Float for f32 {
     }
 
     fn copy_sign(self, sign: Self) -> Self {
-        cuda_specific!(core::intrinsics::copysignf32(self, sign), self.copysign(sign));
+        cuda_specific!(
+            core::intrinsics::copysignf32(self, sign),
+            self.copysign(sign)
+        );
     }
 
     fn mul_add(self, a: Self, b: Self) -> Self {
@@ -297,7 +300,10 @@ impl Float for f64 {
     }
 
     fn copy_sign(self, sign: Self) -> Self {
-        cuda_specific!(core::intrinsics::copysignf64(self, sign), self.copysign(sign));
+        cuda_specific!(
+            core::intrinsics::copysignf64(self, sign),
+            self.copysign(sign)
+        );
     }
 
     fn mul_add(self, a: Self, b: Self) -> Self {
@@ -418,7 +424,7 @@ impl<F: Float> Welford<F> {
             let zero_count = new_count - self.count;
             let count = new_count;
             self.mean = (self.count * self.mean) / count;
-            self.m2 = self.m2 + self.mean.sqr() * self.count * zero_count / count;
+            self.m2 += self.mean.sqr() * self.count * zero_count / count;
             self.count = count;
         }
     }
@@ -439,7 +445,7 @@ impl<F: Float> Welford<F> {
         let count = self.count + other.count;
         let delta = other.mean - self.mean;
         self.mean = (self.count * self.mean + other.count * other.mean) / count;
-        self.m2 = self.m2 + other.m2 + delta.sqr() * self.count * other.count / count;
+        self.m2 += other.m2 + delta.sqr() * self.count * other.count / count;
         self.count = count;
     }
 }

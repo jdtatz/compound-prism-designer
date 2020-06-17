@@ -1,8 +1,8 @@
+use crate::erf::norminv;
 use crate::geom::*;
 use crate::glasscat::Glass;
-use crate::utils::*;
-use crate::erf::norminv;
 use crate::qrng::QuasiRandom;
+use crate::utils::*;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -27,7 +27,7 @@ impl Into<&'static str> for RayTraceError {
 
 pub trait Beam {
     type Scalar: Float;
-    type Vector: Vector<Scalar=Self::Scalar>;
+    type Vector: Vector<Scalar = Self::Scalar>;
     type Quasi: QuasiRandom;
 
     fn y_mean(&self) -> Self::Scalar;
@@ -63,7 +63,7 @@ impl<F: Float> GaussianBeam<F> {
         self.y_mean - self.width * norminv(p)
     }
 
-    pub fn inverse_cdf_ray<V: Vector<Scalar=F>>(&self, p: F) -> Ray<V> {
+    pub fn inverse_cdf_ray<V: Vector<Scalar = F>>(&self, p: F) -> Ray<V> {
         Ray::new_from_start(self.inverse_cdf_initial_y(p))
     }
 }
@@ -233,7 +233,7 @@ impl<V: Vector> LinearDetectorArray<V> {
     }
 
     pub fn bin_index(&self, pos: V::Scalar) -> Option<u32> {
-        let (bin, bin_pos) = (pos - self.linear_intercept).euclid_dev_rem(self.linear_slope);
+        let (bin, bin_pos) = (pos - self.linear_intercept).euclid_div_rem(self.linear_slope);
         let bin = bin.to_u32();
         if bin < self.bin_count && bin_pos < self.bin_size {
             Some(bin)
@@ -271,7 +271,10 @@ impl<V: Vector> Surface for (&LinearDetectorArray<V>, &DetectorArrayPositioning<
     type Point = V;
     type UnitVector = V;
 
-    fn intersection(&self, ray: (Self::Point, Self::UnitVector)) -> Option<(Self::Point, Self::UnitVector)> {
+    fn intersection(
+        &self,
+        ray: (Self::Point, Self::UnitVector),
+    ) -> Option<(Self::Point, Self::UnitVector)> {
         let (detarr, detpos) = self;
         let ci = -ray.1.dot(detarr.normal);
         if ci <= detarr.min_ci {
@@ -326,10 +329,7 @@ impl<V: Vector> Ray<V> {
     pub fn new_from_start(y: V::Scalar) -> Self {
         Ray {
             origin: V::from_xy(V::Scalar::zero(), y),
-            direction: V::from_xy(
-                V::Scalar::one(),
-                V::Scalar::zero(),
-            ),
+            direction: V::from_xy(V::Scalar::one(), V::Scalar::zero()),
             s_transmittance: V::Scalar::one(),
             p_transmittance: V::Scalar::one(),
         }
@@ -344,10 +344,7 @@ impl<V: Vector> Ray<V> {
     pub fn new_from_start_at_angle(y: V::Scalar, angle_sine: V::Scalar) -> Self {
         Ray {
             origin: V::from_xy(V::Scalar::zero(), y),
-            direction: V::from_xy(
-                (V::Scalar::one() - angle_sine.sqr()).sqrt(),
-                angle_sine,
-            ),
+            direction: V::from_xy((V::Scalar::one() - angle_sine.sqr()).sqrt(), angle_sine),
             s_transmittance: V::Scalar::one(),
             p_transmittance: V::Scalar::one(),
         }
@@ -386,19 +383,20 @@ impl<V: Vector> Ray<V> {
         }
         let cr = cr_sq.sqrt();
         let v = self.direction * r + normal * (r * ci - cr);
-        let (s_transmittance, p_transmittance) = if ar_coated && ci > V::Scalar::from_u32_ratio(1, 2) {
-            (
-                self.s_transmittance * V::Scalar::from_u32_ratio(99, 100),
-                self.p_transmittance * V::Scalar::from_u32_ratio(99, 100),
-            )
-        } else {
-            let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
-            let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
-            (
-                self.s_transmittance * (V::Scalar::one() - fresnel_rs.sqr()),
-                self.p_transmittance * (V::Scalar::one() - fresnel_rp.sqr()),
-            )
-        };
+        let (s_transmittance, p_transmittance) =
+            if ar_coated && ci > V::Scalar::from_u32_ratio(1, 2) {
+                (
+                    self.s_transmittance * V::Scalar::from_u32_ratio(99, 100),
+                    self.p_transmittance * V::Scalar::from_u32_ratio(99, 100),
+                )
+            } else {
+                let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
+                let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
+                (
+                    self.s_transmittance * (V::Scalar::one() - fresnel_rs.sqr()),
+                    self.p_transmittance * (V::Scalar::one() - fresnel_rp.sqr()),
+                )
+            };
         Ok(Self {
             origin: intersection,
             direction: v,
@@ -420,8 +418,12 @@ impl<V: Vector> Ray<V> {
         detpos: &DetectorArrayPositioning<V>,
     ) -> Result<(V, u32, V::Scalar), RayTraceError> {
         let det = (detarr, detpos);
-        let (p, _n) = det.intersection((self.origin, self.direction)).ok_or(RayTraceError::SpectrometerAngularResponseTooWeak)?;
-        let bin_idx = det.bin_index(p).ok_or(RayTraceError::NoSurfaceIntersection)?;
+        let (p, _n) = det
+            .intersection((self.origin, self.direction))
+            .ok_or(RayTraceError::SpectrometerAngularResponseTooWeak)?;
+        let bin_idx = det
+            .bin_index(p)
+            .ok_or(RayTraceError::NoSurfaceIntersection)?;
         Ok((p, bin_idx, self.average_transmittance()))
     }
 
@@ -435,19 +437,18 @@ impl<V: Vector> Ray<V> {
         cmpnd: &CompoundPrism<V>,
         wavelength: V::Scalar,
     ) -> Result<Self, RayTraceError> {
-        let (ray, n1) =
-            cmpnd
-                .prisms
-                .iter()
-                .try_fold((self, V::Scalar::one()), |(ray, n1), (glass, plane)| {
-                    let n2 = glass.calc_n(wavelength);
-                    debug_assert!(n2 >= V::Scalar::one());
-                    let (p, normal) = plane
-                        .intersection((ray.origin, ray.direction))
-                        .ok_or(RayTraceError::NoSurfaceIntersection)?;
-                    let ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
-                    Ok((ray, n2))
-                })?;
+        let (ray, n1) = cmpnd.prisms.iter().try_fold(
+            (self, V::Scalar::one()),
+            |(ray, n1), (glass, plane)| {
+                let n2 = glass.calc_n(wavelength);
+                debug_assert!(n2 >= V::Scalar::one());
+                let (p, normal) = plane
+                    .intersection((ray.origin, ray.direction))
+                    .ok_or(RayTraceError::NoSurfaceIntersection)?;
+                let ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                Ok((ray, n2))
+            },
+        )?;
         let n2 = V::Scalar::one();
         let (p, normal) = cmpnd
             .lens
@@ -559,7 +560,10 @@ pub(crate) fn detector_array_positioning<V: Vector>(
     debug_assert!(upper_ray.direction.check_unit());
     let spec_dir = V::angled_xy(detarr.angle).rot_90_xy();
     let spec = spec_dir * detarr.length;
-    let mat = Mat2::new_from_cols(Pair::from_vector(upper_ray.direction), -Pair::from_vector(lower_ray.direction));
+    let mat = Mat2::new_from_cols(
+        Pair::from_vector(upper_ray.direction),
+        -Pair::from_vector(lower_ray.direction),
+    );
     let imat = mat.inverse().ok_or(RayTraceError::NoSurfaceIntersection)?;
     let dists = imat * Pair::from_vector(spec - upper_ray.origin + lower_ray.origin);
     let d2 = dists.y;
@@ -614,7 +618,11 @@ impl<V: Vector> Spectrometer<V> {
     ///  * `self` - spectrometer specification
     ///  * `wavelength` - the wavelength of the light ray
     ///  * `initial_y` - the initial y value of the ray
-    pub fn propagate(&self, wavelength: V::Scalar, initial_y: V::Scalar) -> Result<(u32, V::Scalar), RayTraceError> {
+    pub fn propagate(
+        &self,
+        wavelength: V::Scalar,
+        initial_y: V::Scalar,
+    ) -> Result<(u32, V::Scalar), RayTraceError> {
         Ray::new_from_start(initial_y)
             .propagate(
                 wavelength,
@@ -659,7 +667,10 @@ impl<V: Vector> Spectrometer<V> {
     }
 
     pub(crate) fn probability_z_in_bounds(&self) -> V::Scalar {
-        let p_z = (self.compound_prism.width * V::Scalar::from_f64(core::f64::consts::FRAC_1_SQRT_2) / self.gaussian_beam.width).erf();
+        let p_z = (self.compound_prism.width
+            * V::Scalar::from_f64(core::f64::consts::FRAC_1_SQRT_2)
+            / self.gaussian_beam.width)
+            .erf();
         debug_assert!(V::Scalar::zero() <= p_z && p_z <= V::Scalar::one());
         p_z
     }
@@ -683,7 +694,8 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<GaussianBeam<F2>> for Gauss
 }
 
 impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<CompoundPrism<V2>> for CompoundPrism<V1>
-    where V1::Scalar: LossyInto<V2::Scalar>
+where
+    V1::Scalar: LossyInto<V2::Scalar>,
 {
     fn lossy_into(self) -> CompoundPrism<V2> {
         CompoundPrism {
@@ -696,12 +708,14 @@ impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<CompoundPrism<V2>> for Co
     }
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<LinearDetectorArray<V2>> for LinearDetectorArray<V1>
-    where V1::Scalar: LossyInto<V2::Scalar>
+impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<LinearDetectorArray<V2>>
+    for LinearDetectorArray<V1>
+where
+    V1::Scalar: LossyInto<V2::Scalar>,
 {
     fn lossy_into(self) -> LinearDetectorArray<V2> {
         LinearDetectorArray {
-            bin_count: self.bin_count.into(),
+            bin_count: self.bin_count,
             bin_size: self.bin_size.lossy_into(),
             linear_slope: self.linear_slope.lossy_into(),
             linear_intercept: self.linear_intercept.lossy_into(),
@@ -713,8 +727,10 @@ impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<LinearDetectorArray<V2>> 
     }
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<DetectorArrayPositioning<V2>> for DetectorArrayPositioning<V1>
-    where V1::Scalar: LossyInto<V2::Scalar>
+impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<DetectorArrayPositioning<V2>>
+    for DetectorArrayPositioning<V1>
+where
+    V1::Scalar: LossyInto<V2::Scalar>,
 {
     fn lossy_into(self) -> DetectorArrayPositioning<V2> {
         DetectorArrayPositioning {
@@ -725,7 +741,8 @@ impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<DetectorArrayPositioning<
 }
 
 impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<Spectrometer<V2>> for Spectrometer<V1>
-    where V1::Scalar: LossyInto<V2::Scalar>
+where
+    V1::Scalar: LossyInto<V2::Scalar>,
 {
     fn lossy_into(self) -> Spectrometer<V2> {
         Spectrometer {

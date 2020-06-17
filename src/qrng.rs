@@ -101,7 +101,11 @@ const PHI_2: f64 = 1.3247179572447460259609088544780973;
 const ALPHA_2: [f64; 2] = [1_f64 / PHI_2, 1_f64 / (PHI_2 * PHI_2)];
 #[allow(clippy::unreadable_literal, clippy::excessive_precision)]
 const PHI_3: f64 = 1.2207440846057594753616853491088319;
-const ALPHA_3: [f64; 3] = [1_f64 / PHI_3, 1_f64 / (PHI_3 * PHI_3), 1_f64 / (PHI_3 * PHI_3 * PHI_3)];
+const ALPHA_3: [f64; 3] = [
+    1_f64 / PHI_3,
+    1_f64 / (PHI_3 * PHI_3),
+    1_f64 / (PHI_3 * PHI_3 * PHI_3),
+];
 
 pub trait QuasiRandom: Copy {
     fn alpha() -> Self;
@@ -141,7 +145,11 @@ impl<F: Float> QuasiRandom for [F; 2] {
 
 impl<F: Float> QuasiRandom for [F; 3] {
     fn alpha() -> Self {
-        [F::from_f64(ALPHA_3[0]), F::from_f64(ALPHA_3[1]),  F::from_f64(ALPHA_3[2])]
+        [
+            F::from_f64(ALPHA_3[0]),
+            F::from_f64(ALPHA_3[1]),
+            F::from_f64(ALPHA_3[2]),
+        ]
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
@@ -162,9 +170,7 @@ pub struct Qrng<Q: QuasiRandom> {
 
 impl<Q: QuasiRandom> Qrng<Q> {
     pub fn new(seed: Q) -> Self {
-        Self {
-            state: seed,
-        }
+        Self { state: seed }
     }
 
     pub fn next_by(&mut self, step: u32) -> Q {
