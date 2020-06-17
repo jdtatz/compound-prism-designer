@@ -5,24 +5,24 @@ use core::ops::{
 };
 
 pub trait LossyInto<T>: Sized {
-    fn into(self) -> T;
+    fn lossy_into(self) -> T;
 }
 
 impl LossyInto<f32> for f64 {
-    fn into(self) -> f32 {
+    fn lossy_into(self) -> f32 {
         self as f32
     }
 }
 
 impl LossyInto<f64> for f32 {
-    fn into(self) -> f64 {
+    fn lossy_into(self) -> f64 {
         self as f64
     }
 }
 
 impl<U1, U2, T1: LossyInto<U1>, T2: LossyInto<U2>> LossyInto<(U1, U2)> for (T1, T2) {
-    fn into(self) -> (U1, U2) {
-        (self.0.into(), self.1.into())
+    fn lossy_into(self) -> (U1, U2) {
+        (self.0.lossy_into(), self.1.lossy_into())
     }
 }
 
@@ -30,8 +30,8 @@ impl<A1: Array, A2: Array> LossyInto<ArrayVec<A2>> for ArrayVec<A1>
 where
     A1::Item: LossyInto<A2::Item>,
 {
-    fn into(self) -> ArrayVec<A2> {
-        self.into_iter().map(LossyInto::into).collect()
+    fn lossy_into(self) -> ArrayVec<A2> {
+        self.into_iter().map(LossyInto::lossy_into).collect()
     }
 }
 
@@ -42,6 +42,9 @@ pub trait Float:
     + Clone
     + core::fmt::Debug
     + core::fmt::Display
+    + core::fmt::LowerExp
+    + serde::Serialize
+    + serde::de::DeserializeOwned
     + PartialEq
     + PartialOrd
     + Neg<Output = Self>

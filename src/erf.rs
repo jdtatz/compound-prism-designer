@@ -65,7 +65,6 @@ pub fn norminv<F: Float>(x: F) -> F {
 mod test {
     use super::*;
     use crate::assert_almost_eq;
-    use core::f64::NAN;
     use statrs::distribution::{Normal, InverseCDF};
 
     #[test]

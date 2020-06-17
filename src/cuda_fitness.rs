@@ -1,6 +1,7 @@
 use crate::fitness::DesignFitness;
 use crate::ray::Spectrometer;
 use crate::utils::{Float, Welford};
+use crate::geom::Vector;
 use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
@@ -9,7 +10,7 @@ use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::{CStr, CString};
 
-unsafe impl<F: Float + DeviceCopy> DeviceCopy for Spectrometer<F> {}
+unsafe impl<F: Float + DeviceCopy, V: Vector<Scalar=F>> DeviceCopy for Spectrometer<V> {}
 
 const PTX_STR: &str =
     include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
@@ -99,10 +100,10 @@ impl CudaFitnessContext {
         })
     }
 
-    fn launch_p_dets_l_ws<F: KernelFloat>(
+    fn launch_p_dets_l_ws<F: KernelFloat, V: Vector<Scalar=F>>(
         &mut self,
         seed: f64,
-        spec: &Spectrometer<F>,
+        spec: &Spectrometer<V>,
     ) -> rustacuda::error::CudaResult<Vec<F>> {
         ContextStack::push(&self.ctxt)?;
 
@@ -112,7 +113,7 @@ impl CudaFitnessContext {
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
-        let dynamic_shared_mem = std::mem::size_of::<Spectrometer<F>>() as u32
+        let dynamic_shared_mem = std::mem::size_of::<Spectrometer<V>>() as u32
             + nbin as u32 * NWARP * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
@@ -146,7 +147,7 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
     Ok(())
 }
 
-impl<F: KernelFloat> Spectrometer<F> {
+impl<F: KernelFloat, V: Vector<Scalar=F>> Spectrometer<V> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
         let max_err = F::from_u32_ratio(5, 1000);
         let max_err_sq = max_err * max_err;
