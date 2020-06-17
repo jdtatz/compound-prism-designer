@@ -171,7 +171,7 @@ impl<F: Float> Into<DesignFitness<F>> for PyDesignFitness {
 #[pyclass(name=CompoundPrism, gc, module="compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
-    compound_prism: CompoundPrism<f64>,
+    compound_prism: CompoundPrism<Pair<f64>>,
     #[pyo3(get)]
     glasses: Vec<Py<PyGlass>>,
     #[pyo3(get)]
@@ -284,7 +284,7 @@ impl PyGCProtocol for PyCompoundPrism {
 #[pyclass(name=DetectorArray, module="compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyDetectorArray {
-    detector_array: LinearDetectorArray<f64>,
+    detector_array: LinearDetectorArray<Pair<f64>>,
     #[pyo3(get)]
     bin_count: u32,
     #[pyo3(get)]
@@ -396,7 +396,7 @@ impl PyGaussianBeam {
 #[pyclass(name=Spectrometer, gc, module="compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
-    spectrometer: Spectrometer<f64>,
+    spectrometer: Spectrometer<Pair<f64>>,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
     compound_prism: Py<PyCompoundPrism>,
@@ -455,7 +455,7 @@ impl PySpectrometer {
     }
 
     fn gpu_fitness(&self, py: Python) -> Option<PyDesignFitness> {
-        let spec: Spectrometer<f32> = LossyInto::into(self.spectrometer.clone());
+        let spec: Spectrometer<Pair<f32>> = LossyInto::lossy_into(self.spectrometer.clone());
         let fit = py.allow_threads(|| spec.cuda_fitness())?;
         Some(fit.into())
     }

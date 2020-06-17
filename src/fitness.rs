@@ -1,6 +1,7 @@
 use crate::qrng::*;
 use crate::ray::*;
 use crate::utils::*;
+use crate::geom::Vector;
 
 const MAX_N: usize = 100_000;
 
@@ -38,33 +39,32 @@ where
 }
 
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(bound = "F: Float")]
 pub struct DesignFitness<F: Float> {
     pub size: F,
     pub info: F,
     pub deviation: F,
 }
 
-impl<F: Float> Spectrometer<F> {
+impl<V: Vector> Spectrometer<V> {
     /// Conditional Probability of detection per detector given a `wavelength`
     /// { p(D=d|Λ=λ) : d in D }
     ///
     /// # Arguments
     ///  * `wavelength` - given wavelength
-    pub fn p_dets_l_wavelength(&self, wavelength: F) -> impl Iterator<Item = F> {
+    pub fn p_dets_l_wavelength(&self, wavelength: V::Scalar) -> impl Iterator<Item = V::Scalar> {
         let p_z = self.probability_z_in_bounds();
-        debug_assert!(F::zero() <= p_z && p_z <= F::one());
+        debug_assert!(V::Scalar::zero() <= p_z && p_z <= V::Scalar::one());
         let nbin = self.detector_array.bin_count as usize;
-        vector_quasi_monte_carlo_integration(F::from_u32_ratio(5, 1000), nbin, move |u: F| {
+        vector_quasi_monte_carlo_integration(V::Scalar::from_u32_ratio(5, 1000), nbin, move |u: V::Scalar| {
             // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
             let y = self.gaussian_beam.inverse_cdf_initial_y(u);
-            if y <= F::zero() || self.compound_prism.height <= y {
+            if y <= V::Scalar::zero() || self.compound_prism.height <= y {
                 return None;
             }
-            if let Ok((pos, t)) = self.propagate(wavelength, y) {
-                debug_assert!(pos.is_finite());
-                debug_assert!(F::zero() <= pos && pos <= self.detector_array.length);
+            if let Ok((bin_idx, t)) = self.propagate(wavelength, y) {
                 debug_assert!(t.is_finite());
-                debug_assert!(F::zero() <= t && t <= F::one());
+                debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
                 // What is actually being integrated is
                 // pdf_t = p_z * t * pdf(y);
                 // But because of importance sampling using the same distribution
@@ -72,11 +72,11 @@ impl<F: Float> Spectrometer<F> {
                 // the pdf(y) is cancelled, so.
                 // pdf_t = p_z * t;
                 let pdf_t = p_z * t;
-                Some(self.detector_array.bounds().map(move |[l, u]| {
-                    if l <= pos && pos < u {
+                Some((0..self.detector_array.bin_count).map(move |i| {
+                    if i == bin_idx {
                         pdf_t
                     } else {
-                        F::zero()
+                        V::Scalar::zero()
                     }
                 }))
             } else {
@@ -95,22 +95,22 @@ impl<F: Float> Spectrometer<F> {
     /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
     /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
     /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-    pub fn mutual_information(&self) -> F {
+    pub fn mutual_information(&self) -> V::Scalar {
         let nbin = self.detector_array.bin_count as usize;
         // p(d=D)
         let mut p_dets = vec![Welford::new(); nbin];
         // -H(D|Λ)
         let mut h_det_l_w = Welford::new();
-        let qrng = Qrng::<F>::new(F::from_u32_ratio(1, 2));
+        let qrng = Qrng::new(V::Scalar::from_u32_ratio(1, 2));
         for u in qrng.take(MAX_N) {
             // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
             let w = self.gaussian_beam.inverse_cdf_wavelength(u);
             // p(d=D|λ=Λ)
             let p_dets_l_w = self.p_dets_l_wavelength(w);
             // -H(D|λ=Λ)
-            let mut h_det_l_ws = F::zero();
+            let mut h_det_l_ws = V::Scalar::zero();
             for (dstat, p_det_l_w) in p_dets.iter_mut().zip(p_dets_l_w) {
-                debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
+                debug_assert!(V::Scalar::zero() <= p_det_l_w && p_det_l_w <= V::Scalar::one());
                 dstat.next_sample(p_det_l_w);
                 h_det_l_ws += p_det_l_w.plog2p();
             }
@@ -118,7 +118,7 @@ impl<F: Float> Spectrometer<F> {
             if p_dets.iter().all(|stat| {
                 const MAX_ERR_N: u32 = 5;
                 const MAX_ERR_D: u32 = 1000;
-                stat.sem_le_error_threshold(F::from_u32_ratio(MAX_ERR_N*MAX_ERR_N, MAX_ERR_D*MAX_ERR_D))
+                stat.sem_le_error_threshold(V::Scalar::from_u32_ratio(MAX_ERR_N*MAX_ERR_N, MAX_ERR_D*MAX_ERR_D))
             }) {
                 break;
             }
@@ -127,7 +127,7 @@ impl<F: Float> Spectrometer<F> {
         let h_det = p_dets
             .iter()
             .map(|s| s.mean.plog2p())
-            .fold(F::zero(), core::ops::Add::add);
+            .fold(V::Scalar::zero(), core::ops::Add::add);
         // I(Λ; D) = H(D) - H(D|Λ)
         h_det_l_w.mean - h_det
     }
@@ -137,7 +137,7 @@ impl<F: Float> Spectrometer<F> {
     /// * size = the distance from the mean starting position of the beam to the center of detector array
     /// * info = I(Λ; D)
     /// * deviation = sin(abs(angle of deviation))
-    pub fn fitness(&self) -> DesignFitness<F> {
+    pub fn fitness(&self) -> DesignFitness<V::Scalar> {
         let (size, deviation) = self.size_and_deviation();
         let info = self.mutual_information();
         DesignFitness {
@@ -153,6 +153,7 @@ mod tests {
     use super::*;
     use crate::glasscat::{Glass, BUNDLED_CATALOG};
     use crate::utils::almost_eq;
+    use crate::geom::Pair;
     use rand::prelude::*;
     use std::f64::consts::*;
 
@@ -213,7 +214,7 @@ mod tests {
                 w_range: wavelegth_range,
             };
 
-            let spec = match Spectrometer::new(beam, prism, detarr) {
+            let spec = match Spectrometer::<Pair<_>>::new(beam, prism, detarr) {
                 Ok(s) => s,
                 Err(_) => continue,
             };
@@ -225,7 +226,7 @@ mod tests {
                     + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
                 let ps = spec.p_dets_l_wavelength(w);
                 for p in ps {
-                    assert!(p.is_finite() && 0. <= p && p <= 1.);
+                    assert!(p.is_finite() && 0_f64 <= p && p <= 1.);
                 }
             }
             let v = spec.fitness();
@@ -269,7 +270,7 @@ mod tests {
         let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();
         let lengths = [0_f64; 3];
-        let prism = CompoundPrism::new(
+        let prism = CompoundPrism::<Pair<_>>::new(
             glasses.iter().cloned(),
             angles.as_ref(),
             lengths.as_ref(),

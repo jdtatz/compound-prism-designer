@@ -88,7 +88,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
     let angles: Box<[f32]> = angles.iter().cloned().map(f32::to_radians).collect();
     let lengths = [0_f32; 3];
-    let prism = CompoundPrism::<f32>::new(
+    let prism = CompoundPrism::new(
         glasses.iter().cloned(),
         angles.as_ref().into(),
         lengths.as_ref().into(),
@@ -116,7 +116,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         y_mean: 0.95,
         w_range: (0.5, 0.82),
     };
-    let spec = Spectrometer::new(beam, prism, detarr).unwrap();
+    let spec = Spectrometer::<geom::Pair<_>>::new(beam, prism, detarr).unwrap();
     c.bench_function("known_design_example", |b| {
         b.iter(|| spec.fitness());
     });

@@ -32,7 +32,7 @@ impl Into<&'static str> for CatalogError {
 /// Glass Dispersion Formulae Source:
 /// https://neurophysics.ucsd.edu/Manuals/Zemax/ZemaxManual.pdf#page=590
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Glass<F: Float> {
+pub enum Glass<F> {
     Schott([F; 6]),
     Sellmeier1([F; 6]),
     Sellmeier2([F; 5]),
@@ -222,14 +222,14 @@ fn from_iter_to_array<F1: Float + LossyInto<F2>, F2: Float, A: arrayvec::Array<I
     it: &[F1],
 ) -> Result<A, CatalogError> {
     it.iter()
-        .map(|v| (*v).into())
+        .map(|v| (*v).lossy_into())
         .collect::<ArrayVec<_>>()
         .into_inner()
         .map_err(|_| CatalogError::InvalidGlassDescription)
 }
 
 impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Glass<F2>> for Glass<F1> {
-    fn into(self) -> Glass<F2> {
+    fn lossy_into(self) -> Glass<F2> {
         match &self {
             Glass::Schott(cd) => Glass::Schott(from_iter_to_array(cd).unwrap()),
             Glass::Sellmeier1(cd) => Glass::Sellmeier1(from_iter_to_array(cd).unwrap()),

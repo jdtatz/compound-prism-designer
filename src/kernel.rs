@@ -2,6 +2,7 @@ use crate::utils::{Float, Welford};
 use crate::Spectrometer;
 use crate::qrng::Qrng;
 use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
+use crate::geom::{Vector, Pair};
 
 #[panic_handler]
 unsafe fn panic_handle(p: &PanicInfo) -> ! {
@@ -117,10 +118,10 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
-unsafe fn kernel<F: CudaFloat>(
+unsafe fn kernel<F: CudaFloat, V: Vector<Scalar=F>>(
     seed: F,
     max_evals: u32,
-    spectrometer: &Spectrometer<F>,
+    spectrometer: &Spectrometer<V>,
     prob: *mut F,
 ) {
     if max_evals == 0 {
@@ -138,7 +139,7 @@ unsafe fn kernel<F: CudaFloat>(
 
     let ptr: *mut u8 = ptr_shared_to_gen(0 as _) as _;
     let spec_ptr = ptr;
-    let prob_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<F>>());
+    let prob_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<V>>());
     let ptr = prob_ptr as *mut Welford<F>;
 
     let spectrometer = cuda_memcpy_1d(spec_ptr, spectrometer);
@@ -164,8 +165,8 @@ unsafe fn kernel<F: CudaFloat>(
     while index < max_evals {
         let u = qrng.next_by(32);
         let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
-        let (mut bin_index, t) = if let Ok((pos, t)) = spectrometer.propagate(wavelength, y0) {
-            (spectrometer.detector_array.bin_index(pos), t)
+        let (mut bin_index, t) = if let Ok((idx, t)) = spectrometer.propagate(wavelength, y0) {
+            (Some(idx), t)
         } else {
             (None, F::zero())
         };
@@ -226,7 +227,7 @@ unsafe fn kernel<F: CudaFloat>(
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
     seed: f32,
     max_evals: u32,
-    spectrometer: &Spectrometer<f32>,
+    spectrometer: &Spectrometer<Pair<f32>>,
     prob: *mut f32,
 ) {
     kernel(seed, max_evals, spectrometer, prob)
@@ -236,7 +237,7 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths_f64(
     seed: f64,
     max_evals: u32,
-    spectrometer: &Spectrometer<f64>,
+    spectrometer: &Spectrometer<Pair<f64>>,
     prob: *mut f64,
 ) {
     kernel(seed, max_evals, spectrometer, prob)
