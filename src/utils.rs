@@ -212,7 +212,7 @@ impl Float for f32 {
     }
 
     fn trunc(self) -> Self {
-        cuda_specific!(core::intrinsics::truncf32(self), self.fract());
+        cuda_specific!(core::intrinsics::truncf32(self), self.trunc());
     }
 
     fn fract(self) -> Self {
@@ -318,7 +318,7 @@ impl Float for f64 {
     }
 
     fn trunc(self) -> Self {
-        cuda_specific!(core::intrinsics::truncf64(self), self.fract());
+        cuda_specific!(core::intrinsics::truncf64(self), self.trunc());
     }
 
     fn fract(self) -> Self {
