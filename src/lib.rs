@@ -3,7 +3,7 @@
     target_arch = "nvptx64",
     feature(abi_ptx, core_intrinsics, stdsimd, link_llvm_intrinsics)
 )]
-#![allow(clippy::block_in_if_condition_stmt, clippy::range_plus_one)]
+#![allow(clippy::blocks_in_if_conditions, clippy::range_plus_one, clippy::excessive_precision)]
 #[macro_use]
 extern crate derive_more;
 #[macro_use]
