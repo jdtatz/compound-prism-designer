@@ -436,8 +436,8 @@ impl PySpectrometer {
             compound_prism,
             detector_array,
             gaussian_beam,
-            position: spectrometer.detector_array_position.position.clone(),
-            direction: spectrometer.detector_array_position.direction.clone(),
+            position: spectrometer.detector_array_position.position,
+            direction: spectrometer.detector_array_position.direction,
             spectrometer,
         })
     }

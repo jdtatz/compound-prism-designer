@@ -216,6 +216,7 @@ impl DynamicQrng {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> &[f64] {
         for (s, alpha) in self.state.iter_mut().zip(self.alphas.iter().copied()) {
             *s = (*s + alpha).fract();

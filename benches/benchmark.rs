@@ -1,3 +1,4 @@
+#![allow(clippy::excessive_precision)]
 #[macro_use]
 extern crate criterion;
 
@@ -90,8 +91,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let lengths = [0_f32; 3];
     let prism = CompoundPrism::new(
         glasses.iter().cloned(),
-        angles.as_ref().into(),
-        lengths.as_ref().into(),
+        angles.as_ref(),
+        lengths.as_ref(),
         0.21,
         2.5,
         2.,
