@@ -1,0 +1,9 @@
+[tasks.python-devlop]
+command = "maturin"
+args = ["develop", "--release", "--rustc-extra-args=\"-C target-feature=+fma -C target-cpu=native -C link-arg=-fuse-ld=lld\"", "--cargo-extra-args=\"--features pyext\""]
+
+[tasks.kernel]
+env = { "RUSTFLAGS" = "-Ccodegen-units=1 -Clto -Ctarget-cpu=sm_52 -Ctarget-feature=+ptx60 -Cllvm-args=--lto-embed-bitcode -Cdefault-linker-libraries=no" }
+command = "cargo"
+args = ["rustc", "--manifest-path", "compound_prism_designer_kernel/Cargo.toml", "--release", "--target=nvptx64-nvidia-cuda.json", "-Z", " build-std=core", "-Z", "features=all", "--", "--emit=asm=\"target/kernel.ptx\""]
+
