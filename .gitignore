@@ -3,3 +3,4 @@
 **/*.rs.bk
 Cargo.lock
 /venv
+!target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx

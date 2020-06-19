@@ -1,30 +1,33 @@
 use crate::geom::Vector;
 use crate::qrng::*;
 use crate::ray::*;
+use crate::spectrometer::Spectrometer;
 use crate::utils::*;
+use crate::welford::Welford;
 
 const MAX_N: usize = 100_000;
 
-fn vector_quasi_monte_carlo_integration<V, F>(
+fn vector_quasi_monte_carlo_integration<V, Q, F>(
     max_err: V,
     vec_len: usize,
     vector_fn: F,
 ) -> Vec<Welford<V>>
 where
     V: Float,
-    F: Fn(V) -> Option<(usize, V)>,
+    Q: QuasiRandom<Scalar = V>,
+    F: Fn(Q) -> Option<(usize, V)>,
 {
     let max_err_squared = max_err * max_err;
     let mut count = V::zero();
     let mut stats = vec![Welford::new(); vec_len];
-    let qrng = Qrng::<V>::new(V::from_u32_ratio(1, 2));
+    let qrng = Qrng::new_from_scalar(V::from_u32_ratio(1, 2));
     for u in qrng.take(MAX_N) {
         count += V::one();
         if let Some((idx, v)) = vector_fn(u) {
             stats[idx].skip(count);
             stats[idx].next_sample(v);
             if stats[idx].sem_le_error_threshold(max_err_squared) {
-                break
+                break;
             }
         }
     }
@@ -42,35 +45,32 @@ pub struct DesignFitness<F: Float> {
     pub deviation: F,
 }
 
-impl<V: Vector> Spectrometer<V> {
+impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
     /// Conditional Probability of detection per detector given a `wavelength`
     /// { p(D=d|Λ=λ) : d in D }
     ///
     /// # Arguments
     ///  * `wavelength` - given wavelength
     pub fn p_dets_l_wavelength(&self, wavelength: V::Scalar) -> impl Iterator<Item = V::Scalar> {
-        let p_z = self.probability_z_in_bounds();
-        debug_assert!(V::Scalar::zero() <= p_z && p_z <= V::Scalar::one());
-        let nbin = self.detector_array.bin_count as usize;
+        let nbin = self.detector.bin_count() as usize;
         vector_quasi_monte_carlo_integration(
             V::Scalar::from_u32_ratio(5, 1000),
             nbin,
-            move |u: V::Scalar| {
-                // Inverse transform sampling-method: U[0, 1) => N(µ = beam.y_mean, σ = beam.width / 2)
-                let y = self.gaussian_beam.inverse_cdf_initial_y(u);
-                if y <= V::Scalar::zero() || self.compound_prism.height <= y {
-                    return None;
-                }
-                if let Ok((bin_idx, t)) = self.propagate(wavelength, y) {
+            move |q: B::Quasi| {
+                // Inverse transform sampling-method
+                let ray = self.beam.inverse_cdf_ray(q);
+                if let Ok((bin_idx, t)) =
+                    ray.propagate(wavelength, &self.compound_prism, &self.detector)
+                {
                     debug_assert!(t.is_finite());
                     debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
                     // What is actually being integrated is
-                    // pdf_t = p_z * t * pdf(y);
+                    // pdf_t = t * pdf(y, z);
                     // But because of importance sampling using the same distribution
-                    // pdf_t /= pdf(y);
-                    // the pdf(y) is cancelled, so.
-                    // pdf_t = p_z * t;
-                    let pdf_t = p_z * t;
+                    // pdf_t /= pdf(y, z);
+                    // the pdf(y, z) is cancelled, so.
+                    // pdf_t = t;
+                    let pdf_t = t;
                     Some((bin_idx as usize, pdf_t))
                 } else {
                     None
@@ -90,7 +90,7 @@ impl<V: Vector> Spectrometer<V> {
     /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
     /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
     pub fn mutual_information(&self) -> V::Scalar {
-        let nbin = self.detector_array.bin_count as usize;
+        let nbin = self.detector.bin_count() as usize;
         // p(d=D)
         let mut p_dets = vec![Welford::new(); nbin];
         // -H(D|Λ)
@@ -98,7 +98,7 @@ impl<V: Vector> Spectrometer<V> {
         let qrng = Qrng::new(V::Scalar::from_u32_ratio(1, 2));
         for u in qrng.take(MAX_N) {
             // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-            let w = self.gaussian_beam.inverse_cdf_wavelength(u);
+            let w = self.beam.inverse_cdf_wavelength(u);
             // p(d=D|λ=Λ)
             let p_dets_l_w = self.p_dets_l_wavelength(w);
             // -H(D|λ=Λ)
@@ -150,6 +150,7 @@ mod tests {
     use super::*;
     use crate::geom::Pair;
     use crate::glasscat::{Glass, BUNDLED_CATALOG};
+    use crate::spectrometer::{GaussianBeam, LinearDetectorArray};
     use crate::utils::almost_eq;
     use rand::prelude::*;
     use std::f64::consts::*;
@@ -211,7 +212,7 @@ mod tests {
                 w_range: wavelegth_range,
             };
 
-            let spec = match Spectrometer::<Pair<_>>::new(beam, prism, detarr) {
+            let spec = match Spectrometer::<Pair<_>, _>::new(beam, prism, detarr) {
                 Ok(s) => s,
                 Err(_) => continue,
             };

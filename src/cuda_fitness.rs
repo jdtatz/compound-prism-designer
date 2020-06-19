@@ -1,7 +1,10 @@
 use crate::fitness::DesignFitness;
 use crate::geom::Vector;
-use crate::ray::Spectrometer;
-use crate::utils::{Float, Welford};
+use crate::ray::DetectorArray;
+use crate::spectrometer::Spectrometer;
+use crate::utils::Float;
+use crate::welford::Welford;
+use crate::Beam;
 use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
@@ -10,7 +13,10 @@ use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::{CStr, CString};
 
-unsafe impl<F: Float + DeviceCopy, V: Vector<Scalar = F>> DeviceCopy for Spectrometer<V> {}
+unsafe impl<F: Float + DeviceCopy, V: Vector<Scalar = F>, B: Beam<Vector = V>> DeviceCopy
+    for Spectrometer<V, B>
+{
+}
 
 const PTX_STR: &str =
     include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
@@ -100,20 +106,20 @@ impl CudaFitnessContext {
         })
     }
 
-    fn launch_p_dets_l_ws<F: KernelFloat, V: Vector<Scalar = F>>(
+    fn launch_p_dets_l_ws<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
         &mut self,
         seed: f64,
-        spec: &Spectrometer<V>,
+        spec: &Spectrometer<V, B>,
     ) -> rustacuda::error::CudaResult<Vec<F>> {
         ContextStack::push(&self.ctxt)?;
 
-        let nbin = spec.detector_array.bin_count as usize;
+        let nbin = spec.detector.bin_count() as usize;
         let mut dev_spec = DeviceBox::new(spec)?;
         let mut dev_probs = unsafe { DeviceBuffer::zeroed(MAX_N * nbin) }?;
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
-        let dynamic_shared_mem = std::mem::size_of::<Spectrometer<V>>() as u32
+        let dynamic_shared_mem = std::mem::size_of::<Spectrometer<V, B>>() as u32
             + nbin as u32 * NWARP * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
@@ -147,7 +153,7 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
     Ok(())
 }
 
-impl<F: KernelFloat, V: Vector<Scalar = F>> Spectrometer<V> {
+impl<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>> Spectrometer<V, B> {
     pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
         let max_err = F::from_u32_ratio(5, 1000);
         let max_err_sq = max_err * max_err;
@@ -157,7 +163,7 @@ impl<F: KernelFloat, V: Vector<Scalar = F>> Spectrometer<V> {
             .expect("Failed to initialize Cuda Fitness Context");
         let mut state = mutex.lock();
 
-        let nbin = self.detector_array.bin_count as usize;
+        let nbin = self.detector.bin_count() as usize;
         // p(d=D)
         let mut p_dets = vec![Welford::new(); nbin];
         // -H(d=D|Λ)

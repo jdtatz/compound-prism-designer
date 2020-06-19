@@ -1,7 +1,8 @@
 use crate::fitness::*;
 use crate::geom::Pair;
 use crate::glasscat::*;
-use crate::ray::{CompoundPrism, GaussianBeam, LinearDetectorArray, Spectrometer};
+use crate::ray::CompoundPrism;
+use crate::spectrometer::{GaussianBeam, LinearDetectorArray, Spectrometer};
 use crate::utils::{Float, LossyInto};
 use ndarray::array;
 use ndarray::prelude::Array2;
@@ -392,7 +393,7 @@ impl PyGaussianBeam {
 #[pyclass(name=Spectrometer, gc, module="compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
-    spectrometer: Spectrometer<Pair<f64>>,
+    spectrometer: Spectrometer<Pair<f64>, GaussianBeam<f64>>,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
     compound_prism: Py<PyCompoundPrism>,
@@ -436,8 +437,8 @@ impl PySpectrometer {
             compound_prism,
             detector_array,
             gaussian_beam,
-            position: spectrometer.detector_array_position.position,
-            direction: spectrometer.detector_array_position.direction,
+            position: spectrometer.detector.1.position,
+            direction: spectrometer.detector.1.direction,
             spectrometer,
         })
     }
@@ -459,7 +460,8 @@ impl PySpectrometer {
     }
 
     fn gpu_fitness(&self, py: Python) -> Option<PyDesignFitness> {
-        let spec: Spectrometer<Pair<f32>> = LossyInto::lossy_into(self.spectrometer.clone());
+        let spec: Spectrometer<Pair<f32>, GaussianBeam<f32>> =
+            LossyInto::lossy_into(self.spectrometer.clone());
         let fit = py.allow_threads(|| spec.cuda_fitness())?;
         Some(fit.into())
     }

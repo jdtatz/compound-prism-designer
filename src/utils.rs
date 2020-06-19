@@ -206,7 +206,7 @@ impl Float for f32 {
     }
 
     fn exp(self) -> Self {
-        cuda_specific!(core::intrinsics::expf32(self), self.exp());
+        cuda_specific!(libm::expf(self), self.exp());
     }
 
     fn ln(self) -> Self {
@@ -315,7 +315,7 @@ impl Float for f64 {
     }
 
     fn exp(self) -> Self {
-        cuda_specific!(core::intrinsics::expf64(self), self.exp());
+        cuda_specific!(libm::exp(self), self.exp());
     }
 
     fn ln(self) -> Self {
@@ -394,64 +394,4 @@ macro_rules! debug_assert_almost_eq {
             $crate::assert_almost_eq!($($inner)*)
         }
     };
-}
-
-/// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-#[derive(Copy, Clone)]
-pub struct Welford<F> {
-    pub count: F,
-    pub mean: F,
-    pub m2: F,
-}
-
-impl<F: Float> Welford<F> {
-    pub fn new() -> Self {
-        Welford {
-            count: F::zero(),
-            mean: F::zero(),
-            m2: F::zero(),
-        }
-    }
-    pub fn next_sample(&mut self, x: F) {
-        self.count += F::one();
-        let delta = x - self.mean;
-        self.mean += delta / self.count;
-        let delta2 = x - self.mean;
-        self.m2 += delta * delta2;
-    }
-    pub fn skip(&mut self, new_count: F) {
-        if self.count < new_count {
-            let zero_count = new_count - self.count;
-            let count = new_count;
-            self.mean = (self.count * self.mean) / count;
-            self.m2 += self.mean.sqr() * self.count * zero_count / count;
-            self.count = count;
-        }
-    }
-    pub fn sample_variance(&self) -> F {
-        self.m2 / (self.count - F::one())
-    }
-    /// Standard Error of the Mean (SEM)
-    pub fn sem(&self) -> F {
-        (self.sample_variance() / self.count).sqrt()
-    }
-    /// Is the Standard Error of the Mean (SEM) less than the error threshold?
-    /// Uses the square of the error for numerical stability (avoids sqrt)
-    pub fn sem_le_error_threshold(&self, error_squared: F) -> bool {
-        // SEM^2 = self.sample_variance() / self.count
-        self.m2 < error_squared * (self.count * (self.count - F::one()))
-    }
-    pub fn combine(&mut self, other: Self) {
-        let count = self.count + other.count;
-        let delta = other.mean - self.mean;
-        self.mean = (self.count * self.mean + other.count * other.mean) / count;
-        self.m2 += other.m2 + delta.sqr() * self.count * other.count / count;
-        self.count = count;
-    }
-}
-
-impl<F: Float> Default for Welford<F> {
-    fn default() -> Self {
-        Self::new()
-    }
 }
