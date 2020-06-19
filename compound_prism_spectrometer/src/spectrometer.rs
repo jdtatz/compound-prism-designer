@@ -307,7 +307,7 @@ impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
         Ray::new_from_start(initial_y).trace(wavelength, &self.compound_prism, &self.detector)
     }
 
-    pub(crate) fn size_and_deviation(&self) -> (V::Scalar, V::Scalar) {
+    pub fn size_and_deviation(&self) -> (V::Scalar, V::Scalar) {
         let deviation_vector = self.detector.1.position
             + self.detector.1.direction * self.detector.length() * V::Scalar::from_u32_ratio(1, 2)
             - V::from_xy(V::Scalar::zero(), self.beam.y_mean());
@@ -383,4 +383,9 @@ where
             detector: self.detector.lossy_into(),
         }
     }
+}
+
+unsafe impl<F: Float + rustacuda_core::DeviceCopy, V: Vector<Scalar = F>, B: Beam<Vector = V>>
+    rustacuda_core::DeviceCopy for Spectrometer<V, B>
+{
 }

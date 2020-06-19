@@ -1,9 +1,9 @@
 [package]
 name = "compound_prism_designer"
-version = "0.0.6"
+version = "0.1.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
-include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/design_config.toml", "/README.md", "/requirements.txt"]
+include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/build.rs", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
 
 [lib]
 name = "compound_prism_designer"
@@ -11,13 +11,12 @@ bench = false
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+compound_prism_spectrometer = { path = "./compound_prism_spectrometer", features = ["std"] }
 derive_more = "0.99"
-arrayvec = { version = "0.5", default-features = false, features = ["serde"] }
+arrayvec = { version = "0.5", features = ["serde"] }
 libm = "0.2"
-serde = { version="1", default-features = false, features=["derive"] }
-serde_cbor = { version = "0.11", default-features = false }
-
-[target.'cfg(not(target_arch ="nvptx64"))'.dependencies]
+serde = { version="1", features=["derive"] }
+serde_cbor = "0.11"
 rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update", optional = true }
 once_cell = { version="1.4", features=["parking_lot"], optional = true }
 parking_lot = { version = "0.10",optional = true }
@@ -30,7 +29,6 @@ rand = "0.7"
 rand_xoshiro = "0.4"
 criterion = "0.3"
 cpuprofiler = "0.0.4"
-statrs = "0.12"
 
 [features]
 default = ["cuda", "serde_cbor/std"]
@@ -44,7 +42,6 @@ harness = false
 [profile.release]
 opt-level=3
 lto=true
-codegen-units=1
 
 [profile.bench]
 debug = true
@@ -56,3 +53,9 @@ opt-level=0
 requires-dist = ["numpy~=1.17", "matplotlib~=3.0", "PySide2[app]~=5.13", "toml[app] ~= 0.10"]
 provides-extra = ["app"]
 requires-python = ">=3.7"
+
+[workspace]
+members = [
+    "compound_prism_spectrometer",
+    "compound_prism_designer_kernel"
+]

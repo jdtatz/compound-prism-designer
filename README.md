@@ -33,8 +33,9 @@ Optimization II](https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf)
     - And either
       * ``rustup override set nightly`` in the project directory
       * or ``rustup default nightly``
-  * Need rust version >= 1.36.0
-2. Create and activate a python virtual environment, using either
+  * Need rust version >= 1.46.0-nightly
+2. Install additional rust components ``rustup component add rust-src llvm-tools-preview --toolchain=nightly``
+3. Create and activate a python virtual environment, using either
   - Python3 venv
     * Create and activate python3 virtual environment. See [tutorial](https://docs.python.org/3/tutorial/venv.html).
     * Install the prerequisite packages in the virtual environment with ``pip3 install -r requirements.txt``
@@ -42,6 +43,5 @@ Optimization II](https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf)
     * Install [Anaconda](https://docs.anaconda.com/anaconda/install/) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html)
         for python virtual environment package environment.
     * Create and activate a conda virtual environment using [environment.yml](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file) 
-3. Build the library and add it to your using virtual environment with ``maturin develop --release --rustc-extra-args="-C target-feature=+fma -C target-cpu=native" --cargo-extra-args="--features pyext"``
-4. Configure design specifications in ``design_config.toml``
-5. Run the designer app with ``python3 -m compound_prism_designer``
+4. Build the library and add it to your using virtual environment with ``maturin develop --release --rustc-extra-args="-C target-feature=+fma -C target-cpu=native" --cargo-extra-args="--features pyext"``
+5. Run the designer app with ``python3 designer.py``

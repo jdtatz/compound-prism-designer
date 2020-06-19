@@ -1,9 +1,4 @@
-use crate::geom::Vector;
-use crate::qrng::*;
-use crate::ray::*;
-use crate::spectrometer::Spectrometer;
-use crate::utils::*;
-use crate::welford::Welford;
+use compound_prism_spectrometer::*;
 
 const MAX_N: usize = 100_000;
 
@@ -45,113 +40,116 @@ pub struct DesignFitness<F: Float> {
     pub deviation: F,
 }
 
-impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
-    /// Conditional Probability of detection per detector given a `wavelength`
-    /// { p(D=d|Λ=λ) : d in D }
-    ///
-    /// # Arguments
-    ///  * `wavelength` - given wavelength
-    pub fn p_dets_l_wavelength(&self, wavelength: V::Scalar) -> impl Iterator<Item = V::Scalar> {
-        let nbin = self.detector.bin_count() as usize;
-        vector_quasi_monte_carlo_integration(
-            V::Scalar::from_u32_ratio(5, 1000),
-            nbin,
-            move |q: B::Quasi| {
-                // Inverse transform sampling-method
-                let ray = self.beam.inverse_cdf_ray(q);
-                if let Ok((bin_idx, t)) =
-                    ray.propagate(wavelength, &self.compound_prism, &self.detector)
-                {
-                    debug_assert!(t.is_finite());
-                    debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
-                    // What is actually being integrated is
-                    // pdf_t = t * pdf(y, z);
-                    // But because of importance sampling using the same distribution
-                    // pdf_t /= pdf(y, z);
-                    // the pdf(y, z) is cancelled, so.
-                    // pdf_t = t;
-                    let pdf_t = t;
-                    Some((bin_idx as usize, pdf_t))
-                } else {
-                    None
-                }
-            },
-        )
-        .into_iter()
-        .map(|w| w.mean)
-    }
-
-    /// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
-    /// I(Λ; D) = H(D) - H(D|Λ)
-    ///   = Sum(Integrate(p(Λ=λ) p(D=d|Λ=λ) log2(p(D=d|Λ=λ)), {λ, wmin, wmax}), d in D)
-    ///      - Sum(p(D=d) log2(p(D=d)), d in D)
-    /// p(D=d) = Expectation_Λ(p(D=d|Λ=λ)) = Integrate(p(Λ=λ) p(D=d|Λ=λ), {λ, wmin, wmax})
-    /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
-    /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
-    /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-    pub fn mutual_information(&self) -> V::Scalar {
-        let nbin = self.detector.bin_count() as usize;
-        // p(d=D)
-        let mut p_dets = vec![Welford::new(); nbin];
-        // -H(D|Λ)
-        let mut h_det_l_w = Welford::new();
-        let qrng = Qrng::new(V::Scalar::from_u32_ratio(1, 2));
-        for u in qrng.take(MAX_N) {
-            // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-            let w = self.beam.inverse_cdf_wavelength(u);
-            // p(d=D|λ=Λ)
-            let p_dets_l_w = self.p_dets_l_wavelength(w);
-            // -H(D|λ=Λ)
-            let mut h_det_l_ws = V::Scalar::zero();
-            for (dstat, p_det_l_w) in p_dets.iter_mut().zip(p_dets_l_w) {
-                debug_assert!(V::Scalar::zero() <= p_det_l_w && p_det_l_w <= V::Scalar::one());
-                dstat.next_sample(p_det_l_w);
-                h_det_l_ws += p_det_l_w.plog2p();
+/// Conditional Probability of detection per detector given a `wavelength`
+/// { p(D=d|Λ=λ) : d in D }
+///
+/// # Arguments
+///  * `wavelength` - given wavelength
+pub fn p_dets_l_wavelength<V: Vector, B: Beam<Vector = V>>(
+    spectrometer: &Spectrometer<V, B>,
+    wavelength: V::Scalar,
+) -> impl Iterator<Item = V::Scalar> {
+    let nbin = spectrometer.detector.bin_count() as usize;
+    vector_quasi_monte_carlo_integration(
+        V::Scalar::from_u32_ratio(5, 1000),
+        nbin,
+        move |q: B::Quasi| {
+            // Inverse transform sampling-method
+            let ray = spectrometer.beam.inverse_cdf_ray(q);
+            if let Ok((bin_idx, t)) = ray.propagate(
+                wavelength,
+                &spectrometer.compound_prism,
+                &spectrometer.detector,
+            ) {
+                debug_assert!(t.is_finite());
+                debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
+                // What is actually being integrated is
+                // pdf_t = t * pdf(y, z);
+                // But because of importance sampling using the same distribution
+                // pdf_t /= pdf(y, z);
+                // the pdf(y, z) is cancelled, so.
+                // pdf_t = t;
+                let pdf_t = t;
+                Some((bin_idx as usize, pdf_t))
+            } else {
+                None
             }
-            h_det_l_w.next_sample(h_det_l_ws);
-            if p_dets.iter().all(|stat| {
-                const MAX_ERR_N: u32 = 5;
-                const MAX_ERR_D: u32 = 1000;
-                stat.sem_le_error_threshold(V::Scalar::from_u32_ratio(
-                    MAX_ERR_N * MAX_ERR_N,
-                    MAX_ERR_D * MAX_ERR_D,
-                ))
-            }) {
-                break;
-            }
-        }
-        // -H(D)
-        let h_det = p_dets
-            .iter()
-            .map(|s| s.mean.plog2p())
-            .fold(V::Scalar::zero(), core::ops::Add::add);
-        // I(Λ; D) = H(D) - H(D|Λ)
-        h_det_l_w.mean - h_det
-    }
+        },
+    )
+    .into_iter()
+    .map(|w| w.mean)
+}
 
-    /// Return the fitness of the spectrometer design to be minimized by an optimizer.
-    /// The fitness objectives are
-    /// * size = the distance from the mean starting position of the beam to the center of detector array
-    /// * info = I(Λ; D)
-    /// * deviation = sin(abs(angle of deviation))
-    pub fn fitness(&self) -> DesignFitness<V::Scalar> {
-        let (size, deviation) = self.size_and_deviation();
-        let info = self.mutual_information();
-        DesignFitness {
-            size,
-            info,
-            deviation,
+/// The mutual information of Λ and D. How much information is gained about Λ by measuring D.
+/// I(Λ; D) = H(D) - H(D|Λ)
+///   = Sum(Integrate(p(Λ=λ) p(D=d|Λ=λ) log2(p(D=d|Λ=λ)), {λ, wmin, wmax}), d in D)
+///      - Sum(p(D=d) log2(p(D=d)), d in D)
+/// p(D=d) = Expectation_Λ(p(D=d|Λ=λ)) = Integrate(p(Λ=λ) p(D=d|Λ=λ), {λ, wmin, wmax})
+/// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
+/// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
+/// https://en.wikipedia.org/wiki/Differential_entropy#Definition
+pub fn mutual_information<V: Vector, B: Beam<Vector = V>>(
+    spectrometer: &Spectrometer<V, B>,
+) -> V::Scalar {
+    let nbin = spectrometer.detector.bin_count() as usize;
+    // p(d=D)
+    let mut p_dets = vec![Welford::new(); nbin];
+    // -H(D|Λ)
+    let mut h_det_l_w = Welford::new();
+    let qrng = Qrng::new(V::Scalar::from_u32_ratio(1, 2));
+    for u in qrng.take(MAX_N) {
+        // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
+        let w = spectrometer.beam.inverse_cdf_wavelength(u);
+        // p(d=D|λ=Λ)
+        let p_dets_l_w = p_dets_l_wavelength(spectrometer, w);
+        // -H(D|λ=Λ)
+        let mut h_det_l_ws = V::Scalar::zero();
+        for (dstat, p_det_l_w) in p_dets.iter_mut().zip(p_dets_l_w) {
+            debug_assert!(V::Scalar::zero() <= p_det_l_w && p_det_l_w <= V::Scalar::one());
+            dstat.next_sample(p_det_l_w);
+            h_det_l_ws += p_det_l_w.plog2p();
         }
+        h_det_l_w.next_sample(h_det_l_ws);
+        if p_dets.iter().all(|stat| {
+            const MAX_ERR_N: u32 = 5;
+            const MAX_ERR_D: u32 = 1000;
+            stat.sem_le_error_threshold(V::Scalar::from_u32_ratio(
+                MAX_ERR_N * MAX_ERR_N,
+                MAX_ERR_D * MAX_ERR_D,
+            ))
+        }) {
+            break;
+        }
+    }
+    // -H(D)
+    let h_det = p_dets
+        .iter()
+        .map(|s| s.mean.plog2p())
+        .fold(V::Scalar::zero(), core::ops::Add::add);
+    // I(Λ; D) = H(D) - H(D|Λ)
+    h_det_l_w.mean - h_det
+}
+
+/// Return the fitness of the spectrometer design to be minimized by an optimizer.
+/// The fitness objectives are
+/// * size = the distance from the mean starting position of the beam to the center of detector array
+/// * info = I(Λ; D)
+/// * deviation = sin(abs(angle of deviation))
+pub fn fitness<V: Vector, B: Beam<Vector = V>>(
+    spectrometer: &Spectrometer<V, B>,
+) -> DesignFitness<V::Scalar> {
+    let (size, deviation) = spectrometer.size_and_deviation();
+    let info = mutual_information(spectrometer);
+    DesignFitness {
+        size,
+        info,
+        deviation,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::Pair;
-    use crate::glasscat::{Glass, BUNDLED_CATALOG};
-    use crate::spectrometer::{GaussianBeam, LinearDetectorArray};
-    use crate::utils::almost_eq;
     use rand::prelude::*;
     use std::f64::consts::*;
 
@@ -222,12 +220,12 @@ mod tests {
             for i in 0..nwlen {
                 let w = wavelegth_range.0
                     + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
-                let ps = spec.p_dets_l_wavelength(w);
+                let ps = p_dets_l_wavelength(&spec, w);
                 for p in ps {
                     assert!(p.is_finite() && 0_f64 <= p && p <= 1.);
                 }
             }
-            let v = spec.fitness();
+            let v = fitness(&spec);
             assert!(v.size > 0.);
             assert!(0. <= v.info && v.info <= (NBIN as f64).log2());
             assert!(0. <= v.deviation && v.deviation < FRAC_PI_2);
@@ -300,19 +298,19 @@ mod tests {
         let spec =
             Spectrometer::new(beam, prism, detarr).expect("This is a valid spectrometer design.");
 
-        let v = spec.fitness();
+        let v = fitness(&spec);
         assert!(
-            almost_eq(v.size, 41.3241, 1e-3),
+            utils::almost_eq(v.size, 41.3241, 1e-3),
             "Size is incorrect. {} ≉ 41.3",
             v.size
         );
         assert!(
-            almost_eq(v.info, 1.44, 1e-2),
+            utils::almost_eq(v.info, 1.44, 1e-2),
             "Mutual information is incorrect. {} ≉ 1.44",
             v.info
         );
         assert!(
-            almost_eq(v.deviation, 0.377159, 1e-3),
+            utils::almost_eq(v.deviation, 0.377159, 1e-3),
             "Deviation is incorrect. {} ≉ 0.377",
             v.deviation
         );
