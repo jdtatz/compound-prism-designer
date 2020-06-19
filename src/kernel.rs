@@ -1,7 +1,8 @@
-use crate::geom::{Pair, Vector};
-use crate::qrng::Qrng;
-use crate::utils::{Float, Welford};
-use crate::Spectrometer;
+use crate::{
+    geom::{Pair, Vector},
+    qrng::Qrng,
+    Beam, DetectorArray, Float, GaussianBeam, Spectrometer, Welford,
+};
 use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
 
 #[panic_handler]
@@ -118,10 +119,10 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
-unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>>(
+unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     seed: F,
     max_evals: u32,
-    spectrometer: &Spectrometer<V>,
+    spectrometer: &Spectrometer<V, B>,
     prob: *mut F,
 ) {
     if max_evals == 0 {
@@ -139,12 +140,12 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>>(
 
     let ptr: *mut u8 = ptr_shared_to_gen(0 as _) as _;
     let spec_ptr = ptr;
-    let prob_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<V>>());
+    let prob_ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<V, B>>());
     let ptr = prob_ptr as *mut Welford<F>;
 
     let spectrometer = cuda_memcpy_1d(spec_ptr, spectrometer);
     _syncthreads();
-    let nbin = spectrometer.detector_array.bin_count;
+    let nbin = spectrometer.detector.bin_count();
     let shared = from_raw_parts_mut(ptr.add((warpid * nbin) as usize), nbin as usize);
     let mut i = laneid;
     while i < nbin {
@@ -155,18 +156,22 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>>(
     let id = (_block_idx_x() as u32) * nwarps + warpid;
 
     let u = (F::from_u32(id)).mul_add(F::from_f64(ALPHA), seed).fract();
-    let wavelength = spectrometer.gaussian_beam.inverse_cdf_wavelength(u);
+    let wavelength = spectrometer.beam.inverse_cdf_wavelength(u);
 
     let mut count = F::zero();
     let mut index = laneid;
-    let mut qrng = Qrng::new(seed);
+    let mut qrng = Qrng::new_from_scalar(seed);
     qrng.next_by(laneid);
     let max_evals = max_evals - (max_evals % 32);
     while index < max_evals {
-        let u = qrng.next_by(32);
-        let y0 = spectrometer.gaussian_beam.inverse_cdf_initial_y(u);
-        let (mut bin_index, t) = spectrometer
-            .propagate(wavelength, y0)
+        let q = qrng.next_by(32);
+        let ray = spectrometer.beam.inverse_cdf_ray(q);
+        let (mut bin_index, t) = ray
+            .propagate(
+                wavelength,
+                &spectrometer.compound_prism,
+                &spectrometer.detector,
+            )
             .unwrap_or((nbin, F::zero()));
         let mut det_count = warp_ballot(bin_index < nbin);
         let mut finished = det_count > 0;
@@ -221,7 +226,7 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>>(
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
     seed: f32,
     max_evals: u32,
-    spectrometer: &Spectrometer<Pair<f32>>,
+    spectrometer: &Spectrometer<Pair<f32>, GaussianBeam<f32>>,
     prob: *mut f32,
 ) {
     kernel(seed, max_evals, spectrometer, prob)
@@ -231,7 +236,7 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths_f64(
     seed: f64,
     max_evals: u32,
-    spectrometer: &Spectrometer<Pair<f64>>,
+    spectrometer: &Spectrometer<Pair<f64>, GaussianBeam<f64>>,
     prob: *mut f64,
 ) {
     kernel(seed, max_evals, spectrometer, prob)

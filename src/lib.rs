@@ -3,7 +3,11 @@
     target_arch = "nvptx64",
     feature(abi_ptx, core_intrinsics, stdsimd, link_llvm_intrinsics)
 )]
-#![allow(clippy::blocks_in_if_conditions, clippy::range_plus_one, clippy::excessive_precision)]
+#![allow(
+    clippy::blocks_in_if_conditions,
+    clippy::range_plus_one,
+    clippy::excessive_precision
+)]
 #[macro_use]
 extern crate derive_more;
 #[macro_use]
@@ -22,9 +26,14 @@ pub mod utils;
 pub mod cuda_fitness;
 #[cfg(not(target_arch = "nvptx64"))]
 mod fitness;
+mod spectrometer;
+mod welford;
 #[cfg(not(target_arch = "nvptx64"))]
 pub use crate::fitness::*;
 pub use crate::glasscat::*;
 pub use crate::ray::*;
+pub use crate::spectrometer::*;
+pub use crate::utils::{Float, LossyInto};
+pub use crate::welford::Welford;
 #[cfg(target_arch = "nvptx64")]
 mod kernel;

@@ -108,14 +108,22 @@ const ALPHA_3: [f64; 3] = [
 ];
 
 pub trait QuasiRandom: Copy {
+    type Scalar;
     fn alpha() -> Self;
+    fn from_scalar(scalar: Self::Scalar) -> Self;
     fn iadd_mod_1(&mut self, rhs: Self);
     fn mul_by_int(self, rhs: u32) -> Self;
 }
 
 impl<F: Float> QuasiRandom for F {
+    type Scalar = F;
+
     fn alpha() -> Self {
         F::from_f64(ALPHA_1)
+    }
+
+    fn from_scalar(scalar: Self::Scalar) -> Self {
+        scalar
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
@@ -128,8 +136,14 @@ impl<F: Float> QuasiRandom for F {
 }
 
 impl<F: Float> QuasiRandom for [F; 2] {
+    type Scalar = F;
+
     fn alpha() -> Self {
         [F::from_f64(ALPHA_2[0]), F::from_f64(ALPHA_2[1])]
+    }
+
+    fn from_scalar(scalar: Self::Scalar) -> Self {
+        [scalar, scalar]
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
@@ -144,12 +158,18 @@ impl<F: Float> QuasiRandom for [F; 2] {
 }
 
 impl<F: Float> QuasiRandom for [F; 3] {
+    type Scalar = F;
+
     fn alpha() -> Self {
         [
             F::from_f64(ALPHA_3[0]),
             F::from_f64(ALPHA_3[1]),
             F::from_f64(ALPHA_3[2]),
         ]
+    }
+
+    fn from_scalar(scalar: Self::Scalar) -> Self {
+        [scalar, scalar, scalar]
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
@@ -171,6 +191,12 @@ pub struct Qrng<Q: QuasiRandom> {
 impl<Q: QuasiRandom> Qrng<Q> {
     pub fn new(seed: Q) -> Self {
         Self { state: seed }
+    }
+
+    pub fn new_from_scalar(scalar_seed: Q::Scalar) -> Self {
+        Self {
+            state: Q::from_scalar(scalar_seed),
+        }
     }
 
     pub fn next_by(&mut self, step: u32) -> Q {
