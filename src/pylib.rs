@@ -1,9 +1,6 @@
-use crate::fitness::*;
-use crate::geom::Pair;
-use crate::glasscat::*;
-use crate::ray::CompoundPrism;
-use crate::spectrometer::{GaussianBeam, LinearDetectorArray, Spectrometer};
-use crate::utils::{Float, LossyInto};
+use crate::cuda_fitness::cuda_fitness;
+use crate::fitness::{fitness, p_dets_l_wavelength, DesignFitness};
+use compound_prism_spectrometer::*;
 use ndarray::array;
 use ndarray::prelude::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
@@ -16,31 +13,6 @@ use pyo3::{create_exception, PyObjectProtocol};
 
 create_exception!(compound_prism_designer, GlassCatalogError, Exception);
 create_exception!(compound_prism_designer, RayTraceError, Exception);
-
-impl From<CatalogError> for PyErr {
-    fn from(err: CatalogError) -> PyErr {
-        GlassCatalogError::py_err(<CatalogError as Into<&'static str>>::into(err))
-    }
-}
-
-impl From<crate::ray::RayTraceError> for PyErr {
-    fn from(err: crate::ray::RayTraceError) -> PyErr {
-        RayTraceError::py_err(<crate::ray::RayTraceError as Into<&'static str>>::into(err))
-    }
-}
-
-impl<'src> FromPyObject<'src> for Pair<f64> {
-    fn extract(obj: &'src PyAny) -> Result<Self, PyErr> {
-        let (x, y) = obj.extract()?;
-        Ok(Pair { x, y })
-    }
-}
-
-impl IntoPy<PyObject> for Pair<f64> {
-    fn into_py(self, py: Python) -> PyObject {
-        (self.x, self.y).to_object(py)
-    }
-}
 
 #[pyclass(name=Glass, module="compound_prism_designer")]
 #[derive(Clone, Debug)]
@@ -106,7 +78,9 @@ fn create_glass_catalog(catalog_file_contents: &str) -> PyResult<Vec<PyGlass>> {
                 name: name.into(),
                 glass,
             })
-            .map_err(|e| e.into())
+            .map_err(|err| {
+                GlassCatalogError::py_err(<CatalogError as Into<&'static str>>::into(err))
+            })
         })
         .collect()
 }
@@ -405,10 +379,10 @@ struct PySpectrometer {
     gaussian_beam: Py<PyGaussianBeam>,
     /// detector array position : (float, float)
     #[pyo3(get)]
-    position: Pair<f64>,
+    position: (f64, f64),
     /// detector array direction : (float, float)
     #[pyo3(get)]
-    direction: Pair<f64>,
+    direction: (f64, f64),
 }
 
 #[pymethods]
@@ -432,13 +406,24 @@ impl PySpectrometer {
                 .try_borrow()?
                 .detector_array
                 .clone(),
-        )?;
+        )
+        .map_err(|err| {
+            RayTraceError::py_err(<compound_prism_spectrometer::RayTraceError as Into<
+                &'static str,
+            >>::into(err))
+        })?;
         Ok(PySpectrometer {
             compound_prism,
             detector_array,
             gaussian_beam,
-            position: spectrometer.detector.1.position,
-            direction: spectrometer.detector.1.direction,
+            position: (
+                spectrometer.detector.1.position.x,
+                spectrometer.detector.1.position.y,
+            ),
+            direction: (
+                spectrometer.detector.1.direction.x,
+                spectrometer.detector.1.direction.y,
+            ),
             spectrometer,
         })
     }
@@ -456,18 +441,18 @@ impl PySpectrometer {
     ///
     /// Computes the spectrometer fitness using on the cpu
     fn cpu_fitness(&self, py: Python) -> PyDesignFitness {
-        py.allow_threads(|| self.spectrometer.fitness().into())
+        py.allow_threads(|| fitness(&self.spectrometer).into())
     }
 
     fn gpu_fitness(&self, py: Python) -> Option<PyDesignFitness> {
         let spec: Spectrometer<Pair<f32>, GaussianBeam<f32>> =
             LossyInto::lossy_into(self.spectrometer.clone());
-        let fit = py.allow_threads(|| spec.cuda_fitness())?;
+        let fit = py.allow_threads(|| cuda_fitness(&spec))?;
         Some(fit.into())
     }
 
     fn slow_gpu_fitness(&self, py: Python) -> Option<PyDesignFitness> {
-        let fit = py.allow_threads(|| self.spectrometer.cuda_fitness())?;
+        let fit = py.allow_threads(|| cuda_fitness(&self.spectrometer))?;
         Some(fit.into())
     }
 
@@ -481,7 +466,7 @@ impl PySpectrometer {
         py.allow_threads(|| {
             wavelengths_array
                 .into_iter()
-                .flat_map(|w| spec.p_dets_l_wavelength(*w))
+                .flat_map(|w| p_dets_l_wavelength(&spec, *w))
                 .collect::<Vec<_>>()
         })
         .to_pyarray(py)
@@ -502,7 +487,12 @@ impl PySpectrometer {
         Ok(Array2::from(
             spec.trace_ray_path(wavelength, inital_y)
                 .map(|r| r.map(|p| [p.x, p.y]))
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| {
+                    RayTraceError::py_err(<compound_prism_spectrometer::RayTraceError as Into<
+                        &'static str,
+                    >>::into(err))
+                })?,
         )
         .to_pyarray(py))
     }

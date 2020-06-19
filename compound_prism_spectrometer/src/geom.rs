@@ -476,7 +476,7 @@ where
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(bound = "V: Vector")]
-pub(crate) struct CurvedPlane<V: Vector> {
+pub struct CurvedPlane<V: Vector> {
     /// The midpt of the Curved Surface / circular segment
     pub(crate) midpt: V,
     /// The center of the circle

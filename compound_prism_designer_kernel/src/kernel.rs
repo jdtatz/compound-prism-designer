@@ -1,6 +1,10 @@
-use crate::{
-    geom::{Pair, Vector},
-    qrng::Qrng,
+#![no_std]
+#![cfg(target_arch = "nvptx64")]
+#![feature(abi_ptx, stdsimd, link_llvm_intrinsics)]
+
+use compound_prism_spectrometer::{
+    Pair, Vector,
+    Qrng,
     Beam, DetectorArray, Float, GaussianBeam, Spectrometer, Welford,
 };
 use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
@@ -107,6 +111,7 @@ unsafe fn warp_fold<F: Shareable, Op: Fn(F, F) -> F>(mut val: F, fold: Op) -> F 
 }
 
 unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
+    #[allow(clippy::cast_ptr_alignment)]
     let dest = dest as *mut u32;
     let src = src as *const T as *const u32;
     let count = (core::mem::size_of::<T>() / core::mem::size_of::<u32>()) as u32;

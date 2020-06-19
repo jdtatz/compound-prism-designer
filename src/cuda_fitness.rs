@@ -1,10 +1,5 @@
 use crate::fitness::DesignFitness;
-use crate::geom::Vector;
-use crate::ray::DetectorArray;
-use crate::spectrometer::Spectrometer;
-use crate::utils::Float;
-use crate::welford::Welford;
-use crate::Beam;
+use compound_prism_spectrometer::*;
 use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use rustacuda::context::ContextStack;
@@ -13,13 +8,8 @@ use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::{CStr, CString};
 
-unsafe impl<F: Float + DeviceCopy, V: Vector<Scalar = F>, B: Beam<Vector = V>> DeviceCopy
-    for Spectrometer<V, B>
-{
-}
-
 const PTX_STR: &str =
-    include_str!("../target/nvptx64-nvidia-cuda/release/compound_prism_designer.ptx");
+    include_str!(env!("KERNEL"));
 
 // post-processed generated ptx
 static PTX: Lazy<CString> = Lazy::new(|| {
@@ -153,62 +143,65 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
     Ok(())
 }
 
-impl<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>> Spectrometer<V, B> {
-    pub fn cuda_fitness(&self) -> Option<DesignFitness<F>> {
-        let max_err = F::from_u32_ratio(5, 1000);
-        let max_err_sq = max_err * max_err;
+pub fn cuda_fitness<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
+    spectrometer: &Spectrometer<V, B>,
+) -> Option<DesignFitness<F>> {
+    let max_err = F::from_u32_ratio(5, 1000);
+    let max_err_sq = max_err * max_err;
 
-        let mutex = CACHED_CUDA_FITNESS_CONTEXT
-            .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))
-            .expect("Failed to initialize Cuda Fitness Context");
-        let mut state = mutex.lock();
+    let mutex = CACHED_CUDA_FITNESS_CONTEXT
+        .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))
+        .expect("Failed to initialize Cuda Fitness Context");
+    let mut state = mutex.lock();
 
-        let nbin = self.detector.bin_count() as usize;
-        // p(d=D)
-        let mut p_dets = vec![Welford::new(); nbin];
-        // -H(d=D|Λ)
-        let mut h_det_l_w = Welford::new();
+    let nbin = spectrometer.detector.bin_count() as usize;
+    // p(d=D)
+    let mut p_dets = vec![Welford::new(); nbin];
+    // -H(d=D|Λ)
+    let mut h_det_l_w = Welford::new();
 
-        for &seed in SEEDS {
-            // p(d=D|λ=Λ)
-            let p_dets_l_ws = state
-                .launch_p_dets_l_ws(seed, self)
-                .expect("Failed to launch Cuda fitness kernel");
-            for p_dets_l_w in p_dets_l_ws.chunks_exact(nbin) {
-                // -H(D|λ=Λ)
-                let mut h_det_l_ws = F::zero();
-                for (p_det, p) in p_dets.iter_mut().zip(p_dets_l_w.iter().copied()) {
-                    p_det.next_sample(p);
-                    h_det_l_ws += p.plog2p();
-                }
-                h_det_l_w.next_sample(h_det_l_ws);
+    for &seed in SEEDS {
+        // p(d=D|λ=Λ)
+        let p_dets_l_ws = state
+            .launch_p_dets_l_ws(seed, spectrometer)
+            .expect("Failed to launch Cuda fitness kernel");
+        for p_dets_l_w in p_dets_l_ws.chunks_exact(nbin) {
+            // -H(D|λ=Λ)
+            let mut h_det_l_ws = F::zero();
+            for (p_det, p) in p_dets.iter_mut().zip(p_dets_l_w.iter().copied()) {
+                p_det.next_sample(p);
+                h_det_l_ws += p.plog2p();
             }
-            if p_dets.iter().all(|s| s.sem_le_error_threshold(max_err_sq)) {
-                // -H(D)
-                let h_det = p_dets
-                    .iter()
-                    .map(|s| s.mean.plog2p())
-                    .fold(F::zero(), core::ops::Add::add);
-                // -H(D|Λ)
-                let h_det_l_w = h_det_l_w.mean;
-                // H(D) - H(D|Λ)
-                let info = h_det_l_w - h_det;
-                let (size, deviation) = self.size_and_deviation();
-
-                return Some(DesignFitness {
-                    size,
-                    info,
-                    deviation,
-                });
-            }
+            h_det_l_w.next_sample(h_det_l_ws);
         }
+        if p_dets.iter().all(|s| s.sem_le_error_threshold(max_err_sq)) {
+            // -H(D)
+            let h_det = p_dets
+                .iter()
+                .map(|s| s.mean.plog2p())
+                .fold(F::zero(), core::ops::Add::add);
+            // -H(D|Λ)
+            let h_det_l_w = h_det_l_w.mean;
+            // H(D) - H(D|Λ)
+            let info = h_det_l_w - h_det;
+            let (size, deviation) = spectrometer.size_and_deviation();
 
-        let errors: Vec<_> = p_dets
-            .iter()
-            .map(|s| s.sem())
-            .filter(|e| !e.is_finite() || e >= &max_err)
-            .collect();
-        eprintln!("cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}", max_err, errors);
-        None
+            return Some(DesignFitness {
+                size,
+                info,
+                deviation,
+            });
+        }
     }
+
+    let errors: Vec<_> = p_dets
+        .iter()
+        .map(|s| s.sem())
+        .filter(|e| !e.is_finite() || e >= &max_err)
+        .collect();
+    eprintln!(
+        "cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}",
+        max_err, errors
+    );
+    None
 }

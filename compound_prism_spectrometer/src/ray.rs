@@ -108,7 +108,7 @@ impl<V: Vector> CompoundPrism<V> {
         }
     }
 
-    #[cfg(not(target_arch = "nvptx64"))]
+    #[cfg(feature = "std")]
     pub fn polygons(&self) -> (Vec<[V; 4]>, [V; 4], V, V::Scalar) {
         let mut poly = Vec::with_capacity(self.prisms.len());
         let (mut u0, mut l0) = self.prisms[0].1.end_points(self.height);

@@ -3,6 +3,7 @@
 extern crate criterion;
 
 use compound_prism_designer::*;
+use compound_prism_spectrometer::*;
 
 use criterion::profiler::Profiler;
 use criterion::Criterion;
@@ -117,15 +118,15 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         y_mean: 0.95,
         w_range: (0.5, 0.82),
     };
-    let spec = Spectrometer::<geom::Pair<_>, _>::new(beam, prism, detarr).unwrap();
+    let spec = Spectrometer::<Pair<_>, _>::new(beam, prism, detarr).unwrap();
     c.bench_function("known_design_example", |b| {
-        b.iter(|| spec.fitness());
+        b.iter(|| fitness(&spec));
     });
     c.bench_function("cuda_known_design_example", |b| {
-        b.iter(|| spec.cuda_fitness().unwrap())
+        b.iter(|| cuda_fitness(&spec).unwrap())
     });
-    let cpu_fitness = spec.fitness();
-    let cuda_fitness = spec.cuda_fitness().unwrap();
+    let cpu_fitness = fitness(&spec);
+    let cuda_fitness = cuda_fitness(&spec).unwrap();
     assert_almost_eq!(cpu_fitness.info as f64, cuda_fitness.info as f64, 1e-2);
     println!("cpu: {:?}", cpu_fitness);
     println!("cuda: {:?}", cuda_fitness);
