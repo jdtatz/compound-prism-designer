@@ -8,8 +8,7 @@ use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::{CStr, CString};
 
-const PTX_STR: &str =
-    include_str!(env!("KERNEL"));
+const PTX_STR: &str = include_str!("kernel.ptx");
 
 // post-processed generated ptx
 static PTX: Lazy<CString> = Lazy::new(|| {

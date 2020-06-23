@@ -7,7 +7,11 @@ include = ["/src/**/*", "/Cargo.toml"]
 
 [lib]
 path = "src/kernel.rs"
-crate-type = ["staticlib"]
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "kernel"
+path = "src/kernel.rs"
 
 [dependencies]
 derive_more = "0.99"

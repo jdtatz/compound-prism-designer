@@ -1,11 +1,10 @@
 #![no_std]
+#![no_main]
 #![cfg(target_arch = "nvptx64")]
 #![feature(abi_ptx, stdsimd, link_llvm_intrinsics)]
 
 use compound_prism_spectrometer::{
-    Pair, Vector,
-    Qrng,
-    Beam, DetectorArray, Float, GaussianBeam, Spectrometer, Welford,
+    Beam, DetectorArray, Float, GaussianBeam, Pair, Qrng, Spectrometer, Vector, Welford,
 };
 use core::{arch::nvptx::*, panic::PanicInfo, slice::from_raw_parts_mut};
 

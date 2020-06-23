@@ -3,7 +3,7 @@ name = "compound_prism_designer"
 version = "0.1.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
-include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/build.rs", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
+include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/make.toml", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
 
 [lib]
 name = "compound_prism_designer"
@@ -31,9 +31,9 @@ criterion = "0.3"
 cpuprofiler = "0.0.4"
 
 [features]
-default = ["cuda", "serde_cbor/std"]
+default = ["cuda"]
 cuda = ["rustacuda", "once_cell", "parking_lot"]
-pyext = ["pyo3", "numpy", "ndarray", "serde_cbor/std"]
+pyext = ["pyo3", "numpy", "ndarray"]
 
 [[bench]]
 name = "benchmark"
