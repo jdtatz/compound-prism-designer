@@ -1,6 +1,6 @@
 use crate::utils::Float;
 /*
-#![feature(const_fn, const_loop, const_if_match, const_generics)]
+#![feature(const_fn_floating_point_arithmetic, min_const_generics)]
 
 const fn powi(mut x: f64, mut n: usize) -> f64 {
     if n == 0 {
@@ -39,30 +39,90 @@ const fn phi(dim: usize) -> f64 {
     }
 }
 
-struct Qrng<const N: usize> {
-    state: [f64; N],
-    alpha: [f64; N],
+const fn create_alpha<const N: usize>() -> [f64; N] {
+    let g = phi(N);
+    let mut alpha = [0f64; N];
+    let mut i = 0;
+    while i < N {
+        alpha[i] = 1_f64 / powi(g, i + 1);
+        i += 1;
+    }
+    alpha
 }
 
-impl<const N: usize> Qrng<N> {
-    pub const fn new(seed: [f64; N]) -> Self {
-        let g = phi(N);
-        let mut alpha = seed;
-        let mut i = 0;
-        while i < N {
-            alpha[i] = 1_f64 / powi(g, i + 1);
-            i += 1;
-        }
+
+const fn array_cast_f64_f32<const N: usize>(arr: [f64; N]) -> [f32; N] {
+    let mut out = [0f32; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = arr[i] as f32;
+        i += 1;
+    }
+    out
+}
+
+pub struct Qrng32<const N: usize> {
+    state: [f32; N],
+}
+
+impl<const N: usize> Qrng32<N> {
+    const ALPHA: [f32; N] = array_cast_f64_f32(create_alpha::<N>());
+
+    pub const fn new(seed: [f32; N]) -> Self {
         Self {
             state: seed,
-            alpha,
+        }
+    }
+
+    pub const fn from_scalar(seed: f32) -> Self {
+        Self {
+            state: [seed; N],
+        }
+    }
+
+    pub fn next(&mut self) -> [f32; N] {
+        let mut i = 0;
+        while i < N {
+            self.state[i] = (self.state[i] + Self::ALPHA[i]) % 1_f32;
+            i += 1;
+        }
+        self.state
+    }
+
+    pub fn step(&mut self, step: u32) -> [f32; N] {
+        let step = step as f32;
+        let mut i = 0;
+        while i < N {
+            self.state[i] = (self.state[i] + step * Self::ALPHA[i]) % 1_f32;
+            i += 1;
+        }
+        self.state
+    }
+}
+
+pub struct Qrng64<const N: usize> {
+    state: [f64; N],
+}
+
+impl<const N: usize> Qrng64<N> {
+    const ALPHA: [f64; N] = create_alpha();
+
+    pub const fn new(seed: [f64; N]) -> Self {
+        Self {
+            state: seed,
+        }
+    }
+
+    pub const fn from_scalar(seed: f64) -> Self {
+        Self {
+            state: [seed; N],
         }
     }
 
     pub fn next(&mut self) -> [f64; N] {
         let mut i = 0;
         while i < N {
-            self.state[i] = (self.state[i] + self.alpha[i]) % 1_f64;
+            self.state[i] = (self.state[i] + Self::ALPHA[i]) % 1_f64;
             i += 1;
         }
         self.state
@@ -72,7 +132,7 @@ impl<const N: usize> Qrng<N> {
         let step = step as f64;
         let mut i = 0;
         while i < N {
-            self.state[i] = (self.state[i] + step * self.alpha[i]) % 1_f64;
+            self.state[i] = (self.state[i] + step * Self::ALPHA[i]) % 1_f64;
             i += 1;
         }
         self.state

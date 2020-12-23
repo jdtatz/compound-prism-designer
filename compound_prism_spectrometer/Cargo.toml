@@ -18,7 +18,7 @@ serde_cbor = { version = "0.11", default-features = false }
 rustacuda_core = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update" }
 
 [dev-dependencies]
-statrs = "0.12"
+statrs = "0.13"
 
 [features]
 std = []

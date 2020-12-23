@@ -5,9 +5,9 @@ authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
 include = ["/src/**/*", "/Cargo.toml"]
 
-[lib]
-path = "src/kernel.rs"
-crate-type = ["lib", "cdylib"]
+# [lib]
+# path = "src/kernel.rs"
+# crate-type = ["lib", "cdylib"]
 
 [[bin]]
 name = "kernel"
