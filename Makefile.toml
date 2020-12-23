@@ -7,6 +7,7 @@ command = "cargo"
 args = ["fmt"]
 
 [tasks.kernel]
+toolchain = "nightly"
 command = "cargo"
 args = [
     "rustc",
@@ -45,7 +46,6 @@ args = [
     "--release",
     "--no-sdist",
     "--manylinux=off",
-    "-i=python3",
     "--rustc-extra-args=-Ctarget-feature=+fma",
     "--cargo-extra-args=\"--features=pyext\""
 ]

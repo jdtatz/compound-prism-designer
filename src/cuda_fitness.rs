@@ -12,20 +12,10 @@ const PTX_STR: &str = include_str!("kernel.ptx");
 
 // post-processed generated ptx
 static PTX: Lazy<CString> = Lazy::new(|| {
-    let bytes: Vec<u8> = PTX_STR
-        .lines()
-        // skip invalid ptx and/or comments
-        .skip_while(|l| l.starts_with(".version"))
-        // switch from slow division into fast but still very accurate division
-        // and flushes subnormal values to 0
-        .flat_map(|l| {
-            let mut line = l.replace("div.rn.f32", "div.approx.ftz.f32");
-            // re-add newlines
-            line.push('\n');
-            line.into_bytes()
-        })
-        .collect();
-    unsafe { CString::from_vec_unchecked(bytes) }
+    // switch from slow division into fast but still very accurate division
+    // and flushes subnormal values to 0
+    let s = PTX_STR.replace("div.rn.f32", "div.approx.ftz.f32");
+    CString::new(s).unwrap()
 });
 
 const MAX_N: usize = 256;

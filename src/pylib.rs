@@ -4,17 +4,24 @@ use compound_prism_spectrometer::*;
 use ndarray::array;
 use ndarray::prelude::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
-use pyo3::exceptions::Exception;
 use pyo3::gc::{PyGCProtocol, PyVisit};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 use pyo3::PyTraverseError;
 use pyo3::{create_exception, PyObjectProtocol};
 
-create_exception!(compound_prism_designer, GlassCatalogError, Exception);
-create_exception!(compound_prism_designer, RayTraceError, Exception);
+create_exception!(
+    compound_prism_designer,
+    GlassCatalogError,
+    pyo3::exceptions::PyException
+);
+create_exception!(
+    compound_prism_designer,
+    RayTraceError,
+    pyo3::exceptions::PyException
+);
 
-#[pyclass(name=Glass, module="compound_prism_designer")]
+#[pyclass(name = "Glass", module = "compound_prism_designer")]
 #[derive(Clone, Debug)]
 pub struct PyGlass {
     /// Glass Name : str
@@ -28,7 +35,7 @@ impl PyGlass {
     #[new]
     fn create(name: String, serialized_glass: Vec<u8>) -> PyResult<Self> {
         let glass = serde_cbor::from_slice(&serialized_glass)
-            .map_err(|e| GlassCatalogError::py_err(e.to_string()))?;
+            .map_err(|e| GlassCatalogError::new_err(e.to_string()))?;
         Ok(PyGlass { name, glass })
     }
 
@@ -36,7 +43,7 @@ impl PyGlass {
         Ok((
             self.name.clone(),
             serde_cbor::to_vec(&self.glass)
-                .map_err(|e| GlassCatalogError::py_err(e.to_string()))?,
+                .map_err(|e| GlassCatalogError::new_err(e.to_string()))?,
         ))
     }
 
@@ -79,13 +86,13 @@ fn create_glass_catalog(catalog_file_contents: &str) -> PyResult<Vec<PyGlass>> {
                 glass,
             })
             .map_err(|err| {
-                GlassCatalogError::py_err(<CatalogError as Into<&'static str>>::into(err))
+                GlassCatalogError::new_err(<CatalogError as Into<&'static str>>::into(err))
             })
         })
         .collect()
 }
 
-#[pyclass(name=DesignFitness, module="compound_prism_designer")]
+#[pyclass(name = "DesignFitness", module = "compound_prism_designer")]
 #[derive(Debug, Clone, Copy)]
 struct PyDesignFitness {
     #[pyo3(get)]
@@ -139,7 +146,7 @@ impl<F: Float> Into<DesignFitness<F>> for PyDesignFitness {
     }
 }
 
-#[pyclass(name=CompoundPrism, gc, module="compound_prism_designer")]
+#[pyclass(name = "CompoundPrism", gc, module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
     compound_prism: CompoundPrism<Pair<f64>>,
@@ -243,16 +250,10 @@ impl PyGCProtocol for PyCompoundPrism {
         Ok(())
     }
 
-    fn __clear__(&mut self) {
-        let gil = GILGuard::acquire();
-        let py = gil.python();
-        for obj in self.glasses.drain(..) {
-            py.release(obj);
-        }
-    }
+    fn __clear__(&mut self) {}
 }
 
-#[pyclass(name=DetectorArray, module="compound_prism_designer")]
+#[pyclass(name = "DetectorArray", module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyDetectorArray {
     detector_array: LinearDetectorArray<Pair<f64>>,
@@ -316,14 +317,9 @@ impl PyDetectorArray {
             self.angle,
         )
     }
-
-    #[getter]
-    fn get_bins<'py>(&'py self, py: Python<'py>) -> PyResult<&'py PyArray2<f64>> {
-        Ok(Array2::from(self.detector_array.bounds().collect::<Vec<_>>()).to_pyarray(py))
-    }
 }
 
-#[pyclass(name=GaussianBeam, module="compound_prism_designer")]
+#[pyclass(name = "GaussianBeam", module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyGaussianBeam {
     gaussian_beam: GaussianBeam<f64>,
@@ -364,7 +360,7 @@ impl PyGaussianBeam {
 ///
 /// Args:
 ///     compound_prism (CompoundPrism): spasefiowhpiueh
-#[pyclass(name=Spectrometer, gc, module="compound_prism_designer")]
+#[pyclass(name = "Spectrometer", gc, module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
     spectrometer: Spectrometer<Pair<f64>, GaussianBeam<f64>>,
@@ -408,7 +404,7 @@ impl PySpectrometer {
                 .clone(),
         )
         .map_err(|err| {
-            RayTraceError::py_err(<compound_prism_spectrometer::RayTraceError as Into<
+            RayTraceError::new_err(<compound_prism_spectrometer::RayTraceError as Into<
                 &'static str,
             >>::into(err))
         })?;
@@ -462,7 +458,8 @@ impl PySpectrometer {
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
         let spec = &self.spectrometer;
-        let wavelengths_array = wavelengths.as_array();
+        let readonly = wavelengths.readonly();
+        let wavelengths_array = readonly.as_array();
         py.allow_threads(|| {
             wavelengths_array
                 .into_iter()
@@ -489,12 +486,16 @@ impl PySpectrometer {
                 .map(|r| r.map(|p| [p.x, p.y]))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| {
-                    RayTraceError::py_err(<compound_prism_spectrometer::RayTraceError as Into<
+                    RayTraceError::new_err(<compound_prism_spectrometer::RayTraceError as Into<
                         &'static str,
                     >>::into(err))
                 })?,
         )
         .to_pyarray(py))
+    }
+
+    pub fn to_string(&self) -> String {
+        format!("{:#?}", self.spectrometer)
     }
 }
 
@@ -507,22 +508,14 @@ impl PyGCProtocol for PySpectrometer {
         Ok(())
     }
 
-    fn __clear__(&mut self) {
-        let gil = GILGuard::acquire();
-        let py = gil.python();
-        py.release(&self.compound_prism);
-        py.release(&self.detector_array);
-        py.release(&self.gaussian_beam);
-    }
+    fn __clear__(&mut self) {}
 }
 
 /// This module is implemented in Rust.
 #[pymodule]
 fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
-    // TODO: Better way to expose exception types
-    use pyo3::type_object::PyTypeObject;
-    m.add("GlassCatalogError", GlassCatalogError::type_object())?;
-    m.add("RayTraceError", RayTraceError::type_object())?;
+    m.add("GlassCatalogError", py.get_type::<GlassCatalogError>())?;
+    m.add("RayTraceError", py.get_type::<RayTraceError>())?;
     m.add_class::<PyGlass>()?;
     m.add(
         "BUNDLED_CATALOG",

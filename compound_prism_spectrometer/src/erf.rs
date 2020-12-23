@@ -1,4 +1,8 @@
-#![allow(clippy::many_single_char_names, clippy::unreadable_literal, clippy::excessive_precision)]
+#![allow(
+    clippy::many_single_char_names,
+    clippy::unreadable_literal,
+    clippy::excessive_precision
+)]
 use crate::utils::Float;
 
 fn polynomial<F: Float>(z: F, coeff: &[f64]) -> F {
