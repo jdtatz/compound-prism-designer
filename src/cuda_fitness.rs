@@ -94,7 +94,7 @@ impl CudaFitnessContext {
 
         let nbin = spec.detector.bin_count() as usize;
         let mut dev_spec = DeviceBox::new(spec)?;
-        let mut dev_probs = unsafe { DeviceBuffer::zeroed(MAX_N * nbin) }?;
+        let mut dev_probs = unsafe { DeviceBuffer::uninitialized(MAX_N * nbin) }?;
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
