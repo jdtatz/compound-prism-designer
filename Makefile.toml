@@ -50,7 +50,7 @@ args = [
     "--cargo-extra-args=\"--features=pyext\""
 ]
 
-[tasks.python-devlop]
+[tasks.python-develop]
 command = "maturin"
 args = [
     "develop",

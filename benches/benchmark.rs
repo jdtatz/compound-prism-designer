@@ -1,63 +1,58 @@
 #![allow(clippy::excessive_precision)]
 #[macro_use]
 extern crate criterion;
+use criterion::Criterion;
 
 use compound_prism_designer::*;
 use compound_prism_spectrometer::*;
 
-use criterion::profiler::Profiler;
-use criterion::Criterion;
-use std::path::Path;
+#[cfg(unix)]
+struct GProf(Option<pprof::ProfilerGuard<'static>>);
 
-use cpuprofiler::PROFILER;
-
-struct GProf;
-
-impl Profiler for GProf {
-    fn start_profiling(&mut self, benchmark_id: &str, benchmark_dir: &Path) {
-        std::fs::create_dir_all(benchmark_dir).unwrap();
-        let profile = benchmark_dir.join(format!("{}.profile", benchmark_id));
-        if profile.exists() {
-            std::fs::remove_file(&profile).unwrap();
-        }
-        PROFILER
-            .lock()
-            .unwrap()
-            .start(profile.to_string_lossy().into_owned())
-            .unwrap();
+#[cfg(unix)]
+impl criterion::profiler::Profiler for GProf {
+    fn start_profiling(&mut self, benchmark_id: &str, benchmark_dir: &std::path::Path) {
+        self.0.replace(pprof::ProfilerGuard::new(100).unwrap());
     }
 
-    fn stop_profiling(&mut self, benchmark_id: &str, benchmark_dir: &Path) {
-        PROFILER.lock().unwrap().stop().unwrap();
+    fn stop_profiling(&mut self, benchmark_id: &str, benchmark_dir: &std::path::Path) {
+        use std::io::Write;
+        use pprof::protos::Message;
+        std::fs::create_dir_all(benchmark_dir).unwrap();
+        let profile_path = benchmark_dir.join(format!("{}.pb", benchmark_id));
+        if profile_path.exists() {
+            std::fs::remove_file(&profile_path).unwrap();
+        }
+        let profile_file = std::fs::File::create(profile_path).unwrap();
 
         let cwd = std::env::current_dir().unwrap();
         let fdir = cwd.join("flamegraphs");
         std::fs::create_dir_all(&fdir).unwrap();
-        let flamegraph = fdir.join(format!("{}.svg", benchmark_id));
-        if flamegraph.exists() {
-            std::fs::remove_file(&flamegraph).unwrap();
+        let flamegraph_path = fdir.join(format!("{}.svg", benchmark_id));
+        if flamegraph_path.exists() {
+            std::fs::remove_file(&flamegraph_path).unwrap();
         }
-        let flamegraph = std::fs::File::create(flamegraph).unwrap();
-        let binary = std::env::current_exe().unwrap();
-        let profile = benchmark_dir.join(format!("{}.profile", benchmark_id));
+        let flamegraph_file = std::fs::File::create(flamegraph_path).unwrap();
 
-        let pprof = std::process::Command::new("google-pprof")
-            .arg("--collapsed")
-            .arg(&binary)
-            .arg(&profile)
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("Failed to process profiled benchmarks with google-pprof");
-        let _inferno = std::process::Command::new("inferno-flamegraph")
-            .stdin(pprof.stdout.unwrap())
-            .stdout(flamegraph)
-            .output()
-            .expect("Failed to create flamegraphs of profiled benchmarks with inferno-flamegraph");
+        let report = self.0.take().unwrap().report().build().unwrap();
+        let profile = report.pprof().unwrap();
+        let mut content = Vec::new();
+        profile.encode(&mut content).unwrap();
+        profile_file.write_all(&content).unwrap();
+
+        report.flamegraph(flamegraph_file).unwrap();
     }
 }
 
 fn profiled() -> Criterion {
-    Criterion::default().with_profiler(GProf)
+    #[cfg(unix)]
+    {
+        Criterion::default().with_profiler(GProf(None))
+    }
+    #[cfg(not(unix))]
+    {
+        Criterion::default()
+    }
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
@@ -118,18 +113,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         y_mean: 0.95,
         w_range: (0.5, 0.82),
     };
-    let spec = Spectrometer::<Pair<_>, _>::new(beam, prism, detarr).unwrap();
+    let spec = Spectrometer::<Pair<f32>, _>::new(beam, prism, detarr).unwrap();
+    let cpu_fitness = fitness(&spec);
+    let gpu_fitness = cuda_fitness(&spec).unwrap();
+    assert_almost_eq!(cpu_fitness.info as f64, gpu_fitness.info as f64, 1e-2);
+
     c.bench_function("known_design_example", |b| {
         b.iter(|| fitness(&spec));
     });
     c.bench_function("cuda_known_design_example", |b| {
         b.iter(|| cuda_fitness(&spec).unwrap())
     });
-    let cpu_fitness = fitness(&spec);
-    let cuda_fitness = cuda_fitness(&spec).unwrap();
-    assert_almost_eq!(cpu_fitness.info as f64, cuda_fitness.info as f64, 1e-2);
     println!("cpu: {:?}", cpu_fitness);
-    println!("cuda: {:?}", cuda_fitness);
+    println!("gpu: {:?}", gpu_fitness);
 }
 
 criterion_group! {
