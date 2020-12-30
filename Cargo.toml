@@ -1,6 +1,6 @@
 [package]
 name = "compound_prism_designer"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
 include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/make.toml", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
@@ -21,15 +21,16 @@ rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_
 once_cell = { version="1.4", features=["parking_lot"], optional = true }
 parking_lot = { version = "0.11",optional = true }
 pyo3 = { version="0.13", features = ["extension-module"], optional = true }
-# numpy = { version="0.13", optional = true }
-numpy = { git = "https://github.com/PyO3/rust-numpy.git", rev="20b44fe362c1e076ebe254453a77e6287083a031", optional = true }
+numpy = { version="0.13", optional = true }
 ndarray = { version="0.14", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
 rand_xoshiro = "0.6"
 criterion = "0.3"
-cpuprofiler = "0.0.4"
+
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { version = "0.4", features = ["flamegraph", "protobuf"] } 
 
 [features]
 default = ["cuda"]

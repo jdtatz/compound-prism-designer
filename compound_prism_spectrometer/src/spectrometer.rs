@@ -198,6 +198,7 @@ impl<V: Vector> DetectorArray for (LinearDetectorArray<V>, DetectorArrayPosition
         detarr.bin_index(pos)
     }
 }
+
 /// Find the position and orientation of the detector array,
 /// parameterized by the minimum and maximum wavelengths of the input beam,
 /// and its angle from the normal.
@@ -316,14 +317,6 @@ impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
         (size, deviation)
     }
 }
-
-// cpu => 1.434454269122527
-
-// 5.6923 ms & approx.ftz => 1.4349899
-// 6.5894 ms & full.ftz => 1.4349899
-// 34.771 ms & div.f32 => 1.4349926
-
-// 180.14 ms & div.f64 => 1.4339791804027775
 
 impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<GaussianBeam<F2>> for GaussianBeam<F1> {
     fn lossy_into(self) -> GaussianBeam<F2> {

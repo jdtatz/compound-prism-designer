@@ -1,14 +1,8 @@
-use crate::cuda_fitness::cuda_fitness;
-use crate::fitness::{fitness, p_dets_l_wavelength, DesignFitness};
 use compound_prism_spectrometer::*;
+use pyo3::{prelude::*, wrap_pyfunction, PyTraverseError, create_exception, PyObjectProtocol, gc::{PyGCProtocol, PyVisit}};
 use ndarray::array;
 use ndarray::prelude::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
-use pyo3::gc::{PyGCProtocol, PyVisit};
-use pyo3::prelude::*;
-use pyo3::wrap_pyfunction;
-use pyo3::PyTraverseError;
-use pyo3::{create_exception, PyObjectProtocol};
 
 create_exception!(
     compound_prism_designer,
@@ -126,8 +120,8 @@ impl PyObjectProtocol for PyDesignFitness {
     }
 }
 
-impl<F: Float> From<DesignFitness<F>> for PyDesignFitness {
-    fn from(fit: DesignFitness<F>) -> Self {
+impl<F: Float> From<crate::DesignFitness<F>> for PyDesignFitness {
+    fn from(fit: crate::DesignFitness<F>) -> Self {
         Self {
             size: fit.size.to_f64(),
             info: fit.info.to_f64(),
@@ -136,9 +130,9 @@ impl<F: Float> From<DesignFitness<F>> for PyDesignFitness {
     }
 }
 
-impl<F: Float> Into<DesignFitness<F>> for PyDesignFitness {
-    fn into(self) -> DesignFitness<F> {
-        DesignFitness {
+impl<F: Float> Into<crate::DesignFitness<F>> for PyDesignFitness {
+    fn into(self) -> crate::DesignFitness<F> {
+        crate::DesignFitness {
             size: F::from_f64(self.size),
             info: F::from_f64(self.info),
             deviation: F::from_f64(self.deviation),
@@ -437,18 +431,20 @@ impl PySpectrometer {
     ///
     /// Computes the spectrometer fitness using on the cpu
     fn cpu_fitness(&self, py: Python) -> PyDesignFitness {
-        py.allow_threads(|| fitness(&self.spectrometer).into())
+        py.allow_threads(|| crate::fitness(&self.spectrometer).into())
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_fitness(&self, py: Python) -> Option<PyDesignFitness> {
         let spec: Spectrometer<Pair<f32>, GaussianBeam<f32>> =
             LossyInto::lossy_into(self.spectrometer.clone());
-        let fit = py.allow_threads(|| cuda_fitness(&spec))?;
+        let fit = py.allow_threads(|| crate::cuda_fitness(&spec))?;
         Some(fit.into())
     }
 
+    #[cfg(feature = "cuda")]
     fn slow_gpu_fitness(&self, py: Python) -> Option<PyDesignFitness> {
-        let fit = py.allow_threads(|| cuda_fitness(&self.spectrometer))?;
+        let fit = py.allow_threads(|| crate::cuda_fitness(&self.spectrometer))?;
         Some(fit.into())
     }
 
@@ -463,7 +459,7 @@ impl PySpectrometer {
         py.allow_threads(|| {
             wavelengths_array
                 .into_iter()
-                .flat_map(|w| p_dets_l_wavelength(&spec, *w))
+                .flat_map(|w| crate::p_dets_l_wavelength(&spec, *w))
                 .collect::<Vec<_>>()
         })
         .to_pyarray(py)
