@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![cfg(target_arch = "nvptx64")]
-#![feature(abi_ptx, link_llvm_intrinsics)]
+#![feature(abi_ptx, link_llvm_intrinsics, asm)]
 
 use compound_prism_spectrometer::{
     Beam, DetectorArray, Float, GaussianBeam, Pair, Qrng, Spectrometer, Vector, Welford,
@@ -93,6 +93,7 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
             .write_volatile(src.add(id as usize).read_volatile());
         id += blockDim::x() as u32;
     }
+    syncthreads();
     &*(dest as *const T)
 }
 
@@ -114,14 +115,18 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     let warpid = tid / 32;
     let nwarps = blockDim::x() as u32 / 32;
     let laneid = nvptx_sys::laneid() as u32;
+    let shared_spectrometer_ptr;
+    asm!(
+        ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;", 
+        ptr = out(reg64) shared_spectrometer_ptr, 
+        size = const core::mem::size_of::<Spectrometer<V, B>>(),
+        options(readonly, nostack, preserves_flags)
+    );
+    let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
 
     let (ptr, _dyn_mem) = dynamic_shared_memory();
-    let spec_ptr = ptr as *mut u8;
-    let ptr = spec_ptr.add(core::mem::size_of::<Spectrometer<V, B>>());
     let ptr = ptr as *mut Welford<F>;
 
-    let spectrometer = cuda_memcpy_1d(spec_ptr, spectrometer);
-    syncthreads();
     let nbin = spectrometer.detector.bin_count();
     let shared = from_raw_parts_mut(ptr.add((warpid * nbin) as usize), nbin as usize);
     let mut i = laneid;

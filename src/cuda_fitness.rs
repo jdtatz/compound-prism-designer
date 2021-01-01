@@ -98,8 +98,7 @@ impl CudaFitnessContext {
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
-        let dynamic_shared_mem = std::mem::size_of::<Spectrometer<V, B>>() as u32
-            + nbin as u32 * NWARP * std::mem::size_of::<Welford<F>>() as u32;
+        let dynamic_shared_mem = nbin as u32 * NWARP * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
             launch!(function<<<(MAX_N as u32) / NWARP, 32 * NWARP, dynamic_shared_mem, stream>>>(
