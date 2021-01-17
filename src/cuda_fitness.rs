@@ -7,6 +7,7 @@ use rustacuda::memory::{DeviceBox, DeviceBuffer, DeviceCopy};
 use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
 use std::ffi::{CStr, CString};
+use std::mem::ManuallyDrop;
 
 const PTX_STR: &str = include_str!("kernel.ptx");
 
@@ -18,9 +19,9 @@ static PTX: Lazy<CString> = Lazy::new(|| {
     CString::new(s).unwrap()
 });
 
-const MAX_N: usize = 256;
-const MAX_M: usize = 16_384;
-const NWARP: u32 = 2;
+// const MAX_N: usize = 256;
+// const MAX_M: usize = 16_384;
+// const NWARP: u32 = 2;
 #[allow(clippy::unreadable_literal)]
 const SEEDS: &[f64] = &[
     0.4993455843,
@@ -89,27 +90,36 @@ impl CudaFitnessContext {
         &mut self,
         seed: f64,
         spec: &Spectrometer<V, B>,
+        max_n: u32,
+        nwarp: u32,
+        max_eval: u32,
     ) -> rustacuda::error::CudaResult<Vec<F>> {
         ContextStack::push(&self.ctxt)?;
 
-        let nbin = spec.detector.bin_count() as usize;
-        let mut dev_spec = DeviceBox::new(spec)?;
-        let mut dev_probs = unsafe { DeviceBuffer::uninitialized(MAX_N * nbin) }?;
+        let nbin = spec.detector.bin_count();
+        let nprobs = (max_n * nbin) as usize;
+        let mut dev_spec = ManuallyDrop::new(DeviceBox::new(spec)?);
+        let mut dev_probs = ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(nprobs) }?);
         let function = self
             .module
             .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(F::FNAME) })?;
-        let dynamic_shared_mem = nbin as u32 * NWARP * std::mem::size_of::<Welford<F>>() as u32;
+        let dynamic_shared_mem = nbin * nwarp * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
-            launch!(function<<<(MAX_N as u32) / NWARP, 32 * NWARP, dynamic_shared_mem, stream>>>(
+            launch!(function<<<max_n / nwarp, 32 * nwarp, dynamic_shared_mem, stream>>>(
                 F::from_f64(seed),
-                MAX_M as u32,
+                max_eval,
                 dev_spec.as_device_ptr(),
                 dev_probs.as_device_ptr()
             ))?;
         }
         self.stream.synchronize()?;
-        let mut p_dets_l_ws = vec![F::zero(); MAX_N * nbin];
+        // When the kernel fails to run correctly, the context becomes unusable
+        // and the device memory that was allocated, can only be freed by destroying the context.
+        // ManuallyDrop is used to prevent rust from trying to deallocate after kernel fail.
+        let _dev_spec = ManuallyDrop::into_inner(dev_spec);
+        let dev_probs = ManuallyDrop::into_inner(dev_probs);
+        let mut p_dets_l_ws = vec![F::zero(); nprobs];
         dev_probs.copy_to(&mut p_dets_l_ws)?;
         Ok(p_dets_l_ws)
     }
@@ -133,6 +143,9 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
 
 pub fn cuda_fitness<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     spectrometer: &Spectrometer<V, B>,
+    max_n: u32,
+    nwarp: u32,
+    max_eval: u32,
 ) -> Option<DesignFitness<F>> {
     let max_err = F::from_u32_ratio(5, 1000);
     let max_err_sq = max_err * max_err;
@@ -151,7 +164,7 @@ pub fn cuda_fitness<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     for &seed in SEEDS {
         // p(d=D|λ=Λ)
         let p_dets_l_ws = state
-            .launch_p_dets_l_ws(seed, spectrometer)
+            .launch_p_dets_l_ws(seed, spectrometer, max_n, nwarp, max_eval)
             .expect("Failed to launch Cuda fitness kernel");
         for p_dets_l_w in p_dets_l_ws.chunks_exact(nbin) {
             // -H(D|λ=Λ)
