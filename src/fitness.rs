@@ -313,8 +313,8 @@ mod tests {
             v.size
         );
         assert!(
-            utils::almost_eq(v.info, 1.44, 1e-2),
-            "Mutual information is incorrect. {} ≉  1.44",
+            utils::almost_eq(v.info, 0.7407094438094362, 1e-2),
+            "Mutual information is incorrect. {} ≉  0.74",
             v.info
         );
         assert!(

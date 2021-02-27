@@ -1,6 +1,6 @@
 use crate::utils::Float;
 /*
-#![feature(const_fn_floating_point_arithmetic, min_const_generics)]
+#![feature(const_fn_floating_point_arithmetic)]
 
 const fn powi(mut x: f64, mut n: usize) -> f64 {
     if n == 0 {
@@ -142,13 +142,13 @@ impl<const N: usize> Qrng64<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assert_almost_eq;
+    use approx::assert_relative_eq;
 
     #[test]
     fn test_phi() {
-        assert_almost_eq!(phi(1), 1.6180339887498948482045868343656381);
-        assert_almost_eq!(phi(2), 1.3247179572447460259609088544780973, 1e-15);
-        assert_almost_eq!(phi(16), 1.042917732301786579722142992093799834021, 1e-15);
+        assert_relative_eq!(phi(1), 1.6180339887498948482045868343656381);
+        assert_relative_eq!(phi(2), 1.3247179572447460259609088544780973, max_relative = 1e-15);
+        assert_relative_eq!(phi(16), 1.042917732301786579722142992093799834021, max_relative = 1e-15);
     }
 }
 */
