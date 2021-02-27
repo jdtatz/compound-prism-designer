@@ -35,11 +35,14 @@ command = "ptxas"
 args = ["-v", "-arch=sm_52", "src/kernel.ptx"]
 
 [tasks.bench]
-dependencies = ["kernel"]
 command = "cargo"
-args = ["bench", "--features=cuda"]
+args = ["bench", "--features=cuda", "-p", "compound_prism_designer"]
 
-[tasks.python]
+[tasks.test]
+command = "cargo"
+args = ["test", "--workspace", "--exclude", "compound_prism_designer_kernel"]
+
+[tasks.build-python]
 command = "maturin"
 args = [
     "build",

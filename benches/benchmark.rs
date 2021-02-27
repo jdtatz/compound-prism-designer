@@ -16,8 +16,8 @@ impl criterion::profiler::Profiler for GProf {
     }
 
     fn stop_profiling(&mut self, benchmark_id: &str, benchmark_dir: &std::path::Path) {
-        use std::io::Write;
         use pprof::protos::Message;
+        use std::io::Write;
         std::fs::create_dir_all(benchmark_dir).unwrap();
         let profile_path = benchmark_dir.join(format!("{}.pb", benchmark_id));
         if profile_path.exists() {
@@ -114,15 +114,15 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         w_range: (0.5, 0.82),
     };
     let spec = Spectrometer::<Pair<f32>, _>::new(beam, prism, detarr).unwrap();
-    let cpu_fitness = fitness(&spec);
-    let gpu_fitness = cuda_fitness(&spec).unwrap();
+    let cpu_fitness = fitness(&spec, 16_384, 16_384);
+    let gpu_fitness = cuda_fitness(&spec, 256, 2, 16_384).unwrap();
     assert_almost_eq!(cpu_fitness.info as f64, gpu_fitness.info as f64, 1e-2);
 
     c.bench_function("known_design_example", |b| {
-        b.iter(|| fitness(&spec));
+        b.iter(|| fitness(&spec, 16_384, 16_384));
     });
     c.bench_function("cuda_known_design_example", |b| {
-        b.iter(|| cuda_fitness(&spec).unwrap())
+        b.iter(|| cuda_fitness(&spec, 256, 2, 16_384).unwrap())
     });
     println!("cpu: {:?}", cpu_fitness);
     println!("gpu: {:?}", gpu_fitness);
