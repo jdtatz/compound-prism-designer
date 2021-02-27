@@ -1,8 +1,13 @@
 use compound_prism_spectrometer::*;
-use pyo3::{prelude::*, wrap_pyfunction, PyTraverseError, create_exception, PyObjectProtocol, gc::{PyGCProtocol, PyVisit}};
 use ndarray::array;
 use ndarray::prelude::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
+use pyo3::{
+    create_exception,
+    gc::{PyGCProtocol, PyVisit},
+    prelude::*,
+    wrap_pyfunction, PyObjectProtocol, PyTraverseError,
+};
 
 create_exception!(
     compound_prism_designer,
@@ -430,14 +435,17 @@ impl PySpectrometer {
     /// --
     ///
     /// Computes the spectrometer fitness using on the cpu
-    fn cpu_fitness(&self, py: Python) -> PyDesignFitness {
-        py.allow_threads(|| crate::fitness(&self.spectrometer).into())
+    #[args("*", max_n = 16_384, max_m = 16_384)]
+    fn cpu_fitness(&self, py: Python, max_n: usize, max_m: usize) -> PyDesignFitness {
+        py.allow_threads(|| crate::fitness(&self.spectrometer, max_n, max_m).into())
     }
 
+    #[args(wavelengths, "*", max_m = 16_384)]
     pub fn transmission_probability<'p>(
         &self,
         wavelengths: &PyArray1<f64>,
         py: Python<'p>,
+        max_m: usize,
     ) -> PyResult<&'p PyArray2<f64>> {
         let spec = &self.spectrometer;
         let readonly = wavelengths.readonly();
@@ -445,7 +453,7 @@ impl PySpectrometer {
         py.allow_threads(|| {
             wavelengths_array
                 .into_iter()
-                .flat_map(|w| crate::p_dets_l_wavelength(&spec, *w))
+                .flat_map(|w| crate::p_dets_l_wavelength(&spec, *w, max_m))
                 .collect::<Vec<_>>()
         })
         .to_pyarray(py)
@@ -485,7 +493,13 @@ impl PySpectrometer {
 #[pymethods]
 impl PySpectrometer {
     #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
-    fn gpu_fitness(&self, py: Python, max_n: u32, nwarp: u32, max_eval: u32) -> Option<PyDesignFitness> {
+    fn gpu_fitness(
+        &self,
+        py: Python,
+        max_n: u32,
+        nwarp: u32,
+        max_eval: u32,
+    ) -> Option<PyDesignFitness> {
         let spec: Spectrometer<Pair<f32>, GaussianBeam<f32>> =
             LossyInto::lossy_into(self.spectrometer.clone());
         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, max_n, nwarp, max_eval))?;
@@ -493,8 +507,15 @@ impl PySpectrometer {
     }
 
     #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
-    fn slow_gpu_fitness(&self, py: Python, max_n: u32, nwarp: u32, max_eval: u32) -> Option<PyDesignFitness> {
-        let fit = py.allow_threads(|| crate::cuda_fitness(&self.spectrometer, max_n, nwarp, max_eval))?;
+    fn slow_gpu_fitness(
+        &self,
+        py: Python,
+        max_n: u32,
+        nwarp: u32,
+        max_eval: u32,
+    ) -> Option<PyDesignFitness> {
+        let fit =
+            py.allow_threads(|| crate::cuda_fitness(&self.spectrometer, max_n, nwarp, max_eval))?;
         Some(fit.into())
     }
 }

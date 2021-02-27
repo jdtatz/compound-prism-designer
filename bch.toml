@@ -1,0 +1,19 @@
+nglass = 3
+
+[spectrometer]
+max-height = 20
+prism-width = 6.6
+bin-count = 64
+bin-size = 0.42
+linear-slope = 0.42
+linear-intercept = 0
+detector-array-length = 26.6
+max-incident-angle = 45
+angle-is-rad = false
+wavelength-range = [ 0.48, 1.0,]
+beam-width = 2
+ar-coated = true
+
+[optimizer]
+cpu-only = false
+parallelize = false
