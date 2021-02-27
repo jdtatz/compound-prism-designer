@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 from pickle import dump
 from typing import Sequence, Optional
@@ -13,7 +14,7 @@ import matplotlib.pyplot as plt
 try:
     from PySide2.QtWidgets import QFileDialog
 except ImportError:
-    from PyQt5.QtWidgets import QFileDialog
+    from PyQt5.QtWidgets import QFileDialog  # type:ignore
 plt.switch_backend("qt5agg")
 from pathlib import Path
 

@@ -1,41 +1,103 @@
 #!/usr/bin/env python3
+# from __future__ import annotations
 import itertools
-from typing import Union, Sequence, Tuple, NamedTuple, Callable
+from typing import Union, Sequence, List, Tuple, NamedTuple, Callable, Optional
 import numpy as np
 from pymoo.model.problem import Problem
 from pymoo.factory import get_algorithm, get_crossover, get_mutation, get_sampling
 from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
 from pymoo.optimize import minimize
+from multiprocessing.pool import ThreadPool
 from compound_prism_designer import RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
     DetectorArray, GaussianBeam, Spectrometer
 from compound_prism_designer.interactive import interactive_show, Design
+from dataclasses import dataclass, is_dataclass, fields
+from serde import deserialize, serialize
+from serde.toml import from_toml, to_toml
+from pathlib import Path
 
 
-class CompoundPrismSpectrometerProblemConfig(NamedTuple):
-    glass_catalog: Sequence[Glass] = BUNDLED_CATALOG
-    max_height: float = 25
-    prism_width: float = 10
-    bin_count: int = 16
-    bin_size: float = 0.8
-    linear_slope: float = 1
-    linear_intercept: float = 0.1
-    detector_array_length: float = 16
-    max_incident_angle: float = np.deg2rad(45)
-    wavelength_range: Tuple[float, float] = (0.5, 1.0)
-    beam_width: float = 3.2
-    ar_coated: bool = False
+@serialize(rename_all="spinalcase")
+@deserialize(rename_all="spinalcase")
+@dataclass
+class CompoundPrismSpectrometerConfig:
+    max_height: float
+    prism_width: float
+    bin_count: int
+    bin_size: float
+    linear_slope: float
+    linear_intercept: float
+    detector_array_length: float
+    max_incident_angle: float
+    angle_is_rad: bool
+    wavelength_range: Tuple[float, float]
+    beam_width: float
+    ar_coated: bool
+
+    glass_catalog_path: Optional[Path] = None
+
+    def __post_init__(self):
+        if not self.angle_is_rad:
+            self.max_incident_angle = np.deg2rad(self.max_incident_angle)
+            self.angle_is_rad = True
+
+    @property
+    def glass_catalog(self) -> Sequence[Glass]:
+        if self.glass_catalog_path is None:
+            return BUNDLED_CATALOG
+        raise NotImplementedError("glass-catalog-path is not yet implmented")
+
+
+@serialize(rename_all="spinalcase")
+@deserialize(rename_all="spinalcase")
+@dataclass
+class OptimizerConfig:
+    cpu_only: bool = False
+    parallelize: bool = False
+    single_objective: bool = False
+
+
+@serialize(rename_all="spinalcase")
+@deserialize(rename_all="spinalcase")
+@dataclass
+class CompoundPrismSpectrometerProblemConfig:
+    spectrometer: CompoundPrismSpectrometerConfig
+    optimizer: OptimizerConfig = OptimizerConfig()
+
+    nglass: Optional[int] = None
+    glass_names: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.nglass is None and self.glass_names is None:
+            raise NotImplementedError("One of `nglass` or `glass-names` must be defined")
+
+    @property
+    def nglass_or_const_glasses(self) -> Union[int, Sequence[Glass]]:
+        if self.nglass is None and self.glass_names is None:
+            raise NotImplementedError("One of `nglass` or `glass-names` must be defined")
+        elif self.glass_names is not None:
+            gcat = {g.name: g for g in self.spectrometer.glass_catalog}
+            return [gcat[n] for n in self.glass_names]
+        else:
+            # MyPy complains if this assert is not included, but this assert should NEVER happen
+            assert self.nglass is not None
+            return self.nglass
+
 
 
 class CompoundPrismSpectrometerProblem(Problem):
-    def __init__(self, nglass_or_const_glasses: Union[int, Sequence[Glass]], config: CompoundPrismSpectrometerProblemConfig):
+    def __init__(self, config: CompoundPrismSpectrometerProblemConfig, **kwargs):
         self.config = config
-        catalog_bounds = 0, len(config.glass_catalog)
-        height_bounds = (0.0001 * config.max_height, config.max_height)
+        self.cpu_only = config.optimizer.cpu_only
+        single_objective =config.optimizer.single_objective
+        catalog_bounds = 0, len(config.spectrometer.glass_catalog)
+        height_bounds = (0.0001 * config.spectrometer.max_height, config.spectrometer.max_height)
         normalized_y_mean_bounds = (0, 1)
         curvature_bounds = (0.00001, 1)
         det_arr_angle_bounds = (-np.pi, np.pi)
         angle_bounds = (-np.pi / 2, np.pi / 2)
         len_bounds = (0, 10)
+        nglass_or_const_glasses = config.nglass_or_const_glasses
 
         if isinstance(nglass_or_const_glasses, int):
             nglass = nglass_or_const_glasses
@@ -80,57 +142,65 @@ class CompoundPrismSpectrometerProblem(Problem):
                 "normalized_y_mean": normalized_y_mean_bounds,
                 "detector_array_angle": det_arr_angle_bounds,
             }
-        bounds = list(itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], (bounds[f] for f in self._numpy_dtype.fields))))
-        bounds = list(zip(*bounds))
-        bounds = np.array(bounds)
+        xl, xu = zip(*itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], (bounds[f] for f in self._numpy_dtype.fields))))
+
+        if config.optimizer.parallelize and "parallelization" not in kwargs:
+            pool = ThreadPool()
+            kwargs["parallelization"] = ('starmap', pool.starmap)
 
         super().__init__(
-            n_var=bounds.shape[1],
-            n_obj=3,
+            n_var=len(xl),
+            n_obj=1 if single_objective else 3,
             n_constr=1,
-            xl=bounds[0],
-            xu=bounds[1],
+            xl=xl,
+            xu=xu,
             elementwise_evaluation=True,
+            **kwargs
         )
 
     def create_spectrometer(self, params: np.ndarray) -> Spectrometer:
         params = params.view(self._numpy_dtype)[0]
         return Spectrometer(
             CompoundPrism(
-                glasses=self._glasses if self._glasses is not None else [self.config.glass_catalog[int(np.clip(i, 0, len(self.config.glass_catalog) - 1))] for i in params["glass_find"]],
+                glasses=self._glasses if self._glasses is not None else [self.config.spectrometer.glass_catalog[int(np.clip(i, 0, len(self.config.spectrometer.glass_catalog) - 1))] for i in params["glass_find"]],
                 angles=params["angles"],
                 lengths=params["lengths"],
                 curvature=params["curvature"],
                 height=params["height"],
-                width=self.config.prism_width,
-                ar_coated=self.config.ar_coated
+                width=self.config.spectrometer.prism_width,
+                ar_coated=self.config.spectrometer.ar_coated
             ), DetectorArray(
-                bin_count=self.config.bin_count,
-                bin_size=self.config.bin_size,
-                linear_slope=self.config.linear_slope,
-                linear_intercept=self.config.linear_intercept,
-                length=self.config.detector_array_length,
-                max_incident_angle=self.config.max_incident_angle,
+                bin_count=self.config.spectrometer.bin_count,
+                bin_size=self.config.spectrometer.bin_size,
+                linear_slope=self.config.spectrometer.linear_slope,
+                linear_intercept=self.config.spectrometer.linear_intercept,
+                length=self.config.spectrometer.detector_array_length,
+                max_incident_angle=self.config.spectrometer.max_incident_angle,
                 angle=params["detector_array_angle"]
             ),
             GaussianBeam(
-                wavelength_range=self.config.wavelength_range,
-                width=self.config.beam_width,
+                wavelength_range=self.config.spectrometer.wavelength_range,
+                width=self.config.spectrometer.beam_width,
                 y_mean=params["height"] * params["normalized_y_mean"]
             )
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
+        max_size = self.config.spectrometer.max_height * 40
         try:
             spectrometer = self.create_spectrometer(x)
-            fit = spectrometer.gpu_fitness()
+            fit = None
+            if not self.cpu_only:
+                fit = spectrometer.gpu_fitness(max_n=128, max_eval=16_384 // 2)
             if fit is None:
                 fit = spectrometer.cpu_fitness()
-            out["F"] = fit.size, np.log2(self.config.bin_count) - fit.info, fit.deviation
-            out["feasible"] = fit.size < 800
-            out["G"] = 0 if fit.size < 800 else 1
+            fit_info = np.log2(self.config.spectrometer.bin_count) - fit.info
+            assert fit_info > 0
+            out["F"] = (fit.size, fit_info, fit.deviation) if self.n_obj == 3 else fit_info
+            out["feasible"] = fit.size < max_size
+            out["G"] = 0 if fit.size < max_size else 1
         except RayTraceError:
-            out["F"] = 1e4, np.log2(self.config.bin_count), 1
+            out["F"] = (max_size * 10, np.log2(self.config.spectrometer.bin_count), 1) if self.n_obj == 3 else np.log2(self.config.spectrometer.bin_count)
             out["feasible"] = False
             out["G"] = 1
 
@@ -152,49 +222,31 @@ class MetaCompoundPrismSpectrometerProblem(Problem):
         pass
 
 
-spring_config = CompoundPrismSpectrometerProblemConfig(
-    max_height=25,
-    prism_width=7,
-    bin_count=32,
-    bin_size=0.8,
-    linear_slope=1,
-    linear_intercept=0.1,
-    detector_array_length=32,
-    max_incident_angle=np.deg2rad(45),
-    wavelength_range=(0.5, 0.82),
-    beam_width=3.2,
-    ar_coated=True,
-)
-bch_config = CompoundPrismSpectrometerProblemConfig(
-    max_height=20,
-    prism_width=6.6,
-    bin_count=64,
-    bin_size=0.42,
-    linear_slope=0.42,
-    linear_intercept=0,
-    detector_array_length=26.6,
-    max_incident_angle=np.deg2rad(45),
-    wavelength_range=(0.48, 1.0),
-    beam_width=2,
-    ar_coated=True,
-)
+with open("spring.toml") as f:
+    spring_config = from_toml(CompoundPrismSpectrometerProblemConfig, f.read())
+
 # glass_cat = {g.name: g for g in BUNDLED_CATALOG}
 # glass_names = "N-SF66", "N-SF14", "N-BAF4"
 # glasses = [glass_cat[n] for n in glass_names]
 # ndim = len(glasses)
-problem = CompoundPrismSpectrometerProblem(3, bch_config)
 
-ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()
+# n_threads = 8
+# pool = ThreadPool(n_threads)
+spring_config.optimizer.cpu_only = True
+problem = CompoundPrismSpectrometerProblem(spring_config) #, cpu_only=True, parallelization = ('starmap', pool.starmap))
+
+# ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()
 # 'ga', 'brkga', 'de', 'nelder-mead', 'pattern-search', 'cmaes', 'nsga2', 'rnsga2', 'nsga3', 'unsga3', 'rnsga3', 'moead'
-algorithm = get_algorithm("unsga3", ref_dirs, pop_size=100)
+# algorithm = get_algorithm("unsga3", ref_dirs, pop_size=100)
+algorithm = get_algorithm("nsga2", pop_size=1000, sampling=get_sampling('real_lhs'))
 
 result = minimize(
     problem,
     algorithm,
     termination=('n_gen', 200),
-    verbose=True
+    verbose=True,
+    save_history=True
 )
-
 
 def create_designs():
     for x, f in zip(result.X, result.opt.get("feasible")):
@@ -204,4 +256,5 @@ def create_designs():
 
 
 designs = list(create_designs())
+print(designs)
 interactive_show(designs)

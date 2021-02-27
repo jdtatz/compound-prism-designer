@@ -1,7 +1,12 @@
+from __future__ import annotations
 import numpy as np
-from typing import Optional
-from .type_hints import Spectrometer
+from typing import Optional, Iterable
+from .compound_prism_designer import Spectrometer
+from platform import system
 
+if system() == "Windows":
+    from win32com.client.gencache import EnsureDispatch, EnsureModule
+    from win32com.client import CastTo, constants
 
 
 class ZemaxException(Exception):
@@ -9,14 +14,11 @@ class ZemaxException(Exception):
 
 
 def create_zemax_file(spec: Spectrometer, zemax_file: str):
-    from win32com.client.gencache import EnsureDispatch, EnsureModule
-    from win32com.client import CastTo, constants
-
     cmpnd = spec.compound_prism
     beam = spec.gaussian_beam
     detarr = spec.detector_array
 
-    EnsureModule('ZOSAPI_Interfaces', 0, 1, 0)
+    EnsureModule("ZOSAPI_Interfaces", 0, 1, 0)
     connection = EnsureDispatch("ZOSAPI.ZOSAPI_Connection")
     if connection is None:
         raise ZemaxException("Unable to intialize COM connection to ZOSAPI")
@@ -45,7 +47,7 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
 
     polys, lens_poly, _, _ = cmpnd.polygons()
     thickness = [
-        (l1 + u1) / 2 - (l0 + u0) / 2 for [*polys, lens_poly]
+        (l1 + u1) / 2 - (l0 + u0) / 2 for (l0, u0, l1, u1) in [*polys, lens_poly]
     ]
     angles = cmpnd.angles
     ytans = np.tan(angles)
@@ -66,12 +68,14 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
     start = _create_standard(system)
     _create_coord_break(system, decenter_y=cmpnd.height / 2 - beam.y_mean)
     for g, y, t in zip(cmpnd.glasses, ytans, thickness):
-        _create_tilt(system, thickness=t, semi_diameter=cmpnd.height / 2, glass=g, y_tangent=-y)
+        _create_tilt(
+            system, thickness=t, semi_diameter=cmpnd.height / 2, glass=g.name, y_tangent=-y
+        )
 
     _create_coord_break(system, tilt_about_x=-np.rad2deg(angles[-1]))
     _create_biconic(system, radius=-lens_radius, semi_diameter=chord / 2)
     _create_coord_break(system, tilt_about_x=np.rad2deg(angles[-1]))
-    
+
     _create_coord_break(system, thickness=detarr_offset[0], decenter_y=detarr_offset[1])
     _create_coord_break(system, tilt_about_x=-np.rad2deg(detarr.angle))
 
@@ -83,11 +87,11 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
 
 
 def _create_standard(
-        system,
-        thickness: float = 0,
-        semi_diameter: float = 0,
-        radius: float = 0,
-        glass: str = None
+    system,
+    thickness: float = 0,
+    semi_diameter: float = 0,
+    radius: float = 0,
+    glass: Optional[str] = None,
 ):
     return _new_surface(
         system,
@@ -95,19 +99,19 @@ def _create_standard(
         thickness=thickness,
         semi_diameter=semi_diameter,
         radius=radius,
-        glass=glass
+        glass=glass,
     )
 
 
 def _create_coord_break(
-        system,
-        thickness: float = 0,
-        decenter_x: float = 0,
-        decenter_y: float = 0,
-        tilt_about_x: float = 0,
-        tilt_about_y: float = 0,
-        tilt_about_z: float = 0,
-        order: int = 0,
+    system,
+    thickness: float = 0,
+    decenter_x: float = 0,
+    decenter_y: float = 0,
+    tilt_about_x: float = 0,
+    tilt_about_y: float = 0,
+    tilt_about_z: float = 0,
+    order: int = 0,
 ):
     return _new_surface(
         system,
@@ -118,28 +122,25 @@ def _create_coord_break(
             tilt_about_x,
             tilt_about_y,
             tilt_about_z,
-            order
+            order,
         ],
-        thickness=thickness
+        thickness=thickness,
     )
 
 
 def _create_tilt(
-        system,
-        thickness: float = 0,
-        semi_diameter: float = 0,
-        radius: float = 0,
-        glass: str = None,
-        x_tangent: float = 0,
-        y_tangent: float = 0,
+    system,
+    thickness: float = 0,
+    semi_diameter: float = 0,
+    radius: float = 0,
+    glass: Optional[str] = None,
+    x_tangent: float = 0,
+    y_tangent: float = 0,
 ):
     return _new_surface(
         system,
         "Tilted",
-        params=[
-            x_tangent,
-            y_tangent
-        ],
+        params=[x_tangent, y_tangent],
         thickness=thickness,
         glass=glass,
         radius=radius,
@@ -148,12 +149,12 @@ def _create_tilt(
 
 
 def _create_biconic(
-        system,
-        thickness: float = 0,
-        semi_diameter: float = 0,
-        radius: float = 0,
-        glass: str = None,
-        x_radius: float = 0,
+    system,
+    thickness: float = 0,
+    semi_diameter: float = 0,
+    radius: float = 0,
+    glass: Optional[str] = None,
+    x_radius: float = 0,
 ):
     return _new_surface(
         system,
@@ -169,23 +170,22 @@ def _create_biconic(
 
 
 def _new_surface(
-        system,
-        surface_type: str,
-        params: [float] = None,
-        thickness: float = 0,
-        semi_diameter: float = 0,
-        radius: float = 0,
-        glass: str = None
+    system,
+    surface_type: str,
+    params: Optional[Iterable[float]] = None,
+    thickness: float = 0,
+    semi_diameter: float = 0,
+    radius: float = 0,
+    glass: Optional[str] = None,
 ):
-    from win32com.client import CastTo, constants
     if params is None:
         params = []
 
     surf = system.LDE.AddSurface()
-    surface_type = gettattr(constants, f"SurfaceType_{surface_type}")
+    surface_type = getattr(constants, f"SurfaceType_{surface_type}")
     surf.ChangeType(surf.GetSurfaceTypeSettings(surface_type))
-    for i, v for enumerate(params):
-        surf.GetSurfaceCell(gettattr(constants, f"SurfaceColumn_Par{1 + i}")).Value = v
+    for i, v in enumerate(params):
+        surf.GetSurfaceCell(getattr(constants, f"SurfaceColumn_Par{1 + i}")).Value = v
     if thickness:
         surf.Thickness = thickness
     if semi_diameter:
@@ -195,5 +195,5 @@ def _new_surface(
         surf.Radius = radius
     if glass:
         surf.Material = glass
-    assert CastTo(surf, 'IEditorRow').IsValidRow
+    assert CastTo(surf, "IEditorRow").IsValidRow
     return surf

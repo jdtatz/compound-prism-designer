@@ -1,5 +1,6 @@
+from __future__ import annotations
 import numpy as np
-from .type_hints import Spectrometer
+from .compound_prism_designer import Spectrometer
 
 
 def create_asap_macro(spectrometer: Spectrometer) -> str:
