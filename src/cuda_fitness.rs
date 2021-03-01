@@ -22,39 +22,6 @@ static PTX: Lazy<CString> = Lazy::new(|| {
 // const MAX_N: usize = 256;
 // const MAX_M: usize = 16_384;
 // const NWARP: u32 = 2;
-#[allow(clippy::unreadable_literal)]
-const SEEDS: &[f64] = &[
-    0.4993455843,
-    0.8171187913,
-    0.8234955201,
-    0.3911129692,
-    0.2887278677,
-    0.5004948416,
-    0.6997901652,
-    0.1544760953,
-    0.8681075152,
-    0.3130246465,
-    0.0472957030,
-    0.5421335682,
-    0.5607025594,
-    0.5911739281,
-    0.7870769069,
-    0.5151657367,
-    0.8326684251,
-    0.4464389474,
-    0.6400765363,
-    0.2099569790,
-    0.7820379526,
-    0.7962472018,
-    0.2470681166,
-    0.0323196288,
-    0.6335551911,
-    0.8439837413,
-    0.6271321302,
-    0.3746263410,
-    0.5696117890,
-    0.8799053487,
-];
 
 pub trait KernelFloat: Float + DeviceCopy {
     const FNAME: &'static [u8];
@@ -143,6 +110,7 @@ pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()
 
 pub fn cuda_fitness<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     spectrometer: &Spectrometer<V, B>,
+    seeds: &[f64],
     max_n: u32,
     nwarp: u32,
     max_eval: u32,
@@ -161,7 +129,7 @@ pub fn cuda_fitness<F: KernelFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     // -H(d=D|Λ)
     let mut h_det_l_w = Welford::new();
 
-    for &seed in SEEDS {
+    for &seed in seeds {
         // p(d=D|λ=Λ)
         let p_dets_l_ws = state
             .launch_p_dets_l_ws(seed, spectrometer, max_n, nwarp, max_eval)
