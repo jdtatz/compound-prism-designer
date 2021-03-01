@@ -190,10 +190,12 @@ class CompoundPrismSpectrometerProblem(Problem):
         try:
             spectrometer = self.create_spectrometer(x)
             fit = None
-            if not self.cpu_only:
-                fit = spectrometer.gpu_fitness(max_n=128, max_eval=16_384 // 2)
-            if fit is None:
+            if self.cpu_only:
                 fit = spectrometer.cpu_fitness()
+            else:
+                fit = spectrometer.gpu_fitness(seeds=np.random.rand(1), max_n=128, max_eval=16_384 // 2)
+                if fit is None:
+                    raise RayTraceError()
             fit_info = np.log2(self.config.spectrometer.bin_count) - fit.info
             assert fit_info > 0
             out["F"] = (fit.size, fit_info, fit.deviation) if self.n_obj == 3 else fit_info
@@ -232,7 +234,7 @@ with open("spring.toml") as f:
 
 # n_threads = 8
 # pool = ThreadPool(n_threads)
-spring_config.optimizer.cpu_only = True
+# spring_config.optimizer.cpu_only = True
 problem = CompoundPrismSpectrometerProblem(spring_config) #, cpu_only=True, parallelization = ('starmap', pool.starmap))
 
 # ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()

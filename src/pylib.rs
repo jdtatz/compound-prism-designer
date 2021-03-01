@@ -496,13 +496,16 @@ impl PySpectrometer {
     fn gpu_fitness(
         &self,
         py: Python,
+        seeds: &PyArray1<f64>,
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
     ) -> Option<PyDesignFitness> {
+        let seeds = seeds.readonly();
+        let seeds = seeds.as_slice().unwrap();
         let spec: Spectrometer<Pair<f32>, GaussianBeam<f32>> =
             LossyInto::lossy_into(self.spectrometer.clone());
-        let fit = py.allow_threads(|| crate::cuda_fitness(&spec, max_n, nwarp, max_eval))?;
+        let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))?;
         Some(fit.into())
     }
 
@@ -510,12 +513,15 @@ impl PySpectrometer {
     fn slow_gpu_fitness(
         &self,
         py: Python,
+        seeds: &PyArray1<f64>,
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
     ) -> Option<PyDesignFitness> {
+        let seeds = seeds.readonly();
+        let seeds = seeds.as_slice().unwrap();
         let fit =
-            py.allow_threads(|| crate::cuda_fitness(&self.spectrometer, max_n, nwarp, max_eval))?;
+            py.allow_threads(|| crate::cuda_fitness(&self.spectrometer, seeds, max_n, nwarp, max_eval))?;
         Some(fit.into())
     }
 }

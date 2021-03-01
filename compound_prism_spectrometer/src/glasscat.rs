@@ -36,15 +36,20 @@ pub enum Glass<F> {
     Schott([F; 6]),
     Sellmeier1([F; 6]),
     Sellmeier2([F; 5]),
+    #[cfg(feature="extended-glass")]
     Sellmeier3([F; 8]),
     Sellmeier4([F; 5]),
+    #[cfg(feature="extended-glass")]
     Sellmeier5([F; 10]),
     Herzberger([F; 6]),
     Conrady([F; 3]),
     HandbookOfOptics1([F; 4]),
     HandbookOfOptics2([F; 4]),
+    #[cfg(feature="extended-glass")]
     Extended([F; 8]),
+    #[cfg(feature="extended-glass")]
     Extended2([F; 8]),
+    #[cfg(feature="extended-glass")]
     Extended3([F; 9]),
 }
 
@@ -70,13 +75,19 @@ impl<F: Float> Glass<F> {
             3 => Glass::Herzberger(iter_to_array(cd)?),
             4 => Glass::Sellmeier2(iter_to_array(cd)?),
             5 => Glass::Conrady(iter_to_array(cd)?),
+            #[cfg(feature="extended-glass")]
             6 => Glass::Sellmeier3(iter_to_array(cd)?),
             7 => Glass::HandbookOfOptics1(iter_to_array(cd)?),
             8 => Glass::HandbookOfOptics2(iter_to_array(cd)?),
+            #[cfg(feature="extended-glass")]
             9 => Glass::Sellmeier4(iter_to_array(cd)?),
+            #[cfg(feature="extended-glass")]
             10 => Glass::Extended(iter_to_array(cd)?),
+            #[cfg(feature="extended-glass")]
             11 => Glass::Sellmeier5(iter_to_array(cd)?),
+            #[cfg(feature="extended-glass")]
             12 => Glass::Extended2(iter_to_array(cd)?),
+            #[cfg(feature="extended-glass")]
             // Unsure if formula Extended3's dispersion formula number is 13
             13 => Glass::Extended3(iter_to_array(cd)?),
             _ => return Err(CatalogError::UnknownGlassType),
@@ -110,6 +121,7 @@ impl<F: Float> Glass<F> {
                 let l2 = l2 * l2;
                 (F::one() + a + b1 * w2 / (w2 - l1) + b2 / (w2 - l2)).sqrt()
             }
+            #[cfg(feature="extended-glass")]
             Glass::Sellmeier3(cd) => {
                 let &[k1, l1, k2, l2, k3, l3, k4, l4] = cd;
                 let w2 = w * w;
@@ -125,6 +137,7 @@ impl<F: Float> Glass<F> {
                 let w2 = w * w;
                 (a + b * w2 / (w2 - c) + d * w2 / (w2 - e)).sqrt()
             }
+            #[cfg(feature="extended-glass")]
             Glass::Sellmeier5(cd) => {
                 let &[k1, l1, k2, l2, k3, l3, k4, l4, k5, l5] = cd;
                 let w2 = w * w;
@@ -160,6 +173,7 @@ impl<F: Float> Glass<F> {
                 let w2 = w * w;
                 (a + b * w2 / (w2 - c) - d * w2).sqrt()
             }
+            #[cfg(feature="extended-glass")]
             Glass::Extended(cd) => {
                 let &[a0, a1, a2, a3, a4, a5, a6, a7] = cd;
                 let w2 = w * w;
@@ -170,6 +184,7 @@ impl<F: Float> Glass<F> {
                 let w12 = w2 * w10;
                 (a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 / w10 + a7 / w12).sqrt()
             }
+            #[cfg(feature="extended-glass")]
             Glass::Extended2(cd) => {
                 let &[a0, a1, a2, a3, a4, a5, a6, a7] = cd;
                 let w2 = w * w;
@@ -178,6 +193,7 @@ impl<F: Float> Glass<F> {
                 let w8 = w2 * w6;
                 (a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 * w4 + a7 * w6).sqrt()
             }
+            #[cfg(feature="extended-glass")]
             Glass::Extended3(cd) => {
                 let &[a0, a1, a2, a3, a4, a5, a6, a7, a8] = cd;
                 let w2 = w * w;
@@ -204,15 +220,20 @@ impl<F: Float> Glass<F> {
             Glass::Schott(cd) => ("Schott", cd),
             Glass::Sellmeier1(cd) => ("Sellmeier1", cd),
             Glass::Sellmeier2(cd) => ("Sellmeier2", cd),
+            #[cfg(feature="extended-glass")]
             Glass::Sellmeier3(cd) => ("Sellmeier3", cd),
             Glass::Sellmeier4(cd) => ("Sellmeier4", cd),
+            #[cfg(feature="extended-glass")]
             Glass::Sellmeier5(cd) => ("Sellmeier5", cd),
             Glass::Herzberger(cd) => ("Herzberger", cd),
             Glass::Conrady(cd) => ("Conrady", cd),
             Glass::HandbookOfOptics1(cd) => ("HandbookOfOptics1", cd),
             Glass::HandbookOfOptics2(cd) => ("HandbookOfOptics2", cd),
+            #[cfg(feature="extended-glass")]
             Glass::Extended(cd) => ("Extended", cd),
+            #[cfg(feature="extended-glass")]
             Glass::Extended2(cd) => ("Extended2", cd),
+            #[cfg(feature="extended-glass")]
             Glass::Extended3(cd) => ("Extended3", cd),
         }
     }
@@ -234,8 +255,10 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Glass<F2>> for Glass<F1> {
             Glass::Schott(cd) => Glass::Schott(from_iter_to_array(cd).unwrap()),
             Glass::Sellmeier1(cd) => Glass::Sellmeier1(from_iter_to_array(cd).unwrap()),
             Glass::Sellmeier2(cd) => Glass::Sellmeier2(from_iter_to_array(cd).unwrap()),
+            #[cfg(feature="extended-glass")]
             Glass::Sellmeier3(cd) => Glass::Sellmeier3(from_iter_to_array(cd).unwrap()),
             Glass::Sellmeier4(cd) => Glass::Sellmeier4(from_iter_to_array(cd).unwrap()),
+            #[cfg(feature="extended-glass")]
             Glass::Sellmeier5(cd) => Glass::Sellmeier5(from_iter_to_array(cd).unwrap()),
             Glass::Herzberger(cd) => Glass::Herzberger(from_iter_to_array(cd).unwrap()),
             Glass::Conrady(cd) => Glass::Conrady(from_iter_to_array(cd).unwrap()),
@@ -245,8 +268,11 @@ impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Glass<F2>> for Glass<F1> {
             Glass::HandbookOfOptics2(cd) => {
                 Glass::HandbookOfOptics2(from_iter_to_array(cd).unwrap())
             }
+            #[cfg(feature="extended-glass")]
             Glass::Extended(cd) => Glass::Extended(from_iter_to_array(cd).unwrap()),
+            #[cfg(feature="extended-glass")]
             Glass::Extended2(cd) => Glass::Extended2(from_iter_to_array(cd).unwrap()),
+            #[cfg(feature="extended-glass")]
             Glass::Extended3(cd) => Glass::Extended3(from_iter_to_array(cd).unwrap()),
         }
     }
