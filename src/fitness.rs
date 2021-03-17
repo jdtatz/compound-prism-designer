@@ -224,7 +224,9 @@ mod tests {
         let beam = GaussianBeam {
             width: 0.2,
             y_mean: 0.95,
-            w_range: (0.5, 0.82),
+            wavelengths: UniformDistribution {
+                bounds: (0.5, 0.82),
+            },
         };
 
         let spec =

@@ -325,7 +325,7 @@ impl PyObjectProtocol for PyDetectorArray {
 #[pyclass(name = "GaussianBeam", module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyGaussianBeam {
-    gaussian_beam: GaussianBeam<f64>,
+    gaussian_beam: GaussianBeam<f64, UniformDistribution<f64>>,
     #[pyo3(get)]
     wavelength_range: (f64, f64),
     #[pyo3(get)]
@@ -341,7 +341,9 @@ impl PyGaussianBeam {
         let gaussian_beam = GaussianBeam {
             width,
             y_mean,
-            w_range: wavelength_range,
+            wavelengths: UniformDistribution {
+                bounds: wavelength_range,
+            },
         };
         PyGaussianBeam {
             gaussian_beam,
@@ -373,7 +375,7 @@ impl PyObjectProtocol for PyGaussianBeam {
 #[pyclass(name = "Spectrometer", gc, module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
-    spectrometer: Spectrometer<Pair<f64>, GaussianBeam<f64>>,
+    spectrometer: Spectrometer<Pair<f64>, GaussianBeam<f64, UniformDistribution<f64>>>,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
     compound_prism: Py<PyCompoundPrism>,
@@ -511,7 +513,7 @@ impl PySpectrometer {
     ) -> Option<PyDesignFitness> {
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
-        let spec: Spectrometer<Pair<f32>, GaussianBeam<f32>> =
+        let spec: Spectrometer<Pair<f32>, GaussianBeam<f32, _>> =
             LossyInto::lossy_into(self.spectrometer.clone());
         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))?;
         Some(fit.into())

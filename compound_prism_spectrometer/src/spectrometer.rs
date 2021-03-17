@@ -1,25 +1,22 @@
+use crate::distribution::Distribution;
 use crate::erf::norminv;
 use crate::geom::{Mat2, Pair, Surface, Vector};
+use crate::qrng::QuasiRandom;
 use crate::utils::{Float, LossyInto};
 use crate::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 /// Collimated Polychromatic Gaussian Beam
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "F: Float")]
-pub struct GaussianBeam<F: Float> {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct GaussianBeam<F, D> {
     /// 1/e^2 beam width
     pub width: F,
     /// Mean y coordinate
     pub y_mean: F,
-    /// Range of wavelengths
-    pub w_range: (F, F),
+    /// Wavelengths distribution
+    pub wavelengths: D,
 }
 
-impl<F: Float> GaussianBeam<F> {
-    pub fn inverse_cdf_wavelength(&self, p: F) -> F {
-        self.w_range.0 + (self.w_range.1 - self.w_range.0) * p
-    }
-
+impl<F: Float, D> GaussianBeam<F, D> {
     pub fn inverse_cdf_initial_y(&self, p: F) -> F {
         self.y_mean - self.width * norminv(p)
     }
@@ -29,29 +26,16 @@ impl<F: Float> GaussianBeam<F> {
     }
 }
 
-impl<F: Float> Beam for GaussianBeam<F> {
+impl<F: Float, D: Distribution<Item = F>> Beam for GaussianBeam<F, D> {
     type Vector = Pair<F>;
     // type Vector = impl Vector<Scalar=F>;
     type Quasi = F;
-
-    fn y_mean(&self) -> <Self::Vector as Vector>::Scalar {
-        self.y_mean
-    }
-
-    fn wavelength_range(
-        &self,
-    ) -> (
-        <Self::Vector as Vector>::Scalar,
-        <Self::Vector as Vector>::Scalar,
-    ) {
-        self.w_range
-    }
 
     fn inverse_cdf_wavelength(
         &self,
         p: <Self::Vector as Vector>::Scalar,
     ) -> <Self::Vector as Vector>::Scalar {
-        self.w_range.0 + (self.w_range.1 - self.w_range.0) * p
+        self.wavelengths.inverse_cdf(p)
     }
 
     fn inverse_cdf_ray(&self, q: Self::Quasi) -> Ray<Self::Vector> {
@@ -60,7 +44,7 @@ impl<F: Float> Beam for GaussianBeam<F> {
 }
 
 /// Polychromatic Uniform Circular Multi-Mode Fiber Beam
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(bound = "F: Float")]
 pub struct FiberBeam<F: Float> {
     /// Radius of fiber core
@@ -77,7 +61,7 @@ pub struct FiberBeam<F: Float> {
 /// for i in 0..bin_count
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(bound = "V: Vector")]
 pub struct LinearDetectorArray<V: Vector> {
     /// The number of bins in the array
@@ -212,8 +196,11 @@ pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>>(
     detarr: &LinearDetectorArray<V>,
     beam: &B,
 ) -> Result<DetectorArrayPositioning<V>, RayTraceError> {
-    let ray = Ray::new_from_start(beam.y_mean());
-    let (wmin, wmax) = beam.wavelength_range();
+    let ray = beam.inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::from_u32_ratio(1, 2)));
+    // let wmin = beam.inverse_cdf_wavelength(V::Scalar::from_u32_ratio(1, 100));
+    // let wmax = beam.inverse_cdf_wavelength(V::Scalar::from_u32_ratio(99, 100));
+    let wmin = beam.inverse_cdf_wavelength(V::Scalar::zero());
+    let wmax = beam.inverse_cdf_wavelength(V::Scalar::one());
     let lower_ray = ray.propagate_internal(cmpnd, wmin)?;
     let upper_ray = ray.propagate_internal(cmpnd, wmax)?;
     if lower_ray.average_transmittance() <= V::Scalar::from_u32_ratio(1, 1000)
@@ -311,19 +298,24 @@ impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
     pub fn size_and_deviation(&self) -> (V::Scalar, V::Scalar) {
         let deviation_vector = self.detector.1.position
             + self.detector.1.direction * self.detector.length() * V::Scalar::from_u32_ratio(1, 2)
-            - V::from_xy(V::Scalar::zero(), self.beam.y_mean());
+            - self
+                .beam
+                .inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::from_u32_ratio(1, 2)))
+                .origin;
         let size = deviation_vector.norm();
         let deviation = deviation_vector.sin_xy(size).abs();
         (size, deviation)
     }
 }
 
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<GaussianBeam<F2>> for GaussianBeam<F1> {
-    fn lossy_into(self) -> GaussianBeam<F2> {
+impl<F1: LossyInto<F2>, F2, D1: LossyInto<D2>, D2> LossyInto<GaussianBeam<F2, D2>>
+    for GaussianBeam<F1, D1>
+{
+    fn lossy_into(self) -> GaussianBeam<F2, D2> {
         GaussianBeam {
             width: self.width.lossy_into(),
             y_mean: self.y_mean.lossy_into(),
-            w_range: self.w_range.lossy_into(),
+            wavelengths: self.wavelengths.lossy_into(),
         }
     }
 }

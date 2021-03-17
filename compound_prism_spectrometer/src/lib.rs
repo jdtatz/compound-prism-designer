@@ -10,6 +10,7 @@ extern crate derive_more;
 #[macro_use]
 extern crate serde;
 
+mod distribution;
 mod erf;
 mod geom;
 mod glasscat;
@@ -19,6 +20,9 @@ mod ray;
 pub mod utils;
 mod spectrometer;
 mod welford;
+pub use crate::distribution::{
+    DiracDeltaDistribution, Distribution, NormalDistribution, UniformDistribution, UserDistribution,
+};
 pub use crate::erf::norminv;
 pub use crate::geom::{CurvedPlane, Pair, Plane, Surface, Triplet, Vector};
 pub use crate::glasscat::Glass;
