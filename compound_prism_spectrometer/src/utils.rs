@@ -26,6 +26,22 @@ impl<U1, U2, T1: LossyInto<U1>, T2: LossyInto<U2>> LossyInto<(U1, U2)> for (T1, 
     }
 }
 
+impl<T: LossyInto<U>, U, const N: usize> LossyInto<[U; N]> for [T; N]
+where
+    [T; N]: Array<Item = T>,
+    [U; N]: Array<Item = U>,
+{
+    fn lossy_into(self) -> [U; N] {
+        // self.map(LossyInto::lossy_into)
+        ArrayVec::from(self)
+            .into_iter()
+            .map(LossyInto::lossy_into)
+            .collect::<ArrayVec<_>>()
+            .into_inner()
+            .unwrap_or_else(|_| unreachable!("How did this happend?"))
+    }
+}
+
 impl<A1: Array, A2: Array> LossyInto<ArrayVec<A2>> for ArrayVec<A1>
 where
     A1::Item: LossyInto<A2::Item>,

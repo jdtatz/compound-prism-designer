@@ -4,6 +4,7 @@ version = "0.2.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
 include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/make.toml", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
+resolver = "2"
 
 [lib]
 name = "compound_prism_designer"
@@ -52,7 +53,7 @@ debug = true
 opt-level=0
 
 [package.metadata.maturin]
-requires-dist = ["numpy~=1.17", "matplotlib~=3.0", "pyserde[toml]~=git+https://github.com/yukinarit/pyserde.git", "pymoo~=0.4", "PySide2~=5.13", "pywin32 >= 1.0;platform_system=='Windows'"]
+requires-dist = ["numpy~=1.20", "matplotlib~=3.3", "pyserde[toml]~=git+https://github.com/yukinarit/pyserde.git", "pymoo~=0.4", "PySide2~=5.13", "pywin32 >= 1.0;platform_system=='Windows'"]
 requires-python = ">=3.7"
 
 [workspace]

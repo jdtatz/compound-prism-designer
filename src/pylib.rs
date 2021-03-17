@@ -1,4 +1,5 @@
 use compound_prism_spectrometer::*;
+use core::convert::TryInto;
 use ndarray::array;
 use ndarray::prelude::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
@@ -6,14 +7,9 @@ use pyo3::{
     create_exception,
     gc::{PyGCProtocol, PyVisit},
     prelude::*,
-    wrap_pyfunction, PyObjectProtocol, PyTraverseError,
+    PyObjectProtocol, PyTraverseError,
 };
 
-create_exception!(
-    compound_prism_designer,
-    GlassCatalogError,
-    pyo3::exceptions::PyException
-);
 create_exception!(
     compound_prism_designer,
     RayTraceError,
@@ -26,23 +22,30 @@ pub struct PyGlass {
     /// Glass Name : str
     #[pyo3(get)]
     name: String,
-    glass: Glass<f64>,
+    glass: Glass<f64, 6>,
 }
 
 #[pymethods]
 impl PyGlass {
+    #[classattr]
+    const ORDER: usize = 5;
+
     #[new]
-    fn create(name: String, serialized_glass: Vec<u8>) -> PyResult<Self> {
-        let glass = serde_cbor::from_slice(&serialized_glass)
-            .map_err(|e| GlassCatalogError::new_err(e.to_string()))?;
-        Ok(PyGlass { name, glass })
+    fn create(name: String, coefficents: &PyArray1<f64>) -> PyResult<Self> {
+        Ok(PyGlass {
+            name,
+            glass: Glass {
+                coefficents: coefficents.to_vec()?.try_into().map_err(|_| {
+                    pyo3::exceptions::PyValueError::new_err("Incorrect coefficents length")
+                })?,
+            },
+        })
     }
 
-    fn __getnewargs__(&self) -> PyResult<impl IntoPy<PyObject>> {
+    fn __getnewargs__<'p>(&self, py: Python<'p>) -> PyResult<impl IntoPy<PyObject> + 'p> {
         Ok((
             self.name.clone(),
-            serde_cbor::to_vec(&self.glass)
-                .map_err(|e| GlassCatalogError::new_err(e.to_string()))?,
+            PyArray1::from_slice(py, &self.glass.coefficents),
         ))
     }
 
@@ -60,35 +63,22 @@ impl PyGlass {
 
     #[getter]
     fn get_glass<'p>(&self, py: Python<'p>) -> impl IntoPy<PyObject> + 'p {
-        let (name, consts) = self.glass.decompose();
-        (name.to_string(), PyArray1::from_slice(py, consts))
+        (
+            self.name.clone(),
+            PyArray1::from_slice(py, &self.glass.coefficents),
+        )
     }
 }
 
 #[pyproto]
 impl PyObjectProtocol for PyGlass {
     fn __str__(&self) -> PyResult<String> {
-        Ok(format!("{}: {:?}", self.name, self.glass))
+        Ok(format!("{}: {}", self.name, self.glass))
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:?}", self))
     }
-}
-
-#[pyfunction]
-fn create_glass_catalog(catalog_file_contents: &str) -> PyResult<Vec<PyGlass>> {
-    new_catalog(catalog_file_contents)
-        .map(|r| {
-            r.map(|(name, glass)| PyGlass {
-                name: name.into(),
-                glass,
-            })
-            .map_err(|err| {
-                GlassCatalogError::new_err(<CatalogError as Into<&'static str>>::into(err))
-            })
-        })
-        .collect()
 }
 
 #[pyclass(name = "DesignFitness", module = "compound_prism_designer")]
@@ -252,6 +242,13 @@ impl PyGCProtocol for PyCompoundPrism {
     fn __clear__(&mut self) {}
 }
 
+#[pyproto]
+impl PyObjectProtocol for PyCompoundPrism {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
+    }
+}
+
 #[pyclass(name = "DetectorArray", module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyDetectorArray {
@@ -318,6 +315,13 @@ impl PyDetectorArray {
     }
 }
 
+#[pyproto]
+impl PyObjectProtocol for PyDetectorArray {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
+    }
+}
+
 #[pyclass(name = "GaussianBeam", module = "compound_prism_designer")]
 #[derive(Debug, Clone)]
 struct PyGaussianBeam {
@@ -349,6 +353,13 @@ impl PyGaussianBeam {
 
     fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
         (self.wavelength_range, self.width, self.y_mean)
+    }
+}
+
+#[pyproto]
+impl PyObjectProtocol for PyGaussianBeam {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
     }
 }
 
@@ -487,11 +498,8 @@ impl PySpectrometer {
     pub fn to_string(&self) -> String {
         format!("{:#?}", self.spectrometer)
     }
-}
 
-#[cfg(feature = "cuda")]
-#[pymethods]
-impl PySpectrometer {
+    #[cfg(feature = "cuda")]
     #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
     fn gpu_fitness(
         &self,
@@ -509,6 +517,7 @@ impl PySpectrometer {
         Some(fit.into())
     }
 
+    #[cfg(feature = "cuda")]
     #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
     fn slow_gpu_fitness(
         &self,
@@ -520,8 +529,9 @@ impl PySpectrometer {
     ) -> Option<PyDesignFitness> {
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
-        let fit =
-            py.allow_threads(|| crate::cuda_fitness(&self.spectrometer, seeds, max_n, nwarp, max_eval))?;
+        let fit = py.allow_threads(|| {
+            crate::cuda_fitness(&self.spectrometer, seeds, max_n, nwarp, max_eval)
+        })?;
         Some(fit.into())
     }
 }
@@ -538,33 +548,22 @@ impl PyGCProtocol for PySpectrometer {
     fn __clear__(&mut self) {}
 }
 
+#[pyproto]
+impl PyObjectProtocol for PySpectrometer {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
+    }
+}
+
 /// This module is implemented in Rust.
 #[pymodule]
 fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
-    m.add("GlassCatalogError", py.get_type::<GlassCatalogError>())?;
     m.add("RayTraceError", py.get_type::<RayTraceError>())?;
     m.add_class::<PyGlass>()?;
-    m.add(
-        "BUNDLED_CATALOG",
-        BUNDLED_CATALOG
-            .iter()
-            .cloned()
-            .map(|(s, g)| {
-                Py::new(
-                    py,
-                    PyGlass {
-                        name: s.to_owned(),
-                        glass: g,
-                    },
-                )
-            })
-            .collect::<PyResult<Vec<_>>>()?,
-    )?;
     m.add_class::<PyDesignFitness>()?;
     m.add_class::<PyCompoundPrism>()?;
     m.add_class::<PyDetectorArray>()?;
     m.add_class::<PyGaussianBeam>()?;
     m.add_class::<PySpectrometer>()?;
-    m.add_wrapped(wrap_pyfunction!(create_glass_catalog))?;
     Ok(())
 }

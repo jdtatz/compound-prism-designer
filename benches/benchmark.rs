@@ -56,31 +56,38 @@ fn profiled() -> Criterion {
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
+    // "N-PK52A", "N-SF57", "N-FK58"
     let glasses = [
-        Glass::Sellmeier1([
-            1.029607,
-            0.00516800155,
-            0.1880506,
-            0.0166658798,
-            0.736488165,
-            138.964129,
-        ]),
-        Glass::Sellmeier1([
-            1.87543831,
-            0.0141749518,
-            0.37375749,
-            0.0640509927,
-            2.30001797,
-            177.389795,
-        ]),
-        Glass::Sellmeier1([
-            0.738042712,
-            0.00339065607,
-            0.363371967,
-            0.0117551189,
-            0.989296264,
-            212.842145,
-        ]),
+        Glass {
+            coefficents: [
+                -0.19660238,
+                0.85166448,
+                -1.49929414,
+                1.35438084,
+                -0.64424681,
+                1.62434799,
+            ],
+        },
+        Glass {
+            coefficents: [
+                -1.81746234,
+                7.71730927,
+                -13.2402884,
+                11.56821078,
+                -5.23836004,
+                2.82403194,
+            ],
+        },
+        Glass {
+            coefficents: [
+                -0.15938247,
+                0.69081086,
+                -1.21697038,
+                1.10021121,
+                -0.52409733,
+                1.55979703,
+            ],
+        },
     ];
     let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
     let angles: Box<[f32]> = angles.iter().cloned().map(f32::to_radians).collect();
@@ -115,14 +122,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     };
     let spec = Spectrometer::<Pair<f32>, _>::new(beam, prism, detarr).unwrap();
     let cpu_fitness = fitness(&spec, 16_384, 16_384);
-    let gpu_fitness = cuda_fitness(&spec, 256, 2, 16_384).unwrap();
+    let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap();
     assert_almost_eq!(cpu_fitness.info as f64, gpu_fitness.info as f64, 1e-2);
 
     c.bench_function("known_design_example", |b| {
         b.iter(|| fitness(&spec, 16_384, 16_384));
     });
     c.bench_function("cuda_known_design_example", |b| {
-        b.iter(|| cuda_fitness(&spec, 256, 2, 16_384).unwrap())
+        b.iter(|| cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap())
     });
     println!("cpu: {:?}", cpu_fitness);
     println!("gpu: {:?}", gpu_fitness);

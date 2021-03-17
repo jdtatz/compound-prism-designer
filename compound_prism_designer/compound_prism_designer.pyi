@@ -1,21 +1,18 @@
 from __future__ import annotations
-from typing import NamedTuple, Optional, Sequence, Tuple
+from typing import NamedTuple, Optional, Sequence, Tuple, ClassVar
 import numpy as np
 
-
-class GlassCatalogError(Exception):
-    pass
 
 class RayTraceError(Exception):
     pass
 
-class Glass(NamedTuple):
+class Glass:
+    ORDER: ClassVar[int]
+
     name: str
+
+    def __new__(cls, name: str, coefficents: np.ndarray): ...
     def __call__(self, wavelength: float) -> float: ...
-
-BUNDLED_CATALOG: Sequence[Glass] = ...
-
-def create_glass_catalog(str) -> Sequence[Glass]: ...
 
 class DesignFitness(NamedTuple):
     size: float
@@ -61,7 +58,7 @@ class Spectrometer(NamedTuple):
     def ray_trace(self, wavelength: float, inital_y: float) -> np.ndarray: ...
     def cpu_fitness(self, max_n: int = ..., max_m: int = ...) -> DesignFitness: ...
     def gpu_fitness(
-        self, max_n: int = ..., nwarp: int = ..., max_eval: int = ...
+        self, seeds: np.ndarray, max_n: int = ..., nwarp: int = ..., max_eval: int = ...
     ) -> Optional[DesignFitness]: ...
     def slow_gpu_fitness(
         self, max_n: int = ..., nwarp: int = ..., max_eval: int = ...
