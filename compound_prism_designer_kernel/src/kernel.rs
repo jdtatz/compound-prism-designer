@@ -117,8 +117,8 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     let laneid = nvptx_sys::laneid() as u32;
     let shared_spectrometer_ptr;
     asm!(
-        ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;", 
-        ptr = out(reg64) shared_spectrometer_ptr, 
+        ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
+        ptr = out(reg64) shared_spectrometer_ptr,
         size = const core::mem::size_of::<Spectrometer<V, B>>(),
         options(readonly, nostack, preserves_flags)
     );

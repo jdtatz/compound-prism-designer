@@ -21,7 +21,7 @@ mod spectrometer;
 mod welford;
 pub use crate::erf::norminv;
 pub use crate::geom::{CurvedPlane, Pair, Plane, Surface, Triplet, Vector};
-pub use crate::glasscat::{new_catalog, CatalogError, Glass, BUNDLED_CATALOG};
+pub use crate::glasscat::Glass;
 pub use crate::qrng::{Qrng, QuasiRandom};
 pub use crate::ray::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 pub use crate::spectrometer::{GaussianBeam, LinearDetectorArray, Spectrometer};

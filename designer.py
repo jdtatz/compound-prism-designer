@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # from __future__ import annotations
 import itertools
-from typing import Union, Sequence, List, Tuple, NamedTuple, Callable, Optional
+from typing import Union, Sequence, List, Tuple, NamedTuple, Callable, Optional, Iterator
 import numpy as np
 from pymoo.model.problem import Problem
 from pymoo.factory import get_algorithm, get_crossover, get_mutation, get_sampling
@@ -9,7 +9,7 @@ from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
 from pymoo.optimize import minimize
 from multiprocessing.pool import ThreadPool
 from compound_prism_designer import RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
-    DetectorArray, GaussianBeam, Spectrometer
+    DetectorArray, GaussianBeam, Spectrometer, AbstractGlass, new_catalog
 from compound_prism_designer.interactive import interactive_show, Design
 from dataclasses import dataclass, is_dataclass, fields
 from serde import deserialize, serialize
@@ -42,10 +42,13 @@ class CompoundPrismSpectrometerConfig:
             self.angle_is_rad = True
 
     @property
-    def glass_catalog(self) -> Sequence[Glass]:
+    def glass_catalog(self) -> Iterator[Glass]:
         if self.glass_catalog_path is None:
-            return BUNDLED_CATALOG
-        raise NotImplementedError("glass-catalog-path is not yet implmented")
+            gcat: Iterator[AbstractGlass] = iter(BUNDLED_CATALOG)
+        else:
+            with open(self.glass_catalog_path) as f:
+                gcat = new_catalog(f.read())
+        return (g.into_glass(self.wavelength_range)[0] for g in gcat)
 
 
 @serialize(rename_all="spinalcase")
@@ -72,12 +75,11 @@ class CompoundPrismSpectrometerProblemConfig:
             raise NotImplementedError("One of `nglass` or `glass-names` must be defined")
 
     @property
-    def nglass_or_const_glasses(self) -> Union[int, Sequence[Glass]]:
+    def nglass_or_const_glasses(self) -> Union[int, Sequence[str]]:
         if self.nglass is None and self.glass_names is None:
             raise NotImplementedError("One of `nglass` or `glass-names` must be defined")
         elif self.glass_names is not None:
-            gcat = {g.name: g for g in self.spectrometer.glass_catalog}
-            return [gcat[n] for n in self.glass_names]
+            return self.glass_names
         else:
             # MyPy complains if this assert is not included, but this assert should NEVER happen
             assert self.nglass is not None
@@ -89,8 +91,10 @@ class CompoundPrismSpectrometerProblem(Problem):
     def __init__(self, config: CompoundPrismSpectrometerProblemConfig, **kwargs):
         self.config = config
         self.cpu_only = config.optimizer.cpu_only
+        self.glass_list = list(config.spectrometer.glass_catalog)
+        self.glass_dict = { g.name: g for g in self.glass_list }
         single_objective =config.optimizer.single_objective
-        catalog_bounds = 0, len(config.spectrometer.glass_catalog)
+        catalog_bounds = 0, len(self.glass_list)
         height_bounds = (0.0001 * config.spectrometer.max_height, config.spectrometer.max_height)
         normalized_y_mean_bounds = (0, 1)
         curvature_bounds = (0.00001, 1)
@@ -121,7 +125,7 @@ class CompoundPrismSpectrometerProblem(Problem):
                 "detector_array_angle": det_arr_angle_bounds,
             }
         else:
-            glasses = tuple(nglass_or_const_glasses)
+            glasses = [self.glass_dict[n] for n in nglass_or_const_glasses]
             if not all(isinstance(g, Glass) for g in glasses):
                 raise TypeError(f"{nglass_or_const_glasses} is not a sequence of Glass")
             self._glasses = glasses
@@ -142,7 +146,7 @@ class CompoundPrismSpectrometerProblem(Problem):
                 "normalized_y_mean": normalized_y_mean_bounds,
                 "detector_array_angle": det_arr_angle_bounds,
             }
-        xl, xu = zip(*itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], (bounds[f] for f in self._numpy_dtype.fields))))
+        xl, xu = zip(*itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], bounds.values())))
 
         if config.optimizer.parallelize and "parallelization" not in kwargs:
             pool = ThreadPool()
@@ -162,7 +166,7 @@ class CompoundPrismSpectrometerProblem(Problem):
         params = params.view(self._numpy_dtype)[0]
         return Spectrometer(
             CompoundPrism(
-                glasses=self._glasses if self._glasses is not None else [self.config.spectrometer.glass_catalog[int(np.clip(i, 0, len(self.config.spectrometer.glass_catalog) - 1))] for i in params["glass_find"]],
+                glasses=self._glasses if self._glasses is not None else [self.glass_list[int(np.clip(i, 0, len(self.glass_list) - 1))] for i in params["glass_find"]],
                 angles=params["angles"],
                 lengths=params["lengths"],
                 curvature=params["curvature"],

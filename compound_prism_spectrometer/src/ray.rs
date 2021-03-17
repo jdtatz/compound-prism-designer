@@ -54,7 +54,7 @@ pub trait DetectorArray: Surface {
 pub struct CompoundPrism<V: Vector> {
     /// List of glasses the compound prism is composed of, in order.
     /// With their inter-media boundary surfaces
-    prisms: arrayvec::ArrayVec<[(Glass<V::Scalar>, Plane<V>); 6]>,
+    prisms: arrayvec::ArrayVec<[(Glass<V::Scalar, 6>, Plane<V>); 6]>,
     /// The curved lens-like last inter-media boundary surface of the compound prism
     lens: CurvedPlane<V>,
     /// Height of compound prism
@@ -76,7 +76,7 @@ impl<V: Vector> CompoundPrism<V> {
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
     ///  * `coat` - Coat the outer compound prism surfaces with anti-reflective coating
-    pub fn new<I: IntoIterator<Item = Glass<V::Scalar>>>(
+    pub fn new<I: IntoIterator<Item = Glass<V::Scalar, 6>>>(
         glasses: I,
         angles: &[V::Scalar],
         lengths: &[V::Scalar],

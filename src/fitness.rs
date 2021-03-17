@@ -157,119 +157,43 @@ pub fn fitness<V: Vector, B: Beam<Vector = V>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::prelude::*;
-    use std::f64::consts::*;
-
-    #[test]
-    fn test_many() {
-        let nglass = BUNDLED_CATALOG.len();
-        let seed = 123456;
-        let mut rng = rand_xoshiro::Xoshiro256StarStar::seed_from_u64(seed);
-        let ntest = 500;
-        let max_nprism = 6;
-        let prism_height = 25.;
-        let prism_width = 25.;
-        let max_length = 0.5 * prism_height;
-        let pmt_length = 3.2;
-        const NBIN: usize = 32;
-        let spec_max_accepted_angle = (45_f64).to_radians();
-        let beam_width = 0.2;
-        let wavelegth_range = (0.5, 0.82);
-        let mut nvalid = 0;
-        while nvalid < ntest {
-            let nprism: usize = rng.gen_range(1..=max_nprism);
-            #[allow(clippy::needless_collect)]
-            let glasses = (0..nprism)
-                .map(|_| &BUNDLED_CATALOG[rng.gen_range(0..nglass)].1)
-                .cloned()
-                .collect::<Vec<_>>();
-            let angles = (0..(nprism + 1))
-                .map(|_| rng.gen_range(-FRAC_PI_2..=FRAC_PI_2))
-                .collect::<Vec<_>>();
-            let lengths = (0..nprism)
-                .map(|_| rng.gen_range(0f64..=max_length))
-                .collect::<Vec<_>>();
-            let curvature = rng.gen_range(0f64..=1f64);
-            let prism = CompoundPrism::new(
-                glasses.into_iter(),
-                angles.as_ref(),
-                lengths.as_ref(),
-                curvature,
-                prism_height,
-                prism_width,
-                false,
-            );
-
-            let detarr_angle = rng.gen_range(-PI..=PI);
-            let detarr = LinearDetectorArray::new(
-                NBIN as u32,
-                0.1,
-                0.1,
-                0.0,
-                spec_max_accepted_angle.cos(),
-                detarr_angle,
-                pmt_length,
-            );
-
-            let y_mean = rng.gen_range(0f64..=prism_height);
-            let beam = GaussianBeam {
-                width: beam_width,
-                y_mean,
-                w_range: wavelegth_range,
-            };
-
-            let spec = match Spectrometer::<Pair<_>, _>::new(beam, prism, detarr) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            nvalid += 1;
-            let nwlen = 25;
-            for i in 0..nwlen {
-                let w = wavelegth_range.0
-                    + (wavelegth_range.1 - wavelegth_range.0) * ((i as f64) / ((nwlen - 1) as f64));
-                let ps = p_dets_l_wavelength(&spec, w, 16_384);
-                for p in ps {
-                    assert!(p.is_finite() && 0_f64 <= p && p <= 1.);
-                }
-            }
-            let v = fitness(&spec, 16_384, 16_384);
-            assert!(v.size > 0.);
-            assert!(0. <= v.info && v.info <= (NBIN as f64).log2());
-            assert!(0. <= v.deviation && v.deviation < FRAC_PI_2);
-        }
-    }
 
     #[test]
     fn test_with_known_prism() {
         let glasses = [
             // N-PK52A
-            Glass::Sellmeier1([
-                1.029607,
-                0.00516800155,
-                0.1880506,
-                0.0166658798,
-                0.736488165,
-                138.964129,
-            ]),
+            Glass {
+                coefficents: [
+                    -0.19660238,
+                    0.85166448,
+                    -1.49929414,
+                    1.35438084,
+                    -0.64424681,
+                    1.62434799,
+                ],
+            },
             // N-SF57
-            Glass::Sellmeier1([
-                1.87543831,
-                0.0141749518,
-                0.37375749,
-                0.0640509927,
-                2.30001797,
-                177.389795,
-            ]),
+            Glass {
+                coefficents: [
+                    -1.81746234,
+                    7.71730927,
+                    -13.2402884,
+                    11.56821078,
+                    -5.23836004,
+                    2.82403194,
+                ],
+            },
             // N-FK58
-            Glass::Sellmeier1([
-                0.738042712,
-                0.00339065607,
-                0.363371967,
-                0.0117551189,
-                0.989296264,
-                212.842145,
-            ]),
+            Glass {
+                coefficents: [
+                    -0.15938247,
+                    0.69081086,
+                    -1.21697038,
+                    1.10021121,
+                    -0.52409733,
+                    1.55979703,
+                ],
+            },
         ];
         let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles: Box<[f64]> = angles.iter().cloned().map(f64::to_radians).collect();

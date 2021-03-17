@@ -7,7 +7,7 @@ command = "cargo"
 args = ["fmt"]
 
 [tasks.kernel]
-toolchain = "nightly"
+toolchain = "nightly-2021-03-01"
 command = "cargo"
 args = [
     "rustc",
@@ -16,17 +16,24 @@ args = [
     "--release",
     "--target=nvptx64-nvidia-cuda.json",
     "-Z", "build-std=core",
-    "-Z", "features=all",
     "--",
-    "--emit=asm=src/kernel.ptx",
-    "-Ccodegen-units=1",
+    "-Cllvm-args=--nvptx-fma-level=2",
+    "-Cllvm-args=--nvptx-prec-divf32=0",
+    "-Cllvm-args=--nvptx-sched4reg",
+    # "-Cllvm-args=--mul-constant-optimization",
+    # "-Cllvm-args=--enable-local-reassign",
+    # "-Cllvm-args=--enable-dse-memoryssa",
+    "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll",
+    "-Cpasses=mem2reg sroa",
+    "-Copt-level=3",
     "-Clto",
     "-Cembed-bitcode=yes",
     "-Ctarget-cpu=sm_32",
     "-Ctarget-feature=+ptx60",
     "-Clinker=echo",
     "-Z", "no-link",
-    "-Z", "mir-opt-level=3",
+    # "-Z", "mir-opt-level=3",
+    "-Z", "combine_cgu",
 ]
 
 [tasks.verify-kernel]
@@ -35,8 +42,9 @@ command = "ptxas"
 args = ["-v", "-arch=sm_52", "src/kernel.ptx"]
 
 [tasks.bench]
+env = {RUSTFLAGS = "-Ctarget-feature=+fma -Ctarget-cpu=native" }
 command = "cargo"
-args = ["bench", "--features=cuda", "-p", "compound_prism_designer"]
+args = ["criterion", "--features=cuda", "-p", "compound_prism_designer"]
 
 [tasks.test]
 command = "cargo"
