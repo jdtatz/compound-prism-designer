@@ -4,7 +4,8 @@
 #![feature(abi_ptx, link_llvm_intrinsics, asm)]
 
 use compound_prism_spectrometer::{
-    Beam, DetectorArray, Float, GaussianBeam, Pair, Qrng, Spectrometer, Vector, Welford,
+    Beam, DetectorArray, Float, GaussianBeam, Pair, Qrng, Spectrometer, UniformDistribution,
+    Vector, Welford,
 };
 use core::slice::from_raw_parts_mut;
 use nvptx_sys::{
@@ -211,7 +212,7 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
     seed: f32,
     max_evals: u32,
-    spectrometer: &Spectrometer<Pair<f32>, GaussianBeam<f32>>,
+    spectrometer: &Spectrometer<Pair<f32>, GaussianBeam<f32, UniformDistribution<f32>>>,
     prob: *mut f32,
 ) {
     kernel(seed, max_evals, spectrometer, prob)
@@ -221,7 +222,7 @@ pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
 pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths_f64(
     seed: f64,
     max_evals: u32,
-    spectrometer: &Spectrometer<Pair<f64>, GaussianBeam<f64>>,
+    spectrometer: &Spectrometer<Pair<f64>, GaussianBeam<f64, UniformDistribution<f64>>>,
     prob: *mut f64,
 ) {
     kernel(seed, max_evals, spectrometer, prob)

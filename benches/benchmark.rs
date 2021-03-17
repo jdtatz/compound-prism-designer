@@ -118,7 +118,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let beam = GaussianBeam {
         width: 0.2,
         y_mean: 0.95,
-        w_range: (0.5, 0.82),
+        wavelengths: UniformDistribution {
+            bounds: (0.5, 0.82),
+        },
     };
     let spec = Spectrometer::<Pair<f32>, _>::new(beam, prism, detarr).unwrap();
     let cpu_fitness = fitness(&spec, 16_384, 16_384);

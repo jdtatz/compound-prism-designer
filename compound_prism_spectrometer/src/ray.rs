@@ -28,13 +28,6 @@ pub trait Beam {
     type Vector: Vector;
     type Quasi: QuasiRandom<Scalar = <Self::Vector as Vector>::Scalar>;
 
-    fn y_mean(&self) -> <Self::Vector as Vector>::Scalar;
-    fn wavelength_range(
-        &self,
-    ) -> (
-        <Self::Vector as Vector>::Scalar,
-        <Self::Vector as Vector>::Scalar,
-    );
     fn inverse_cdf_wavelength(
         &self,
         p: <Self::Vector as Vector>::Scalar,
