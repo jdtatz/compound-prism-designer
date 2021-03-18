@@ -4,50 +4,83 @@ use core::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
+pub trait LossyFrom<T>: Sized {
+    fn lossy_from(_: T) -> Self;
+}
+
 pub trait LossyInto<T>: Sized {
     fn lossy_into(self) -> T;
 }
 
-impl LossyInto<f32> for f64 {
-    fn lossy_into(self) -> f32 {
-        self as f32
+impl<T, U: LossyFrom<T>> LossyInto<U> for T {
+    fn lossy_into(self) -> U {
+        LossyFrom::lossy_from(self)
     }
 }
 
-impl LossyInto<f64> for f32 {
-    fn lossy_into(self) -> f64 {
-        self as f64
+impl LossyFrom<f32> for f32 {
+    fn lossy_from(v: f32) -> Self {
+        v
     }
 }
 
-impl<U1, U2, T1: LossyInto<U1>, T2: LossyInto<U2>> LossyInto<(U1, U2)> for (T1, T2) {
-    fn lossy_into(self) -> (U1, U2) {
-        (self.0.lossy_into(), self.1.lossy_into())
+impl LossyFrom<f64> for f64 {
+    fn lossy_from(v: f64) -> Self {
+        v
     }
 }
 
-impl<T: LossyInto<U>, U, const N: usize> LossyInto<[U; N]> for [T; N]
+impl LossyFrom<f32> for f64 {
+    fn lossy_from(v: f32) -> Self {
+        v as f64
+    }
+}
+
+impl LossyFrom<f64> for f32 {
+    fn lossy_from(v: f64) -> Self {
+        v as f32
+    }
+}
+
+// impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
+//     fn lossy_from(t: [T; N]) -> Self {
+//         t.map(LossyFrom::lossy_from)
+//     }
+// }
+
+impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N]
 where
     [T; N]: Array<Item = T>,
     [U; N]: Array<Item = U>,
 {
-    fn lossy_into(self) -> [U; N] {
-        // self.map(LossyInto::lossy_into)
-        ArrayVec::from(self)
+    fn lossy_from(t: [T; N]) -> Self {
+        ArrayVec::from(t)
             .into_iter()
-            .map(LossyInto::lossy_into)
+            .map(LossyFrom::lossy_from)
             .collect::<ArrayVec<_>>()
             .into_inner()
             .unwrap_or_else(|_| unreachable!("How did this happend?"))
     }
 }
 
-impl<A1: Array, A2: Array> LossyInto<ArrayVec<A2>> for ArrayVec<A1>
+impl<TA: Array, UA: Array> LossyFrom<ArrayVec<TA>> for ArrayVec<UA>
 where
-    A1::Item: LossyInto<A2::Item>,
+    UA::Item: LossyFrom<TA::Item>,
 {
-    fn lossy_into(self) -> ArrayVec<A2> {
-        self.into_iter().map(LossyInto::lossy_into).collect()
+    fn lossy_from(a: ArrayVec<TA>) -> Self {
+        a.into_iter().map(LossyFrom::lossy_from).collect()
+    }
+}
+
+impl<T0, U0: LossyFrom<T0>> LossyFrom<(T0,)> for (U0,) {
+    fn lossy_from(t: (T0,)) -> Self {
+        (LossyFrom::lossy_from(t.0),)
+    }
+}
+
+impl<T0, T1, U0: LossyFrom<T0>, U1: LossyFrom<T1>> LossyFrom<(T0, T1)> for (U0, U1) {
+    fn lossy_from(t: (T0, T1)) -> Self {
+        (LossyFrom::lossy_from(t.0), LossyFrom::lossy_from(t.1))
     }
 }
 

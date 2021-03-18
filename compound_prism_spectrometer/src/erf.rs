@@ -95,7 +95,7 @@ pub fn fast_norminv<F: Float>(u: F) -> F {
     let half_minus_u = F::from_u32_ratio(1, 2) - u;
     let mut x = (u * F::from_u32(2)).copy_sign(half_minus_u);
     if half_minus_u < F::zero() {
-        x = x + F::from_u32(2);
+        x += F::from_u32(2);
     }
     let v = -F::ln(x);
     let p = polynomial(v, FAST_SHAW_P);

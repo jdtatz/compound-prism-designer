@@ -1,6 +1,6 @@
 use crate::{
     debug_assert_almost_eq,
-    utils::{almost_eq, Float, LossyInto},
+    utils::{almost_eq, Float, LossyFrom},
 };
 use core::fmt::Debug;
 use core::ops::{Add, Div, Mul, Neg, Sub};
@@ -79,10 +79,9 @@ pub trait Vector:
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
-#[serde(bound = "F: Float")]
-pub struct Pair<F: Float> {
-    pub x: F,
-    pub y: F,
+pub struct Pair<T> {
+    pub x: T,
+    pub y: T,
 }
 
 impl<F: Float> Vector for Pair<F> {
@@ -179,22 +178,21 @@ impl<F: Float> Pair<F> {
     }
 }
 
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Pair<F2>> for Pair<F1> {
-    fn lossy_into(self) -> Pair<F2> {
-        Pair {
-            x: self.x.lossy_into(),
-            y: self.y.lossy_into(),
+impl<T, U: LossyFrom<T>> LossyFrom<Pair<T>> for Pair<U> {
+    fn lossy_from(v: Pair<T>) -> Self {
+        Self {
+            x: LossyFrom::lossy_from(v.x),
+            y: LossyFrom::lossy_from(v.y),
         }
     }
 }
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
-#[serde(bound = "F: Float")]
-pub struct Triplet<F: Float> {
-    pub x: F,
-    pub y: F,
-    pub z: F,
+pub struct Triplet<T> {
+    pub x: T,
+    pub y: T,
+    pub z: T,
 }
 
 impl<F: Float> Vector for Triplet<F> {
@@ -294,31 +292,12 @@ impl<F: Float> Vector for Triplet<F> {
     }
 }
 
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Triplet<F2>> for Triplet<F1> {
-    fn lossy_into(self) -> Triplet<F2> {
-        Triplet {
-            x: self.x.lossy_into(),
-            y: self.y.lossy_into(),
-            z: self.z.lossy_into(),
-        }
-    }
-}
-
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Pair<F2>> for Triplet<F1> {
-    fn lossy_into(self) -> Pair<F2> {
-        Pair {
-            x: self.x.lossy_into(),
-            y: self.y.lossy_into(),
-        }
-    }
-}
-
-impl<F1: Float + LossyInto<F2>, F2: Float> LossyInto<Triplet<F2>> for Pair<F1> {
-    fn lossy_into(self) -> Triplet<F2> {
-        Triplet {
-            x: self.x.lossy_into(),
-            y: self.y.lossy_into(),
-            z: F2::zero(),
+impl<T, U: LossyFrom<T>> LossyFrom<Triplet<T>> for Triplet<U> {
+    fn lossy_from(v: Triplet<T>) -> Self {
+        Self {
+            x: LossyFrom::lossy_from(v.x),
+            y: LossyFrom::lossy_from(v.y),
+            z: LossyFrom::lossy_from(v.z),
         }
     }
 }
@@ -461,15 +440,15 @@ pub(crate) fn create_joined_trapezoids<'s, V: Vector>(
     (first, rest)
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<Plane<V2>> for Plane<V1>
+impl<T: Vector, U: Vector + LossyFrom<T>> LossyFrom<Plane<T>> for Plane<U>
 where
-    V1::Scalar: LossyInto<V2::Scalar>,
+    U::Scalar: LossyFrom<T::Scalar>,
 {
-    fn lossy_into(self) -> Plane<V2> {
-        Plane {
-            height: self.height.lossy_into(),
-            normal: self.normal.lossy_into(),
-            midpt: self.midpt.lossy_into(),
+    fn lossy_from(v: Plane<T>) -> Self {
+        Self {
+            height: LossyFrom::lossy_from(v.height),
+            normal: LossyFrom::lossy_from(v.normal),
+            midpt: LossyFrom::lossy_from(v.midpt),
         }
     }
 }
@@ -595,17 +574,17 @@ impl<V: Vector> Surface for CurvedPlane<V> {
     }
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<CurvedPlane<V2>> for CurvedPlane<V1>
+impl<T: Vector, U: Vector + LossyFrom<T>> LossyFrom<CurvedPlane<T>> for CurvedPlane<U>
 where
-    V1::Scalar: LossyInto<V2::Scalar>,
+    U::Scalar: LossyFrom<T::Scalar>,
 {
-    fn lossy_into(self) -> CurvedPlane<V2> {
-        CurvedPlane {
-            midpt: self.midpt.lossy_into(),
-            center: self.center.lossy_into(),
-            radius: self.radius.lossy_into(),
-            max_dist_sq: self.max_dist_sq.lossy_into(),
-            direction: self.direction,
+    fn lossy_from(v: CurvedPlane<T>) -> Self {
+        Self {
+            midpt: LossyFrom::lossy_from(v.midpt),
+            center: LossyFrom::lossy_from(v.center),
+            radius: LossyFrom::lossy_from(v.radius),
+            max_dist_sq: LossyFrom::lossy_from(v.max_dist_sq),
+            direction: v.direction,
         }
     }
 }
