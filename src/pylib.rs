@@ -17,7 +17,9 @@ create_exception!(
 );
 
 #[pyclass(name = "Glass", module = "compound_prism_designer")]
-#[derive(Clone, Debug)]
+#[text_signature = "(name, coefficents)"]
+#[derive(Debug, Display, Clone)]
+#[display(fmt = "{}: {}", name, glass)]
 pub struct PyGlass {
     /// Glass Name : str
     #[pyo3(get)]
@@ -63,17 +65,14 @@ impl PyGlass {
 
     #[getter]
     fn get_glass<'p>(&self, py: Python<'p>) -> impl IntoPy<PyObject> + 'p {
-        (
-            self.name.clone(),
-            PyArray1::from_slice(py, &self.glass.coefficents),
-        )
+        PyArray1::from_slice(py, &self.glass.coefficents)
     }
 }
 
 #[pyproto]
 impl PyObjectProtocol for PyGlass {
     fn __str__(&self) -> PyResult<String> {
-        Ok(format!("{}: {}", self.name, self.glass))
+        Ok(format!("{}", self))
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -82,6 +81,7 @@ impl PyObjectProtocol for PyGlass {
 }
 
 #[pyclass(name = "DesignFitness", module = "compound_prism_designer")]
+#[text_signature = "(size, info, deviation)"]
 #[derive(Debug, Clone, Copy)]
 struct PyDesignFitness {
     #[pyo3(get)]
@@ -125,17 +125,18 @@ impl<F: Float> From<crate::DesignFitness<F>> for PyDesignFitness {
     }
 }
 
-impl<F: Float> Into<crate::DesignFitness<F>> for PyDesignFitness {
-    fn into(self) -> crate::DesignFitness<F> {
-        crate::DesignFitness {
-            size: F::from_f64(self.size),
-            info: F::from_f64(self.info),
-            deviation: F::from_f64(self.deviation),
+impl<F: Float> From<PyDesignFitness> for crate::DesignFitness<F> {
+    fn from(fit: PyDesignFitness) -> Self {
+        Self {
+            size: F::from_f64(fit.size),
+            info: F::from_f64(fit.info),
+            deviation: F::from_f64(fit.deviation),
         }
     }
 }
 
 #[pyclass(name = "CompoundPrism", gc, module = "compound_prism_designer")]
+#[text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)"]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
     compound_prism: CompoundPrism<Pair<f64>>,
@@ -250,6 +251,7 @@ impl PyObjectProtocol for PyCompoundPrism {
 }
 
 #[pyclass(name = "DetectorArray", module = "compound_prism_designer")]
+#[text_signature = "(bin_count, bin_size, linear_slope, linear_intercept, length, max_incident_angle, angle)"]
 #[derive(Debug, Clone)]
 struct PyDetectorArray {
     detector_array: LinearDetectorArray<Pair<f64>>,
@@ -323,6 +325,7 @@ impl PyObjectProtocol for PyDetectorArray {
 }
 
 #[pyclass(name = "GaussianBeam", module = "compound_prism_designer")]
+#[text_signature = "(wavelength_range, width, y_mean)"]
 #[derive(Debug, Clone)]
 struct PyGaussianBeam {
     gaussian_beam: GaussianBeam<f64, UniformDistribution<f64>>,
@@ -365,14 +368,14 @@ impl PyObjectProtocol for PyGaussianBeam {
     }
 }
 
-/// Spectrometer(compound_prism, detector_array, gaussian_beam, /)
-/// --
-///
 /// Compound Prism Spectrometer specification
 ///
 /// Args:
-///     compound_prism (CompoundPrism): spasefiowhpiueh
+///     compound_prism (CompoundPrism): compound prism specification
+///     detector_array (DetectorArray): linear detector array specification
+///     gaussian_beam (GaussianBeam): input gaussian beam specification
 #[pyclass(name = "Spectrometer", gc, module = "compound_prism_designer")]
+#[text_signature = "(compound_prism, detector_array, gaussian_beam)"]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
     spectrometer: Spectrometer<Pair<f64>, GaussianBeam<f64, UniformDistribution<f64>>>,
@@ -444,15 +447,14 @@ impl PySpectrometer {
         )
     }
 
-    /// cpu_fitness(self, /)
-    /// --
-    ///
     /// Computes the spectrometer fitness using on the cpu
+    #[text_signature = "($self, /, *, max_n = 16_384, max_m = 16_384)"]
     #[args("*", max_n = 16_384, max_m = 16_384)]
     fn cpu_fitness(&self, py: Python, max_n: usize, max_m: usize) -> PyDesignFitness {
         py.allow_threads(|| crate::fitness(&self.spectrometer, max_n, max_m).into())
     }
 
+    #[text_signature = "($self, /, wavelengths, *, max_m = 16_384)"]
     #[args(wavelengths, "*", max_m = 16_384)]
     pub fn transmission_probability<'p>(
         &self,
@@ -474,9 +476,9 @@ impl PySpectrometer {
             wavelengths.len(),
             self.detector_array.as_ref(py).try_borrow()?.bin_count as usize,
         ))
-        .map_err(|e| e.into())
     }
 
+    #[text_signature = "($self, /, wavelength, inital_y)"]
     pub fn ray_trace<'p>(
         &self,
         wavelength: f64,
@@ -497,11 +499,9 @@ impl PySpectrometer {
         .to_pyarray(py))
     }
 
-    pub fn to_string(&self) -> String {
-        format!("{:#?}", self.spectrometer)
-    }
-
+    /// Computes the spectrometer fitness using on the gpu with float32
     #[cfg(feature = "cuda")]
+    #[text_signature = "($self, /, seeds, *, max_n = 256, nwarp = 2, max_eval = 16_384)"]
     #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
     fn gpu_fitness(
         &self,
@@ -513,13 +513,15 @@ impl PySpectrometer {
     ) -> Option<PyDesignFitness> {
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
-        let spec: Spectrometer<Pair<f32>, GaussianBeam<f32, _>> =
-            LossyInto::lossy_into(self.spectrometer.clone());
+        let spec: Spectrometer<Pair<f32>, GaussianBeam<f32, UniformDistribution<f32>>> =
+            LossyFrom::lossy_from(self.spectrometer.clone());
         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))?;
         Some(fit.into())
     }
 
+    /// Computes the spectrometer fitness using on the gpu with float64
     #[cfg(feature = "cuda")]
+    #[text_signature = "($self, /, seeds, *, max_n = 256, nwarp = 2, max_eval = 16_384)"]
     #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
     fn slow_gpu_fitness(
         &self,

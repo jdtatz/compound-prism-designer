@@ -11,9 +11,9 @@ pub enum RayTraceError {
     SpectrometerAngularResponseTooWeak,
 }
 
-impl Into<&'static str> for RayTraceError {
-    fn into(self) -> &'static str {
-        match self {
+impl From<RayTraceError> for &'static str {
+    fn from(err: RayTraceError) -> &'static str {
+        match err {
             RayTraceError::NoSurfaceIntersection => "NoSurfaceIntersection",
             RayTraceError::OutOfBounds => "OutOfBounds",
             RayTraceError::TotalInternalReflection => "TotalInternalReflection",
@@ -341,17 +341,17 @@ impl<V: Vector> Ray<V> {
     }
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<CompoundPrism<V2>> for CompoundPrism<V1>
+impl<V1: Vector, V2: Vector + LossyFrom<V1>> LossyFrom<CompoundPrism<V1>> for CompoundPrism<V2>
 where
-    V1::Scalar: LossyInto<V2::Scalar>,
+    V2::Scalar: LossyFrom<V1::Scalar>,
 {
-    fn lossy_into(self) -> CompoundPrism<V2> {
+    fn lossy_from(v: CompoundPrism<V1>) -> Self {
         CompoundPrism {
-            prisms: self.prisms.lossy_into(),
-            lens: self.lens.lossy_into(),
-            height: self.height.lossy_into(),
-            width: self.width.lossy_into(),
-            ar_coated: self.ar_coated,
+            prisms: LossyFrom::lossy_from(v.prisms),
+            lens: LossyFrom::lossy_from(v.lens),
+            height: LossyFrom::lossy_from(v.height),
+            width: LossyFrom::lossy_from(v.width),
+            ar_coated: v.ar_coated,
         }
     }
 }

@@ -1,8 +1,8 @@
-use crate::distribution::Distribution;
 use crate::erf::norminv;
 use crate::geom::{Mat2, Pair, Surface, Vector};
 use crate::qrng::QuasiRandom;
-use crate::utils::{Float, LossyInto};
+use crate::utils::Float;
+use crate::{distribution::Distribution, utils::LossyFrom};
 use crate::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 /// Collimated Polychromatic Gaussian Beam
@@ -308,64 +308,64 @@ impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
     }
 }
 
-impl<F1: LossyInto<F2>, F2, D1: LossyInto<D2>, D2> LossyInto<GaussianBeam<F2, D2>>
-    for GaussianBeam<F1, D1>
+impl<F1, F2: LossyFrom<F1>, D1, D2: LossyFrom<D1>> LossyFrom<GaussianBeam<F1, D1>>
+    for GaussianBeam<F2, D2>
 {
-    fn lossy_into(self) -> GaussianBeam<F2, D2> {
-        GaussianBeam {
-            width: self.width.lossy_into(),
-            y_mean: self.y_mean.lossy_into(),
-            wavelengths: self.wavelengths.lossy_into(),
+    fn lossy_from(v: GaussianBeam<F1, D1>) -> Self {
+        Self {
+            width: LossyFrom::lossy_from(v.width),
+            y_mean: LossyFrom::lossy_from(v.y_mean),
+            wavelengths: LossyFrom::lossy_from(v.wavelengths),
         }
     }
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<LinearDetectorArray<V2>>
-    for LinearDetectorArray<V1>
+impl<V1: Vector, V2: Vector + LossyFrom<V1>> LossyFrom<LinearDetectorArray<V1>>
+    for LinearDetectorArray<V2>
 where
-    V1::Scalar: LossyInto<V2::Scalar>,
+    V2::Scalar: LossyFrom<V1::Scalar>,
 {
-    fn lossy_into(self) -> LinearDetectorArray<V2> {
-        LinearDetectorArray {
-            bin_count: self.bin_count,
-            bin_size: self.bin_size.lossy_into(),
-            linear_slope: self.linear_slope.lossy_into(),
-            linear_intercept: self.linear_intercept.lossy_into(),
-            min_ci: self.min_ci.lossy_into(),
-            angle: self.angle.lossy_into(),
-            normal: self.normal.lossy_into(),
-            length: self.length.lossy_into(),
+    fn lossy_from(v: LinearDetectorArray<V1>) -> Self {
+        Self {
+            bin_count: v.bin_count,
+            bin_size: LossyFrom::lossy_from(v.bin_size),
+            linear_slope: LossyFrom::lossy_from(v.linear_slope),
+            linear_intercept: LossyFrom::lossy_from(v.linear_intercept),
+            min_ci: LossyFrom::lossy_from(v.min_ci),
+            angle: LossyFrom::lossy_from(v.angle),
+            normal: LossyFrom::lossy_from(v.normal),
+            length: LossyFrom::lossy_from(v.length),
         }
     }
 }
 
-impl<V1: Vector + LossyInto<V2>, V2: Vector> LossyInto<DetectorArrayPositioning<V2>>
-    for DetectorArrayPositioning<V1>
+impl<V1: Vector, V2: Vector + LossyFrom<V1>> LossyFrom<DetectorArrayPositioning<V1>>
+    for DetectorArrayPositioning<V2>
 where
-    V1::Scalar: LossyInto<V2::Scalar>,
+    V2::Scalar: LossyFrom<V1::Scalar>,
 {
-    fn lossy_into(self) -> DetectorArrayPositioning<V2> {
-        DetectorArrayPositioning {
-            position: self.position.lossy_into(),
-            direction: self.direction.lossy_into(),
+    fn lossy_from(v: DetectorArrayPositioning<V1>) -> Self {
+        Self {
+            position: LossyFrom::lossy_from(v.position),
+            direction: LossyFrom::lossy_from(v.direction),
         }
     }
 }
 
 impl<
-        V1: Vector + LossyInto<V2>,
-        V2: Vector,
-        B1: Beam<Vector = V1> + LossyInto<B2>,
-        B2: Beam<Vector = V2>,
-    > LossyInto<Spectrometer<V2, B2>> for Spectrometer<V1, B1>
+        V1: Vector,
+        V2: Vector + LossyFrom<V1>,
+        B1: Beam<Vector = V1>,
+        B2: Beam<Vector = V2> + LossyFrom<B1>,
+    > LossyFrom<Spectrometer<V1, B1>> for Spectrometer<V2, B2>
 where
-    V1::Scalar: LossyInto<V2::Scalar>,
+    V2::Scalar: LossyFrom<V1::Scalar>,
 {
-    fn lossy_into(self) -> Spectrometer<V2, B2> {
-        Spectrometer {
-            beam: self.beam.lossy_into(),
-            compound_prism: self.compound_prism.lossy_into(),
-            detector: self.detector.lossy_into(),
+    fn lossy_from(v: Spectrometer<V1, B1>) -> Self {
+        Self {
+            beam: LossyFrom::lossy_from(v.beam),
+            compound_prism: LossyFrom::lossy_from(v.compound_prism),
+            detector: LossyFrom::lossy_from(v.detector),
         }
     }
 }

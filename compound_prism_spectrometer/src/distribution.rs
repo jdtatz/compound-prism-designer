@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, ops::*};
 
-use crate::{utils::Float, LossyInto};
+use crate::utils::{Float, LossyFrom};
 
 pub trait Distribution {
     type Item;
@@ -64,27 +64,27 @@ impl<T, F: Fn(T) -> T> Distribution for UserDistribution<T, F> {
     }
 }
 
-impl<T: LossyInto<U>, U> LossyInto<DiracDeltaDistribution<U>> for DiracDeltaDistribution<T> {
-    fn lossy_into(self) -> DiracDeltaDistribution<U> {
-        DiracDeltaDistribution {
-            value: self.value.lossy_into(),
+impl<T, U: LossyFrom<T>> LossyFrom<DiracDeltaDistribution<T>> for DiracDeltaDistribution<U> {
+    fn lossy_from(v: DiracDeltaDistribution<T>) -> Self {
+        Self {
+            value: LossyFrom::lossy_from(v.value),
         }
     }
 }
 
-impl<T: LossyInto<U>, U> LossyInto<UniformDistribution<U>> for UniformDistribution<T> {
-    fn lossy_into(self) -> UniformDistribution<U> {
-        UniformDistribution {
-            bounds: self.bounds.lossy_into(),
+impl<T, U: LossyFrom<T>> LossyFrom<UniformDistribution<T>> for UniformDistribution<U> {
+    fn lossy_from(v: UniformDistribution<T>) -> Self {
+        Self {
+            bounds: LossyFrom::lossy_from(v.bounds),
         }
     }
 }
 
-impl<T: LossyInto<U>, U> LossyInto<NormalDistribution<U>> for NormalDistribution<T> {
-    fn lossy_into(self) -> NormalDistribution<U> {
-        NormalDistribution {
-            mean: self.mean.lossy_into(),
-            stddev: self.stddev.lossy_into(),
+impl<T, U: LossyFrom<T>> LossyFrom<NormalDistribution<T>> for NormalDistribution<U> {
+    fn lossy_from(v: NormalDistribution<T>) -> Self {
+        Self {
+            mean: LossyFrom::lossy_from(v.mean),
+            stddev: LossyFrom::lossy_from(v.stddev),
         }
     }
 }

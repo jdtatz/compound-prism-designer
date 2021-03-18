@@ -4,6 +4,10 @@
     clippy::excessive_precision
 )]
 
+#[cfg(feature = "pyext")]
+#[macro_use]
+extern crate derive_more;
+
 #[macro_use]
 extern crate serde;
 

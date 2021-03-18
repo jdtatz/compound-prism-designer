@@ -1,6 +1,6 @@
 use core::fmt::{Display, Formatter, Result, Write};
 
-use crate::utils::{Float, LossyInto};
+use crate::utils::{Float, LossyFrom};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "[F; N]: serde::Serialize + for<'a> serde::Deserialize<'a>")]
@@ -21,13 +21,13 @@ impl<F: Float, const N: usize> Glass<F, N> {
     }
 }
 
-impl<F1: Float + LossyInto<F2>, F2: Float, const N: usize> LossyInto<Glass<F2, N>> for Glass<F1, N>
+impl<F1, F2, const N: usize> LossyFrom<Glass<F2, N>> for Glass<F1, N>
 where
-    [F1; N]: LossyInto<[F2; N]>,
+    [F1; N]: LossyFrom<[F2; N]>,
 {
-    fn lossy_into(self) -> Glass<F2, N> {
-        Glass {
-            coefficents: self.coefficents.lossy_into(),
+    fn lossy_from(v: Glass<F2, N>) -> Self {
+        Self {
+            coefficents: LossyFrom::lossy_from(v.coefficents),
         }
     }
 }
