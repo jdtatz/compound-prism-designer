@@ -2,8 +2,7 @@ use core::fmt::{Display, Formatter, Result, Write};
 
 use crate::utils::{Float, LossyFrom};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(bound = "[F; N]: serde::Serialize + for<'a> serde::Deserialize<'a>")]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Glass<F, const N: usize> {
     pub coefficents: [F; N],
 }

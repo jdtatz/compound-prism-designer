@@ -7,7 +7,7 @@ pub trait Distribution {
     fn inverse_cdf(&self, p: Self::Item) -> Self::Item;
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct DiracDeltaDistribution<T> {
     pub value: T,
 }
@@ -20,7 +20,7 @@ impl<T: Copy> Distribution for DiracDeltaDistribution<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct UniformDistribution<T> {
     pub bounds: (T, T),
 }
@@ -36,7 +36,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct NormalDistribution<T> {
     pub mean: T,
     pub stddev: T,
@@ -50,7 +50,7 @@ impl<F: Float> Distribution for NormalDistribution<F> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct UserDistribution<T, F: Fn(T) -> T> {
     pub quantile: F,
     pub marker: PhantomData<T>,

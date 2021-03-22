@@ -1,8 +1,17 @@
 #![allow(clippy::needless_return)]
-use arrayvec::{Array, ArrayVec};
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
+use core::mem::swap;
+
+pub fn array_prepend<T, const N: usize>(first: T, mut rest: [T; N]) -> ([T; N], T) {
+    let mut swapped = first;
+    for i in 0..N {
+        swap(&mut rest[i], &mut swapped);
+    }
+    let last = swapped;
+    (rest, last)
+}
 
 pub trait LossyFrom<T>: Sized {
     fn lossy_from(_: T) -> Self;
@@ -42,33 +51,9 @@ impl LossyFrom<f64> for f32 {
     }
 }
 
-// impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
-//     fn lossy_from(t: [T; N]) -> Self {
-//         t.map(LossyFrom::lossy_from)
-//     }
-// }
-
-impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N]
-where
-    [T; N]: Array<Item = T>,
-    [U; N]: Array<Item = U>,
-{
+impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
     fn lossy_from(t: [T; N]) -> Self {
-        ArrayVec::from(t)
-            .into_iter()
-            .map(LossyFrom::lossy_from)
-            .collect::<ArrayVec<_>>()
-            .into_inner()
-            .unwrap_or_else(|_| unreachable!("How did this happend?"))
-    }
-}
-
-impl<TA: Array, UA: Array> LossyFrom<ArrayVec<TA>> for ArrayVec<UA>
-where
-    UA::Item: LossyFrom<TA::Item>,
-{
-    fn lossy_from(a: ArrayVec<TA>) -> Self {
-        a.into_iter().map(LossyFrom::lossy_from).collect()
+        t.map(LossyFrom::lossy_from)
     }
 }
 
@@ -92,8 +77,6 @@ pub trait Float:
     + core::fmt::Debug
     + core::fmt::Display
     + core::fmt::LowerExp
-    + serde::Serialize
-    + serde::de::DeserializeOwned
     + PartialEq
     + PartialOrd
     + Neg<Output = Self>

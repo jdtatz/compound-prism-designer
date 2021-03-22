@@ -10,8 +10,6 @@ pub trait Vector:
     + Copy
     + Clone
     + Debug
-    + serde::Serialize
-    + serde::de::DeserializeOwned
     + PartialEq
     + Neg<Output = Self>
     + Add<Self, Output = Self>
@@ -26,6 +24,8 @@ pub trait Vector:
     fn y(self) -> Self::Scalar;
 
     fn z(self) -> Self::Scalar;
+
+    fn zero() -> Self;
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self;
 
@@ -78,7 +78,7 @@ pub trait Vector:
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div)]
 pub struct Pair<T> {
     pub x: T,
     pub y: T,
@@ -96,11 +96,15 @@ impl<F: Float> Vector for Pair<F> {
     }
 
     fn z(self) -> Self::Scalar {
-        F::zero()
+        Self::Scalar::zero()
+    }
+
+    fn zero() -> Self {
+        Self { x: Self::Scalar::zero(), y: Self::Scalar::zero() }
     }
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
-        Pair { x, y }
+        Self { x, y }
     }
 
     /// unit vector at angle `theta` relative to the x axis.
@@ -188,7 +192,7 @@ impl<T, U: LossyFrom<T>> LossyFrom<Pair<T>> for Pair<U> {
 }
 
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div)]
 pub struct Triplet<T> {
     pub x: T,
     pub y: T,
@@ -210,6 +214,10 @@ impl<F: Float> Vector for Triplet<F> {
         self.z
     }
 
+    fn zero() -> Self {
+        Self { x: Self::Scalar::zero(), y: Self::Scalar::zero(), z: Self::Scalar::zero() }
+    }
+
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
         Self {
             x,
@@ -224,7 +232,7 @@ impl<F: Float> Vector for Triplet<F> {
         Self {
             x: cos,
             y: sin,
-            z: F::zero(),
+            z: Self::Scalar::zero(),
         }
     }
 
@@ -346,8 +354,7 @@ pub trait Surface {
     ) -> Option<(Self::Point, Self::UnitVector)>;
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(bound = "V: Vector")]
+#[derive(Debug, Clone, Copy)]
 pub struct Plane<V: Vector> {
     pub(crate) normal: V,
     pub(crate) midpt: V,
@@ -388,22 +395,21 @@ impl<V: Vector> Surface for Plane<V> {
     }
 }
 
-pub(crate) fn create_joined_trapezoids<'s, V: Vector>(
+pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     height: V::Scalar,
-    angles: &'s [V::Scalar],
-    sep_lengths: &'s [V::Scalar],
-) -> (Plane<V>, impl 's + ExactSizeIterator<Item = Plane<V>>) {
-    debug_assert!(angles.len() >= 2);
-    debug_assert!(angles.len() == sep_lengths.len() + 1);
+    first_angle: V::Scalar,
+    angles: [V::Scalar; N],
+    sep_lengths: [V::Scalar; N],
+) -> (Plane<V>, [Plane<V>; N]) {
     let h2 = height * V::Scalar::from_u32_ratio(1, 2);
-    let normal = V::angled_xy(angles[0]).rot_180_xy();
+    let normal = V::angled_xy(first_angle).rot_180_xy();
     debug_assert_eq!(
         normal,
-        V::from_xy(-V::Scalar::one(), V::Scalar::zero()).rotate_xy(angles[0])
+        V::from_xy(-V::Scalar::one(), V::Scalar::zero()).rotate_xy(first_angle)
     );
     debug_assert_almost_eq!(
         normal.tan_xy().abs(),
-        angles[0].tan().abs(),
+        first_angle.tan().abs(),
         V::Scalar::from_u32_ratio(1, 10000000)
     );
     let first = Plane {
@@ -414,29 +420,25 @@ pub(crate) fn create_joined_trapezoids<'s, V: Vector>(
     let mut prev_sign = normal.y().is_sign_positive();
     let mut d1 = first.midpt.x();
     let mut mx = first.midpt.x();
-    let rest = angles[1..]
-        .iter()
-        .copied()
-        .zip(sep_lengths.iter().copied())
-        .map(move |(angle, sep_len)| {
-            let normal = V::angled_xy(angle).rot_180_xy();
-            let sign = normal.y().is_sign_positive();
-            let d2 = normal.tan_xy().abs() * h2;
-            let sep_dist = sep_len
-                + if prev_sign != sign {
-                    d1 + d2
-                } else {
-                    (d1 - d2).abs()
-                };
-            prev_sign = sign;
-            d1 = d2;
-            mx += sep_dist;
-            Plane {
-                height,
-                normal,
-                midpt: V::from_xy(mx, h2),
-            }
-        });
+    let rest = angles.zip(sep_lengths).map(move |(angle, sep_len)| {
+        let normal = V::angled_xy(angle).rot_180_xy();
+        let sign = normal.y().is_sign_positive();
+        let d2 = normal.tan_xy().abs() * h2;
+        let sep_dist = sep_len
+            + if prev_sign != sign {
+                d1 + d2
+            } else {
+                (d1 - d2).abs()
+            };
+        prev_sign = sign;
+        d1 = d2;
+        mx += sep_dist;
+        Plane {
+            height,
+            normal,
+            midpt: V::from_xy(mx, h2),
+        }
+    });
     (first, rest)
 }
 
@@ -453,8 +455,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(bound = "V: Vector")]
+#[derive(Debug, Clone, Copy)]
 pub struct CurvedPlane<V: Vector> {
     /// The midpt of the Curved Surface / circular segment
     pub(crate) midpt: V,
