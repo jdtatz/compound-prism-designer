@@ -1,3 +1,4 @@
+#![feature(array_map, array_methods)]
 #![allow(
     clippy::blocks_in_if_conditions,
     clippy::range_plus_one,
@@ -7,9 +8,6 @@
 #[cfg(feature = "pyext")]
 #[macro_use]
 extern crate derive_more;
-
-#[macro_use]
-extern crate serde;
 
 #[cfg(feature = "cuda")]
 mod cuda_fitness;

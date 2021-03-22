@@ -6,7 +6,7 @@ use crate::{distribution::Distribution, utils::LossyFrom};
 use crate::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 /// Collimated Polychromatic Gaussian Beam
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct GaussianBeam<F, D> {
     /// 1/e^2 beam width
     pub width: F,
@@ -44,8 +44,7 @@ impl<F: Float, D: Distribution<Item = F>> Beam for GaussianBeam<F, D> {
 }
 
 /// Polychromatic Uniform Circular Multi-Mode Fiber Beam
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(bound = "F: Float")]
+#[derive(Debug, Clone, Copy)]
 pub struct FiberBeam<F: Float> {
     /// Radius of fiber core
     pub radius: F,
@@ -61,8 +60,7 @@ pub struct FiberBeam<F: Float> {
 /// for i in 0..bin_count
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(bound = "V: Vector")]
+#[derive(Debug, Clone, Copy)]
 pub struct LinearDetectorArray<V: Vector> {
     /// The number of bins in the array
     pub(crate) bin_count: u32,
@@ -134,8 +132,7 @@ impl<V: Vector> LinearDetectorArray<V> {
 }
 
 /// Positioning of detector array
-#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
-#[serde(bound = "V: Vector")]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct DetectorArrayPositioning<V: Vector> {
     /// Position vector of array
     pub position: V,
@@ -191,9 +188,9 @@ impl<V: Vector> DetectorArray for (LinearDetectorArray<V>, DetectorArrayPosition
 ///  * `cmpnd` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
-pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>>(
-    cmpnd: &CompoundPrism<V>,
-    detarr: &LinearDetectorArray<V>,
+pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>, const N: usize>(
+    cmpnd: CompoundPrism<V, N>,
+    detarr: LinearDetectorArray<V>,
     beam: &B,
 ) -> Result<DetectorArrayPositioning<V>, RayTraceError> {
     let ray = beam.inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::from_u32_ratio(1, 2)));
@@ -201,8 +198,8 @@ pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>>(
     // let wmax = beam.inverse_cdf_wavelength(V::Scalar::from_u32_ratio(99, 100));
     let wmin = beam.inverse_cdf_wavelength(V::Scalar::zero());
     let wmax = beam.inverse_cdf_wavelength(V::Scalar::one());
-    let lower_ray = ray.propagate_internal(cmpnd, wmin)?;
-    let upper_ray = ray.propagate_internal(cmpnd, wmax)?;
+    let lower_ray = ray.propagate_internal(&cmpnd, wmin)?;
+    let upper_ray = ray.propagate_internal(&cmpnd, wmax)?;
     if lower_ray.average_transmittance() <= V::Scalar::from_u32_ratio(1, 1000)
         || upper_ray.average_transmittance() <= V::Scalar::from_u32_ratio(1, 1000)
     {
@@ -237,22 +234,21 @@ pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>>(
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "V: Vector, B: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct Spectrometer<V: Vector, B: Beam<Vector = V>> {
+#[derive(Debug, Clone, Copy)]
+pub struct Spectrometer<V: Vector, B: Beam<Vector = V>, const N: usize> {
     pub beam: B,
-    pub compound_prism: CompoundPrism<V>,
+    pub compound_prism: CompoundPrism<V, N>,
     pub detector: (LinearDetectorArray<V>, DetectorArrayPositioning<V>),
 }
 
-impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
+impl<V: Vector, B: Beam<Vector = V>, const N: usize> Spectrometer<V, B, N> {
     pub fn new(
         beam: B,
-        compound_prism: CompoundPrism<V>,
+        compound_prism: CompoundPrism<V, N>,
         detector_array: LinearDetectorArray<V>,
     ) -> Result<Self, RayTraceError> {
         let detector_array_position =
-            detector_array_positioning(&compound_prism, &detector_array, &beam)?;
+            detector_array_positioning(compound_prism, detector_array, &beam)?;
         Ok(Self {
             beam,
             compound_prism,
@@ -292,7 +288,7 @@ impl<V: Vector, B: Beam<Vector = V>> Spectrometer<V, B> {
         wavelength: V::Scalar,
         initial_y: V::Scalar,
     ) -> impl Iterator<Item = Result<V, RayTraceError>> + 's {
-        Ray::new_from_start(initial_y).trace(wavelength, &self.compound_prism, &self.detector)
+        Ray::new_from_start(initial_y).trace(wavelength, self.compound_prism, self.detector)
     }
 
     pub fn size_and_deviation(&self) -> (V::Scalar, V::Scalar) {
@@ -357,11 +353,13 @@ impl<
         V2: Vector + LossyFrom<V1>,
         B1: Beam<Vector = V1>,
         B2: Beam<Vector = V2> + LossyFrom<B1>,
-    > LossyFrom<Spectrometer<V1, B1>> for Spectrometer<V2, B2>
+        const N: usize
+    > LossyFrom<Spectrometer<V1, B1, N>> for Spectrometer<V2, B2, N>
 where
     V2::Scalar: LossyFrom<V1::Scalar>,
+    CompoundPrism<V2, N>: LossyFrom<CompoundPrism<V1, N>>,
 {
-    fn lossy_from(v: Spectrometer<V1, B1>) -> Self {
+    fn lossy_from(v: Spectrometer<V1, B1, N>) -> Self {
         Self {
             beam: LossyFrom::lossy_from(v.beam),
             compound_prism: LossyFrom::lossy_from(v.compound_prism),
@@ -370,7 +368,7 @@ where
     }
 }
 
-unsafe impl<F: Float + rustacuda_core::DeviceCopy, V: Vector<Scalar = F>, B: Beam<Vector = V>>
-    rustacuda_core::DeviceCopy for Spectrometer<V, B>
+unsafe impl<F: Float + rustacuda_core::DeviceCopy, V: Vector<Scalar = F>, B: Beam<Vector = V>, const N: usize>
+    rustacuda_core::DeviceCopy for Spectrometer<V, B, N>
 {
 }

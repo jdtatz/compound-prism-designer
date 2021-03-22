@@ -1,5 +1,6 @@
 #![cfg_attr(any(not(feature = "std"), target_arch = "nvptx64"), no_std)]
 #![cfg_attr(target_arch = "nvptx64", feature(core_intrinsics))]
+#![feature(array_map, array_zip)]
 #![allow(
     clippy::blocks_in_if_conditions,
     clippy::range_plus_one,
@@ -7,8 +8,6 @@
 )]
 #[macro_use]
 extern crate derive_more;
-#[macro_use]
-extern crate serde;
 
 mod distribution;
 mod erf;

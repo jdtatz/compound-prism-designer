@@ -98,10 +98,10 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
-unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
+unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>, const N: usize>(
     seed: F,
     max_evals: u32,
-    spectrometer: &Spectrometer<V, B>,
+    spectrometer: &Spectrometer<V, B, N>,
     probability_ptr: *mut F,
 ) {
     if max_evals == 0 {
@@ -120,7 +120,7 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     asm!(
         ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
         ptr = out(reg64) shared_spectrometer_ptr,
-        size = const core::mem::size_of::<Spectrometer<V, B>>(),
+        size = const core::mem::size_of::<Spectrometer<V, B, N>>(),
         options(readonly, nostack, preserves_flags)
     );
     let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
@@ -209,22 +209,24 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths(
-    seed: f32,
-    max_evals: u32,
-    spectrometer: &Spectrometer<Pair<f32>, GaussianBeam<f32, UniformDistribution<f32>>>,
-    prob: *mut f32,
-) {
-    kernel(seed, max_evals, spectrometer, prob)
+macro_rules! gen_kernel {
+    (@inner $fty:ident $n:expr) => {
+        paste::paste! {
+            #[no_mangle]
+            pub unsafe extern "ptx-kernel" fn  [<prob_dets_given_wavelengths_ $fty _ $n>] (
+                seed: $fty,
+                max_evals: u32,
+                spectrometer: &Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, $n>,
+                prob: *mut $fty,
+            ) {
+                kernel(seed, max_evals, spectrometer, prob)
+            }
+        }
+    };
+    ([$($n:expr),*]) => {
+        $( gen_kernel!(@inner f32 $n); )*
+        $( gen_kernel!(@inner f64 $n); )*
+    };
 }
 
-#[no_mangle]
-pub unsafe extern "ptx-kernel" fn prob_dets_given_wavelengths_f64(
-    seed: f64,
-    max_evals: u32,
-    spectrometer: &Spectrometer<Pair<f64>, GaussianBeam<f64, UniformDistribution<f64>>>,
-    prob: *mut f64,
-) {
-    kernel(seed, max_evals, spectrometer, prob)
-}
+gen_kernel!([1, 2, 3, 4, 5, 6]);

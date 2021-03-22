@@ -1,3 +1,4 @@
+#![feature(array_map)]
 #![allow(clippy::excessive_precision)]
 #[macro_use]
 extern crate criterion;
@@ -89,13 +90,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             ],
         },
     ];
-    let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
-    let angles: Box<[f32]> = angles.iter().cloned().map(f32::to_radians).collect();
+    let first_angle = -27.2712308;
+    let angles = [34.16326141, -42.93207009, 1.06311416];
+    let first_angle = f32::to_radians(first_angle);
+    let angles = angles.map(f32::to_radians);
     let lengths = [0_f32; 3];
     let prism = CompoundPrism::new(
-        glasses.iter().cloned(),
-        angles.as_ref(),
-        lengths.as_ref(),
+        glasses,
+        first_angle,
+        angles,
+        lengths,
         0.21,
         2.5,
         2.,
@@ -107,7 +111,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let spec_max_accepted_angle = (60_f32).to_radians();
     let detarr = LinearDetectorArray::new(
         NBIN as u32,
-        0.1,
+        0.1f32,
         0.1,
         0.0,
         spec_max_accepted_angle.cos(),
@@ -122,16 +126,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             bounds: (0.5, 0.82),
         },
     };
-    let spec = Spectrometer::<Pair<f32>, _>::new(beam, prism, detarr).unwrap();
+    let spec = Spectrometer::new(beam, prism, detarr).unwrap();
     let cpu_fitness = fitness(&spec, 16_384, 16_384);
-    let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap();
+    let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap().unwrap();
     assert_almost_eq!(cpu_fitness.info as f64, gpu_fitness.info as f64, 1e-2);
 
     c.bench_function("known_design_example", |b| {
         b.iter(|| fitness(&spec, 16_384, 16_384));
     });
     c.bench_function("cuda_known_design_example", |b| {
-        b.iter(|| cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap())
+        b.iter(|| cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap().unwrap())
     });
     println!("cpu: {:?}", cpu_fitness);
     println!("gpu: {:?}", gpu_fitness);
