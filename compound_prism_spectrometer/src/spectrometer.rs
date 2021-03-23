@@ -6,7 +6,8 @@ use crate::{distribution::Distribution, utils::LossyFrom};
 use crate::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 /// Collimated Polychromatic Gaussian Beam
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct GaussianBeam<F, D> {
     /// 1/e^2 beam width
     pub width: F,
@@ -44,7 +45,8 @@ impl<F: Float, D: Distribution<Item = F>> Beam for GaussianBeam<F, D> {
 }
 
 /// Polychromatic Uniform Circular Multi-Mode Fiber Beam
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct FiberBeam<F: Float> {
     /// Radius of fiber core
     pub radius: F,
@@ -60,9 +62,11 @@ pub struct FiberBeam<F: Float> {
 /// for i in 0..bin_count
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
 pub struct LinearDetectorArray<V: Vector> {
     /// The number of bins in the array
+    #[wrapped_from(skip)]
     pub(crate) bin_count: u32,
     /// The size / length of the bins
     bin_size: V::Scalar,
@@ -132,7 +136,8 @@ impl<V: Vector> LinearDetectorArray<V> {
 }
 
 /// Positioning of detector array
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
 pub struct DetectorArrayPositioning<V: Vector> {
     /// Position vector of array
     pub position: V,
@@ -235,7 +240,8 @@ pub(crate) fn detector_array_positioning<
     })
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
 pub struct Spectrometer<
     V: Vector,
     B: Beam<Vector = V>,
@@ -317,76 +323,6 @@ impl<
         let size = deviation_vector.norm();
         let deviation = deviation_vector.sin_xy(size).abs();
         (size, deviation)
-    }
-}
-
-impl<F1, F2: LossyFrom<F1>, D1, D2: LossyFrom<D1>> LossyFrom<GaussianBeam<F1, D1>>
-    for GaussianBeam<F2, D2>
-{
-    fn lossy_from(v: GaussianBeam<F1, D1>) -> Self {
-        Self {
-            width: LossyFrom::lossy_from(v.width),
-            y_mean: LossyFrom::lossy_from(v.y_mean),
-            wavelengths: LossyFrom::lossy_from(v.wavelengths),
-        }
-    }
-}
-
-impl<V1: Vector, V2: Vector + LossyFrom<V1>> LossyFrom<LinearDetectorArray<V1>>
-    for LinearDetectorArray<V2>
-where
-    V2::Scalar: LossyFrom<V1::Scalar>,
-{
-    fn lossy_from(v: LinearDetectorArray<V1>) -> Self {
-        Self {
-            bin_count: v.bin_count,
-            bin_size: LossyFrom::lossy_from(v.bin_size),
-            linear_slope: LossyFrom::lossy_from(v.linear_slope),
-            linear_intercept: LossyFrom::lossy_from(v.linear_intercept),
-            min_ci: LossyFrom::lossy_from(v.min_ci),
-            angle: LossyFrom::lossy_from(v.angle),
-            normal: LossyFrom::lossy_from(v.normal),
-            length: LossyFrom::lossy_from(v.length),
-        }
-    }
-}
-
-impl<V1: Vector, V2: Vector + LossyFrom<V1>> LossyFrom<DetectorArrayPositioning<V1>>
-    for DetectorArrayPositioning<V2>
-where
-    V2::Scalar: LossyFrom<V1::Scalar>,
-{
-    fn lossy_from(v: DetectorArrayPositioning<V1>) -> Self {
-        Self {
-            position: LossyFrom::lossy_from(v.position),
-            direction: LossyFrom::lossy_from(v.direction),
-        }
-    }
-}
-
-impl<
-        V1: Vector,
-        V2: Vector + LossyFrom<V1>,
-        B1: Beam<Vector = V1>,
-        B2: Beam<Vector = V2> + LossyFrom<B1>,
-        S01: Surface<V1>,
-        S02: Surface<V2> + LossyFrom<S01>,
-        SI1: Surface<V1>,
-        SI2: Surface<V2> + LossyFrom<SI1>,
-        SN1: Surface<V1>,
-        SN2: Surface<V2> + LossyFrom<SN1>,
-        const N: usize,
-    > LossyFrom<Spectrometer<V1, B1, S01, SI1, SN1, N>> for Spectrometer<V2, B2, S02, SI2, SN2, N>
-where
-    V2::Scalar: LossyFrom<V1::Scalar>,
-    CompoundPrism<V2, S02, SI2, SN2, N>: LossyFrom<CompoundPrism<V1, S01, SI1, SN1, N>>,
-{
-    fn lossy_from(v: Spectrometer<V1, B1, S01, SI1, SN1, N>) -> Self {
-        Self {
-            beam: LossyFrom::lossy_from(v.beam),
-            compound_prism: LossyFrom::lossy_from(v.compound_prism),
-            detector: LossyFrom::lossy_from(v.detector),
-        }
     }
 }
 

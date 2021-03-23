@@ -8,6 +8,8 @@
 )]
 #[macro_use]
 extern crate derive_more;
+#[macro_use]
+extern crate derive_wrapped_from;
 
 mod distribution;
 mod erf;
