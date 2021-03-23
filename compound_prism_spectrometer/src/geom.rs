@@ -1,6 +1,6 @@
 use crate::{
     debug_assert_almost_eq,
-    utils::{almost_eq, Float, LossyFrom},
+    utils::{almost_eq, array_prepend, Float, LossyFrom},
 };
 use core::fmt::Debug;
 use core::ops::{Add, Div, Mul, Neg, Sub};
@@ -100,7 +100,10 @@ impl<F: Float> Vector for Pair<F> {
     }
 
     fn zero() -> Self {
-        Self { x: Self::Scalar::zero(), y: Self::Scalar::zero() }
+        Self {
+            x: Self::Scalar::zero(),
+            y: Self::Scalar::zero(),
+        }
     }
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
@@ -215,7 +218,11 @@ impl<F: Float> Vector for Triplet<F> {
     }
 
     fn zero() -> Self {
-        Self { x: Self::Scalar::zero(), y: Self::Scalar::zero(), z: Self::Scalar::zero() }
+        Self {
+            x: Self::Scalar::zero(),
+            y: Self::Scalar::zero(),
+            z: Self::Scalar::zero(),
+        }
     }
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
@@ -345,13 +352,8 @@ impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
     }
 }
 
-pub trait Surface {
-    type Point: Vector;
-    type UnitVector: Vector;
-    fn intersection(
-        &self,
-        ray: (Self::Point, Self::UnitVector),
-    ) -> Option<(Self::Point, Self::UnitVector)>;
+pub trait Surface<Point: Vector, UnitVector: Vector = Point>: 'static + Copy {
+    fn intersection(&self, ray: (Point, UnitVector)) -> Option<(Point, UnitVector)>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -371,14 +373,8 @@ impl<V: Vector> Plane<V> {
     }
 }
 
-impl<V: Vector> Surface for Plane<V> {
-    type Point = V;
-    type UnitVector = V;
-
-    fn intersection(
-        &self,
-        ray: (Self::Point, Self::UnitVector),
-    ) -> Option<(Self::Point, Self::UnitVector)> {
+impl<V: Vector> Surface<V> for Plane<V> {
+    fn intersection(&self, ray: (V, V)) -> Option<(V, V)> {
         let (origin, direction) = ray;
         debug_assert!(direction.check_unit());
         let ci = -direction.dot(self.normal);
@@ -399,8 +395,11 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     height: V::Scalar,
     first_angle: V::Scalar,
     angles: [V::Scalar; N],
+    last_angle: V::Scalar,
+    first_sep_length: V::Scalar,
     sep_lengths: [V::Scalar; N],
-) -> (Plane<V>, [Plane<V>; N]) {
+) -> (Plane<V>, [Plane<V>; N], Plane<V>) {
+    let (sep_lengths, last_sep_length) = array_prepend(first_sep_length, sep_lengths);
     let h2 = height * V::Scalar::from_u32_ratio(1, 2);
     let normal = V::angled_xy(first_angle).rot_180_xy();
     debug_assert_eq!(
@@ -420,7 +419,7 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     let mut prev_sign = normal.y().is_sign_positive();
     let mut d1 = first.midpt.x();
     let mut mx = first.midpt.x();
-    let rest = angles.zip(sep_lengths).map(move |(angle, sep_len)| {
+    let mut next_plane = |(angle, sep_len)| {
         let normal = V::angled_xy(angle).rot_180_xy();
         let sign = normal.y().is_sign_positive();
         let d2 = normal.tan_xy().abs() * h2;
@@ -438,8 +437,10 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
             normal,
             midpt: V::from_xy(mx, h2),
         }
-    });
-    (first, rest)
+    };
+    let inter: [Plane<V>; N] = angles.zip(sep_lengths).map(&mut next_plane);
+    let last = (&mut next_plane)((last_angle, last_sep_length));
+    (first, inter, last)
 }
 
 impl<T: Vector, U: Vector + LossyFrom<T>> LossyFrom<Plane<T>> for Plane<U>
@@ -540,14 +541,8 @@ impl<V: Vector> CurvedPlane<V> {
     }
 }
 
-impl<V: Vector> Surface for CurvedPlane<V> {
-    type Point = V;
-    type UnitVector = V;
-
-    fn intersection(
-        &self,
-        ray: (Self::Point, Self::UnitVector),
-    ) -> Option<(Self::Point, Self::UnitVector)> {
+impl<V: Vector> Surface<V> for CurvedPlane<V> {
+    fn intersection(&self, ray: (V, V)) -> Option<(V, V)> {
         let (origin, direction) = ray;
         debug_assert!(direction.check_unit());
         let delta = origin - self.center;

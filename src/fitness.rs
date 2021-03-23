@@ -45,8 +45,15 @@ pub struct DesignFitness<F: Float> {
 ///
 /// # Arguments
 ///  * `wavelength` - given wavelength
-pub fn p_dets_l_wavelength<V: Vector, B: Beam<Vector = V>, const N: usize>(
-    spectrometer: &Spectrometer<V, B, N>,
+pub fn p_dets_l_wavelength<
+    V: Vector,
+    B: Beam<Vector = V>,
+    S0: Surface<V>,
+    SI: Surface<V>,
+    SN: Surface<V>,
+    const N: usize,
+>(
+    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
     wavelength: V::Scalar,
     max_n: usize,
 ) -> impl Iterator<Item = V::Scalar> {
@@ -90,8 +97,15 @@ pub fn p_dets_l_wavelength<V: Vector, B: Beam<Vector = V>, const N: usize>(
 /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-pub fn mutual_information<V: Vector, B: Beam<Vector = V>, const N: usize>(
-    spectrometer: &Spectrometer<V, B, N>,
+pub fn mutual_information<
+    V: Vector,
+    B: Beam<Vector = V>,
+    S0: Surface<V>,
+    SI: Surface<V>,
+    SN: Surface<V>,
+    const N: usize,
+>(
+    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
     max_n: usize,
     max_m: usize,
 ) -> V::Scalar {
@@ -139,8 +153,15 @@ pub fn mutual_information<V: Vector, B: Beam<Vector = V>, const N: usize>(
 /// * size = the distance from the mean starting position of the beam to the center of detector array
 /// * info = I(Λ; D)
 /// * deviation = sin(abs(angle of deviation))
-pub fn fitness<V: Vector, B: Beam<Vector = V>, const N: usize>(
-    spectrometer: &Spectrometer<V, B, N>,
+pub fn fitness<
+    V: Vector,
+    B: Beam<Vector = V>,
+    S0: Surface<V>,
+    SI: Surface<V>,
+    SN: Surface<V>,
+    const N: usize,
+>(
+    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
     max_n: usize,
     max_m: usize,
 ) -> DesignFitness<V::Scalar> {
@@ -194,15 +215,19 @@ mod tests {
                 ],
             },
         ];
-        let first_angle = -27.2712308;
-        let angles = [34.16326141, -42.93207009, 1.06311416];
-        let first_angle = f64::to_radians(first_angle);
+        let [glass0, glasses @ ..] = glasses;
+        let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
         let angles = angles.map(f64::to_radians);
+        let [first_angle, angles @ .., last_angle] = angles;
         let lengths = [0_f64; 3];
+        let [first_length, lengths @ ..] = lengths;
         let prism = CompoundPrism::new(
+            glass0,
             glasses,
             first_angle,
             angles,
+            last_angle,
+            first_length,
             lengths,
             0.21,
             2.5,

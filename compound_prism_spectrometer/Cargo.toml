@@ -13,6 +13,7 @@ crate-type = ["rlib"]
 derive_more = "0.99"
 libm = "0.2"
 rustacuda_core = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update" }
+paste = "1.0.5"
 
 [dev-dependencies]
 approx = "0.4"

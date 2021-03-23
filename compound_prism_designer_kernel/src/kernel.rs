@@ -4,8 +4,8 @@
 #![feature(abi_ptx, link_llvm_intrinsics, asm)]
 
 use compound_prism_spectrometer::{
-    Beam, DetectorArray, Float, GaussianBeam, Pair, Qrng, Spectrometer, UniformDistribution,
-    Vector, Welford,
+    Beam, CurvedPlane, DetectorArray, Float, GaussianBeam, Pair, Plane, Qrng, Spectrometer,
+    Surface, UniformDistribution, Vector, Welford,
 };
 use core::slice::from_raw_parts_mut;
 use nvptx_sys::{
@@ -98,10 +98,18 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
-unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>, const N: usize>(
+unsafe fn kernel<
+    F: CudaFloat,
+    V: Vector<Scalar = F>,
+    B: Beam<Vector = V>,
+    S0: Surface<V>,
+    SI: Surface<V>,
+    SN: Surface<V>,
+    const N: usize,
+>(
     seed: F,
     max_evals: u32,
-    spectrometer: &Spectrometer<V, B, N>,
+    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
     probability_ptr: *mut F,
 ) {
     if max_evals == 0 {
@@ -120,7 +128,7 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>, const
     asm!(
         ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
         ptr = out(reg64) shared_spectrometer_ptr,
-        size = const core::mem::size_of::<Spectrometer<V, B, N>>(),
+        size = const core::mem::size_of::<Spectrometer<V, B, S0, SI, SN, N>>(),
         options(readonly, nostack, preserves_flags)
     );
     let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
@@ -216,7 +224,7 @@ macro_rules! gen_kernel {
             pub unsafe extern "ptx-kernel" fn  [<prob_dets_given_wavelengths_ $fty _ $n>] (
                 seed: $fty,
                 max_evals: u32,
-                spectrometer: &Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, $n>,
+                spectrometer: &Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n>,
                 prob: *mut $fty,
             ) {
                 kernel(seed, max_evals, spectrometer, prob)
@@ -229,4 +237,4 @@ macro_rules! gen_kernel {
     };
 }
 
-gen_kernel!([1, 2, 3, 4, 5, 6]);
+gen_kernel!([0, 1, 2, 3, 4, 5, 6]);

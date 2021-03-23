@@ -1,8 +1,8 @@
 #![allow(clippy::needless_return)]
+use core::mem::swap;
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
-use core::mem::swap;
 
 pub fn array_prepend<T, const N: usize>(first: T, mut rest: [T; N]) -> ([T; N], T) {
     let mut swapped = first;
@@ -57,17 +57,53 @@ impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
     }
 }
 
-impl<T0, U0: LossyFrom<T0>> LossyFrom<(T0,)> for (U0,) {
-    fn lossy_from(t: (T0,)) -> Self {
-        (LossyFrom::lossy_from(t.0),)
+impl LossyFrom<()> for () {
+    fn lossy_from(_: ()) -> Self {
+        ()
     }
 }
 
-impl<T0, T1, U0: LossyFrom<T0>, U1: LossyFrom<T1>> LossyFrom<(T0, T1)> for (U0, U1) {
-    fn lossy_from(t: (T0, T1)) -> Self {
-        (LossyFrom::lossy_from(t.0), LossyFrom::lossy_from(t.1))
+macro_rules! apply_args_reverse {
+    ($macro_id:tt [] $($reversed:tt)*) => {
+        $macro_id!($($reversed) *);
+    };
+    ($macro_id:tt [$first:tt $($rest:tt)*] $($reversed:tt)*) => {
+        apply_args_reverse!($macro_id [$($rest)*] $first $($reversed)*);
+    };
+    // Entry point, use brackets to recursively reverse above.
+    ($macro_id:tt, $($t:tt)*) => {
+        apply_args_reverse!($macro_id [ $($t)* ]);
+    };
+}
+
+macro_rules! impl_lossy_from_tuple {
+    ( $($i:literal)* ) => {
+        paste::paste! {
+            impl < $( [<T $i>], [<U $i>]: LossyFrom< [<T $i>] > ),* > LossyFrom< ( $( [<T $i>] ),*, ) > for  ( $( [<U $i>] ),*, ) {
+                fn lossy_from(t: ( $( [<T $i>] ),*, ) ) -> Self {
+                    (
+                        $(
+                            LossyFrom::lossy_from(t . $i)
+                        ),*,
+                    )
+                }
+            }
+        }
     }
 }
+
+macro_rules! build_impl_lossy_from_tuple {
+    () => {};
+    ($n:literal $($i:literal)* ) => {
+        build_impl_lossy_from_tuple! { $($i)* }
+        apply_args_reverse! { impl_lossy_from_tuple, $n $($i)* }
+    };
+    ( [$($i:literal),*] ) => {
+        apply_args_reverse! { build_impl_lossy_from_tuple, $($i)* }
+    };
+}
+
+build_impl_lossy_from_tuple! { [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] }
 
 pub trait Float:
     'static

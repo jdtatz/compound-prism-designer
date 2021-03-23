@@ -35,21 +35,28 @@ pub trait Beam {
     fn inverse_cdf_ray(&self, q: Self::Quasi) -> Ray<Self::Vector>;
 }
 
-pub trait DetectorArray: Surface {
+pub trait DetectorArray<Point: Vector, UnitVector: Vector = Point>:
+    Surface<Point, UnitVector>
+{
     fn bin_count(&self) -> u32;
-    fn length(&self) -> <<Self as Surface>::Point as Vector>::Scalar;
-    fn bin_index(&self, intersection: Self::Point) -> Option<u32>;
+    fn length(&self) -> <Point as Vector>::Scalar;
+    fn bin_index(&self, intersection: Point) -> Option<u32>;
 }
 
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy)]
-pub struct CompoundPrism<V: Vector, const N: usize> {
+pub struct CompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>
+{
+    /// First glass
+    glass0: Glass<V::Scalar, 6>,
+    /// First boundary surface
+    surface0: S0,
     /// List of glasses the compound prism is composed of, in order
     glasses: [Glass<V::Scalar, 6>; N],
     /// Inter-media boundary surfaces
-    isurfaces: [Plane<V>; N],
-    /// The curved lens-like last inter-media boundary surface of the compound prism
-    lens: CurvedPlane<V>,
+    isurfaces: [SI; N],
+    /// Final boundary surface
+    surfaceN: SN,
     /// Height of compound prism
     pub(crate) height: V::Scalar,
     /// Width of compound prism
@@ -58,7 +65,13 @@ pub struct CompoundPrism<V: Vector, const N: usize> {
     ar_coated: bool,
 }
 
-impl<V: Vector, const N: usize> CompoundPrism<V, N> {
+pub type PlanerCompoundPrism<V, const N: usize> = CompoundPrism<V, Plane<V>, Plane<V>, Plane<V>, N>;
+pub type CompoundPrismLensLast<V, const N: usize> =
+    CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane<V>, N>;
+pub type CompoundPrismBothLens<V, const N: usize> =
+    CompoundPrism<V, CurvedPlane<V>, Plane<V>, CurvedPlane<V>, N>;
+
+impl<V: Vector, const N: usize> CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane<V>, N> {
     /// Create a new Compound Prism Specification
     ///
     /// # Arguments
@@ -68,25 +81,35 @@ impl<V: Vector, const N: usize> CompoundPrism<V, N> {
     ///  * `curvature` - Lens Curvature of last surface of compound prism
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
-    ///  * `coat` - Coat the outer compound prism surfaces with anti-reflective coating
+    ///  * `coat` - Coat the compound prism surfaces with anti-reflective coating
     pub fn new(
+        glass0: Glass<V::Scalar, 6>,
         glasses: [Glass<V::Scalar, 6>; N],
         first_angle: V::Scalar,
         angles: [V::Scalar; N],
+        last_angle: V::Scalar,
+        first_length: V::Scalar,
         lengths: [V::Scalar; N],
         curvature: V::Scalar,
         height: V::Scalar,
         width: V::Scalar,
         coat: bool,
-    ) -> Self
-     {
-        let (first_surface, rest) = create_joined_trapezoids(height, first_angle, angles, lengths);
-        let (isurfaces, last_surface) = array_prepend(first_surface, rest);
-        let lens = CurvedPlane::new(curvature, height, last_surface);
+    ) -> Self {
+        let (surface0, isurfaces, last_surface) = create_joined_trapezoids(
+            height,
+            first_angle,
+            angles,
+            last_angle,
+            first_length,
+            lengths,
+        );
+        let surfaceN = CurvedPlane::new(curvature, height, last_surface);
         Self {
+            glass0,
             glasses,
+            surface0,
             isurfaces,
-            lens,
+            surfaceN,
             height,
             width,
             ar_coated: coat,
@@ -96,15 +119,20 @@ impl<V: Vector, const N: usize> CompoundPrism<V, N> {
     #[cfg(feature = "std")]
     pub fn polygons(&self) -> (Vec<[V; 4]>, [V; 4], V, V::Scalar) {
         let mut poly = Vec::with_capacity(N);
-        let (mut u0, mut l0) = self.isurfaces[0].end_points(self.height);
+        let (mut u0, mut l0) = self.surface0.end_points(self.height);
         for s in self.isurfaces[1..].iter() {
             let (u1, l1) = s.end_points(self.height);
             poly.push([l0, u0, u1, l1]);
             u0 = u1;
             l0 = l1;
         }
-        let (u1, l1) = self.lens.end_points(self.height);
-        (poly, [l0, u0, u1, l1], self.lens.center, self.lens.radius)
+        let (u1, l1) = self.surfaceN.end_points(self.height);
+        (
+            poly,
+            [l0, u0, u1, l1],
+            self.surfaceN.center,
+            self.surfaceN.radius,
+        )
     }
 }
 
@@ -214,7 +242,7 @@ impl<V: Vector> Ray<V> {
     ///  * `detector` - detector array specification
     fn intersect_detector_array(
         self,
-        detector: &impl DetectorArray<Point = V, UnitVector = V>,
+        detector: &impl DetectorArray<V>,
     ) -> Result<(V, u32, V::Scalar), RayTraceError> {
         let (p, _n) = detector
             .intersection((self.origin, self.direction))
@@ -230,13 +258,24 @@ impl<V: Vector> Ray<V> {
     /// # Arguments
     ///  * `cmpnd` - the compound prism specification
     ///  * `wavelength` - the wavelength of the light ray
-    pub fn propagate_internal<const N: usize>(
+    pub fn propagate_internal<S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>(
         self,
-        cmpnd: &CompoundPrism<V, N>,
+        cmpnd: &CompoundPrism<V, S0, SI, SN, N>,
         wavelength: V::Scalar,
     ) -> Result<Self, RayTraceError> {
         let mut ray = self;
         let mut n1 = V::Scalar::one();
+
+        let glass = cmpnd.glass0;
+        let surf = cmpnd.surface0;
+        let n2 = glass.calc_n(wavelength);
+        debug_assert!(n2 >= V::Scalar::one());
+        let (p, normal) = surf
+            .intersection((ray.origin, ray.direction))
+            .ok_or(RayTraceError::NoSurfaceIntersection)?;
+        ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+        n1 = n2;
+
         for i in 0..N {
             let glass = cmpnd.glasses[i];
             let plane = cmpnd.isurfaces[i];
@@ -250,7 +289,7 @@ impl<V: Vector> Ray<V> {
         }
         let n2 = V::Scalar::one();
         let (p, normal) = cmpnd
-            .lens
+            .surfaceN
             .intersection((ray.origin, ray.direction))
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
         ray.refract(p, normal, n1, n2, cmpnd.ar_coated)
@@ -264,11 +303,11 @@ impl<V: Vector> Ray<V> {
     ///  * `wavelength` - the wavelength of the light ray
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
-    pub fn propagate<const N: usize>(
+    pub fn propagate<S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>(
         self,
         wavelength: V::Scalar,
-        cmpnd: &CompoundPrism<V, N>,
-        detector: &impl DetectorArray<Point = V, UnitVector = V>,
+        cmpnd: &CompoundPrism<V, S0, SI, SN, N>,
+        detector: &impl DetectorArray<V>,
     ) -> Result<(u32, V::Scalar), RayTraceError> {
         let (_, idx, t) = self
             .propagate_internal(cmpnd, wavelength)?
@@ -285,18 +324,28 @@ impl<V: Vector> Ray<V> {
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
     #[cfg(not(target_arch = "nvptx64"))]
-    pub fn trace<const N: usize>(
+    pub fn trace<S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>(
         self,
         wavelength: V::Scalar,
-        cmpnd: CompoundPrism<V, N>,
-        detector: impl DetectorArray<Point = V, UnitVector = V> + Copy,
+        cmpnd: CompoundPrism<V, S0, SI, SN, N>,
+        detector: impl DetectorArray<V> + Copy,
     ) -> impl Iterator<Item = Result<V, RayTraceError>> {
         let mut ray = self;
         let mut n1 = V::Scalar::one();
+        let mut prism0 = Some((cmpnd.glass0, cmpnd.surface0));
         let mut prisms = core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces));
         let mut internal = true;
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<V>, RayTraceError> {
+            if let Some((glass, plane)) = prism0.take() {
+                let n2 = glass.calc_n(wavelength);
+                let (p, normal) = plane
+                    .intersection((ray.origin, ray.direction))
+                    .ok_or(RayTraceError::NoSurfaceIntersection)?;
+                ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                n1 = n2;
+                return Ok(Some(ray.origin));
+            }
             match prisms.next() {
                 Some((glass, plane)) => {
                     let n2 = glass.calc_n(wavelength);
@@ -311,7 +360,7 @@ impl<V: Vector> Ray<V> {
                     internal = false;
                     let n2 = V::Scalar::one();
                     let (p, normal) = cmpnd
-                        .lens
+                        .surfaceN
                         .intersection((ray.origin, ray.direction))
                         .ok_or(RayTraceError::NoSurfaceIntersection)?;
                     ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
@@ -331,18 +380,30 @@ impl<V: Vector> Ray<V> {
     }
 }
 
-impl<V1: Vector, V2: Vector + LossyFrom<V1>, const N: usize> LossyFrom<CompoundPrism<V1, N>> for CompoundPrism<V2, N>
+impl<
+        V1: Vector,
+        V2: Vector + LossyFrom<V1>,
+        S01: Surface<V1>,
+        S02: Surface<V2> + LossyFrom<S01>,
+        SI1: Surface<V1>,
+        SI2: Surface<V2> + LossyFrom<SI1>,
+        SN1: Surface<V1>,
+        SN2: Surface<V2> + LossyFrom<SN1>,
+        const N: usize,
+    > LossyFrom<CompoundPrism<V1, S01, SI1, SN1, N>> for CompoundPrism<V2, S02, SI2, SN2, N>
 where
     V2::Scalar: LossyFrom<V1::Scalar>,
 {
-    fn lossy_from(v: CompoundPrism<V1, N>) -> Self {
+    fn lossy_from(v: CompoundPrism<V1, S01, SI1, SN1, N>) -> Self {
         CompoundPrism {
             glasses: LossyFrom::lossy_from(v.glasses),
             isurfaces: LossyFrom::lossy_from(v.isurfaces),
-            lens: LossyFrom::lossy_from(v.lens),
             height: LossyFrom::lossy_from(v.height),
             width: LossyFrom::lossy_from(v.width),
             ar_coated: v.ar_coated,
+            surface0: LossyFrom::lossy_from(v.surface0),
+            glass0: LossyFrom::lossy_from(v.glass0),
+            surfaceN: LossyFrom::lossy_from(v.surfaceN),
         }
     }
 }
