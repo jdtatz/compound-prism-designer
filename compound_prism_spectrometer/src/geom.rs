@@ -78,7 +78,8 @@ pub trait Vector:
 
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div)]
+#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
 pub struct Pair<T> {
     pub x: T,
     pub y: T,
@@ -185,17 +186,9 @@ impl<F: Float> Pair<F> {
     }
 }
 
-impl<T, U: LossyFrom<T>> LossyFrom<Pair<T>> for Pair<U> {
-    fn lossy_from(v: Pair<T>) -> Self {
-        Self {
-            x: LossyFrom::lossy_from(v.x),
-            y: LossyFrom::lossy_from(v.y),
-        }
-    }
-}
-
 #[repr(C)]
-#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div)]
+#[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
 pub struct Triplet<T> {
     pub x: T,
     pub y: T,
@@ -307,16 +300,6 @@ impl<F: Float> Vector for Triplet<F> {
     }
 }
 
-impl<T, U: LossyFrom<T>> LossyFrom<Triplet<T>> for Triplet<U> {
-    fn lossy_from(v: Triplet<T>) -> Self {
-        Self {
-            x: LossyFrom::lossy_from(v.x),
-            y: LossyFrom::lossy_from(v.y),
-            z: LossyFrom::lossy_from(v.z),
-        }
-    }
-}
-
 /// Matrix in R^(2x2) in row major order
 #[derive(Debug, Clone, Copy)]
 pub struct Mat2<F: Float>([F; 4]);
@@ -356,7 +339,8 @@ pub trait Surface<Point: Vector, UnitVector: Vector = Point>: 'static + Copy {
     fn intersection(&self, ray: (Point, UnitVector)) -> Option<(Point, UnitVector)>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
 pub struct Plane<V: Vector> {
     pub(crate) normal: V,
     pub(crate) midpt: V,
@@ -443,20 +427,8 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     (first, inter, last)
 }
 
-impl<T: Vector, U: Vector + LossyFrom<T>> LossyFrom<Plane<T>> for Plane<U>
-where
-    U::Scalar: LossyFrom<T::Scalar>,
-{
-    fn lossy_from(v: Plane<T>) -> Self {
-        Self {
-            height: LossyFrom::lossy_from(v.height),
-            normal: LossyFrom::lossy_from(v.normal),
-            midpt: LossyFrom::lossy_from(v.midpt),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
 pub struct CurvedPlane<V: Vector> {
     /// The midpt of the Curved Surface / circular segment
     pub(crate) midpt: V,
@@ -466,6 +438,7 @@ pub struct CurvedPlane<V: Vector> {
     pub(crate) radius: V::Scalar,
     /// max_dist_sq = sagitta ^ 2 + (chord_length / 2) ^ 2
     max_dist_sq: V::Scalar,
+    #[wrapped_from(skip)]
     direction: bool,
 }
 
@@ -566,21 +539,6 @@ impl<V: Vector> Surface<V> for CurvedPlane<V> {
             Some((p, snorm))
         } else {
             None
-        }
-    }
-}
-
-impl<T: Vector, U: Vector + LossyFrom<T>> LossyFrom<CurvedPlane<T>> for CurvedPlane<U>
-where
-    U::Scalar: LossyFrom<T::Scalar>,
-{
-    fn lossy_from(v: CurvedPlane<T>) -> Self {
-        Self {
-            midpt: LossyFrom::lossy_from(v.midpt),
-            center: LossyFrom::lossy_from(v.center),
-            radius: LossyFrom::lossy_from(v.radius),
-            max_dist_sq: LossyFrom::lossy_from(v.max_dist_sq),
-            direction: v.direction,
         }
     }
 }

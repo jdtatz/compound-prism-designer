@@ -7,7 +7,8 @@ pub trait Distribution {
     fn inverse_cdf(&self, p: Self::Item) -> Self::Item;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
 pub struct DiracDeltaDistribution<T> {
     pub value: T,
 }
@@ -20,7 +21,8 @@ impl<T: Copy> Distribution for DiracDeltaDistribution<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
 pub struct UniformDistribution<T> {
     pub bounds: (T, T),
 }
@@ -36,7 +38,8 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
 pub struct NormalDistribution<T> {
     pub mean: T,
     pub stddev: T,
@@ -61,30 +64,5 @@ impl<T, F: Fn(T) -> T> Distribution for UserDistribution<T, F> {
 
     fn inverse_cdf(&self, p: Self::Item) -> Self::Item {
         (self.quantile)(p)
-    }
-}
-
-impl<T, U: LossyFrom<T>> LossyFrom<DiracDeltaDistribution<T>> for DiracDeltaDistribution<U> {
-    fn lossy_from(v: DiracDeltaDistribution<T>) -> Self {
-        Self {
-            value: LossyFrom::lossy_from(v.value),
-        }
-    }
-}
-
-impl<T, U: LossyFrom<T>> LossyFrom<UniformDistribution<T>> for UniformDistribution<U> {
-    fn lossy_from(v: UniformDistribution<T>) -> Self {
-        Self {
-            bounds: LossyFrom::lossy_from(v.bounds),
-        }
-    }
-}
-
-impl<T, U: LossyFrom<T>> LossyFrom<NormalDistribution<T>> for NormalDistribution<U> {
-    fn lossy_from(v: NormalDistribution<T>) -> Self {
-        Self {
-            mean: LossyFrom::lossy_from(v.mean),
-            stddev: LossyFrom::lossy_from(v.stddev),
-        }
     }
 }

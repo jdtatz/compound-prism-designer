@@ -44,7 +44,12 @@ pub trait DetectorArray<Point: Vector, UnitVector: Vector = Point>:
 }
 
 /// Compound Prism Specification
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(
+    trait = "crate::LossyFrom",
+    function = "lossy_from",
+    bound = "V::Scalar: LossyFrom<$V::Scalar>"
+)]
 pub struct CompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>
 {
     /// First glass
@@ -62,6 +67,7 @@ pub struct CompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<
     /// Width of compound prism
     pub(crate) width: V::Scalar,
     /// Are the inter-media surfaces coated(anti-reflective)?
+    #[wrapped_from(skip)]
     ar_coated: bool,
 }
 
@@ -377,33 +383,5 @@ impl<V: Vector> Ray<V> {
         };
         core::iter::once(Ok(self.origin))
             .chain(core::iter::from_fn(move || propagation_fn().transpose()).fuse())
-    }
-}
-
-impl<
-        V1: Vector,
-        V2: Vector + LossyFrom<V1>,
-        S01: Surface<V1>,
-        S02: Surface<V2> + LossyFrom<S01>,
-        SI1: Surface<V1>,
-        SI2: Surface<V2> + LossyFrom<SI1>,
-        SN1: Surface<V1>,
-        SN2: Surface<V2> + LossyFrom<SN1>,
-        const N: usize,
-    > LossyFrom<CompoundPrism<V1, S01, SI1, SN1, N>> for CompoundPrism<V2, S02, SI2, SN2, N>
-where
-    V2::Scalar: LossyFrom<V1::Scalar>,
-{
-    fn lossy_from(v: CompoundPrism<V1, S01, SI1, SN1, N>) -> Self {
-        CompoundPrism {
-            glasses: LossyFrom::lossy_from(v.glasses),
-            isurfaces: LossyFrom::lossy_from(v.isurfaces),
-            height: LossyFrom::lossy_from(v.height),
-            width: LossyFrom::lossy_from(v.width),
-            ar_coated: v.ar_coated,
-            surface0: LossyFrom::lossy_from(v.surface0),
-            glass0: LossyFrom::lossy_from(v.glass0),
-            surfaceN: LossyFrom::lossy_from(v.surfaceN),
-        }
     }
 }
