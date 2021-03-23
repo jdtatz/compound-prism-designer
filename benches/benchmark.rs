@@ -90,15 +90,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             ],
         },
     ];
-    let first_angle = -27.2712308;
-    let angles = [34.16326141, -42.93207009, 1.06311416];
-    let first_angle = f32::to_radians(first_angle);
+    let [glass0, glasses @ ..] = glasses;
+    let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
     let angles = angles.map(f32::to_radians);
+    let [first_angle, angles @ .., last_angle] = angles;
     let lengths = [0_f32; 3];
+    let [first_length, lengths @ ..] = lengths;
     let prism = CompoundPrism::new(
+        glass0,
         glasses,
         first_angle,
         angles,
+        last_angle,
+        first_length,
         lengths,
         0.21,
         2.5,
@@ -128,14 +132,20 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     };
     let spec = Spectrometer::new(beam, prism, detarr).unwrap();
     let cpu_fitness = fitness(&spec, 16_384, 16_384);
-    let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap().unwrap();
+    let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
+        .unwrap()
+        .unwrap();
     assert_almost_eq!(cpu_fitness.info as f64, gpu_fitness.info as f64, 1e-2);
 
     c.bench_function("known_design_example", |b| {
         b.iter(|| fitness(&spec, 16_384, 16_384));
     });
     c.bench_function("cuda_known_design_example", |b| {
-        b.iter(|| cuda_fitness(&spec, &[0.798713], 256, 2, 16_384).unwrap().unwrap())
+        b.iter(|| {
+            cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
+                .unwrap()
+                .unwrap()
+        })
     });
     println!("cpu: {:?}", cpu_fitness);
     println!("gpu: {:?}", gpu_fitness);

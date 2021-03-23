@@ -140,14 +140,8 @@ pub struct DetectorArrayPositioning<V: Vector> {
     pub direction: V,
 }
 
-impl<V: Vector> Surface for (LinearDetectorArray<V>, DetectorArrayPositioning<V>) {
-    type Point = V;
-    type UnitVector = V;
-
-    fn intersection(
-        &self,
-        ray: (Self::Point, Self::UnitVector),
-    ) -> Option<(Self::Point, Self::UnitVector)> {
+impl<V: Vector> Surface<V> for (LinearDetectorArray<V>, DetectorArrayPositioning<V>) {
+    fn intersection(&self, ray: (V, V)) -> Option<(V, V)> {
         let (detarr, detpos) = self;
         let ci = -ray.1.dot(detarr.normal);
         if ci <= detarr.min_ci {
@@ -161,16 +155,16 @@ impl<V: Vector> Surface for (LinearDetectorArray<V>, DetectorArrayPositioning<V>
     }
 }
 
-impl<V: Vector> DetectorArray for (LinearDetectorArray<V>, DetectorArrayPositioning<V>) {
+impl<V: Vector> DetectorArray<V> for (LinearDetectorArray<V>, DetectorArrayPositioning<V>) {
     fn bin_count(&self) -> u32 {
         self.0.bin_count
     }
 
-    fn length(&self) -> <Self::Point as Vector>::Scalar {
+    fn length(&self) -> V::Scalar {
         self.0.length
     }
 
-    fn bin_index(&self, intersection: Self::Point) -> Option<u32> {
+    fn bin_index(&self, intersection: V) -> Option<u32> {
         let (detarr, detpos) = self;
         let pos = (intersection - detpos.position).dot(detpos.direction);
         if pos < V::Scalar::zero() || detarr.length < pos {
@@ -188,8 +182,15 @@ impl<V: Vector> DetectorArray for (LinearDetectorArray<V>, DetectorArrayPosition
 ///  * `cmpnd` - the compound prism specification
 ///  * `detarr` - detector array specification
 ///  * `beam` - input gaussian beam specification
-pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>, const N: usize>(
-    cmpnd: CompoundPrism<V, N>,
+pub(crate) fn detector_array_positioning<
+    V: Vector,
+    B: Beam<Vector = V>,
+    S0: Surface<V>,
+    SI: Surface<V>,
+    SN: Surface<V>,
+    const N: usize,
+>(
+    cmpnd: CompoundPrism<V, S0, SI, SN, N>,
     detarr: LinearDetectorArray<V>,
     beam: &B,
 ) -> Result<DetectorArrayPositioning<V>, RayTraceError> {
@@ -235,16 +236,31 @@ pub(crate) fn detector_array_positioning<V: Vector, B: Beam<Vector = V>, const N
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Spectrometer<V: Vector, B: Beam<Vector = V>, const N: usize> {
+pub struct Spectrometer<
+    V: Vector,
+    B: Beam<Vector = V>,
+    S0: Surface<V>,
+    SI: Surface<V>,
+    SN: Surface<V>,
+    const N: usize,
+> {
     pub beam: B,
-    pub compound_prism: CompoundPrism<V, N>,
+    pub compound_prism: CompoundPrism<V, S0, SI, SN, N>,
     pub detector: (LinearDetectorArray<V>, DetectorArrayPositioning<V>),
 }
 
-impl<V: Vector, B: Beam<Vector = V>, const N: usize> Spectrometer<V, B, N> {
+impl<
+        V: Vector,
+        B: Beam<Vector = V>,
+        S0: Surface<V>,
+        SI: Surface<V>,
+        SN: Surface<V>,
+        const N: usize,
+    > Spectrometer<V, B, S0, SI, SN, N>
+{
     pub fn new(
         beam: B,
-        compound_prism: CompoundPrism<V, N>,
+        compound_prism: CompoundPrism<V, S0, SI, SN, N>,
         detector_array: LinearDetectorArray<V>,
     ) -> Result<Self, RayTraceError> {
         let detector_array_position =
@@ -353,13 +369,19 @@ impl<
         V2: Vector + LossyFrom<V1>,
         B1: Beam<Vector = V1>,
         B2: Beam<Vector = V2> + LossyFrom<B1>,
-        const N: usize
-    > LossyFrom<Spectrometer<V1, B1, N>> for Spectrometer<V2, B2, N>
+        S01: Surface<V1>,
+        S02: Surface<V2> + LossyFrom<S01>,
+        SI1: Surface<V1>,
+        SI2: Surface<V2> + LossyFrom<SI1>,
+        SN1: Surface<V1>,
+        SN2: Surface<V2> + LossyFrom<SN1>,
+        const N: usize,
+    > LossyFrom<Spectrometer<V1, B1, S01, SI1, SN1, N>> for Spectrometer<V2, B2, S02, SI2, SN2, N>
 where
     V2::Scalar: LossyFrom<V1::Scalar>,
-    CompoundPrism<V2, N>: LossyFrom<CompoundPrism<V1, N>>,
+    CompoundPrism<V2, S02, SI2, SN2, N>: LossyFrom<CompoundPrism<V1, S01, SI1, SN1, N>>,
 {
-    fn lossy_from(v: Spectrometer<V1, B1, N>) -> Self {
+    fn lossy_from(v: Spectrometer<V1, B1, S01, SI1, SN1, N>) -> Self {
         Self {
             beam: LossyFrom::lossy_from(v.beam),
             compound_prism: LossyFrom::lossy_from(v.compound_prism),
@@ -368,7 +390,14 @@ where
     }
 }
 
-unsafe impl<F: Float + rustacuda_core::DeviceCopy, V: Vector<Scalar = F>, B: Beam<Vector = V>, const N: usize>
-    rustacuda_core::DeviceCopy for Spectrometer<V, B, N>
+unsafe impl<
+        F: Float + rustacuda_core::DeviceCopy,
+        S0: Surface<V>,
+        SI: Surface<V>,
+        SN: Surface<V>,
+        V: Vector<Scalar = F>,
+        B: Beam<Vector = V>,
+        const N: usize,
+    > rustacuda_core::DeviceCopy for Spectrometer<V, B, S0, SI, SN, N>
 {
 }

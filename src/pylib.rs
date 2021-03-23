@@ -27,7 +27,6 @@ fn map_cuda_err(err: rustacuda::error::CudaError) -> PyErr {
     RayTraceError::new_err(err.to_string())
 }
 
-
 #[pyclass(name = "Glass", module = "compound_prism_designer")]
 #[text_signature = "(name, coefficents)"]
 #[derive(Debug, Display, Clone)]
@@ -92,7 +91,10 @@ impl PyObjectProtocol for PyGlass {
     }
 }
 
-fn pyglasses_to_glasses<const N: usize>(py: Python, pyglasses: &[Py<PyGlass>]) -> [Glass<f64, 6>; N] {
+fn pyglasses_to_glasses<const N: usize>(
+    py: Python,
+    pyglasses: &[Py<PyGlass>],
+) -> [Glass<f64, 6>; N] {
     let pyglasses: &[Py<PyGlass>; N] = pyglasses.try_into().unwrap();
     let pyglasses: [&Py<PyGlass>; N] = pyglasses.each_ref();
     pyglasses.map(|pg| pg.as_ref(py).borrow().glass.clone())
@@ -157,7 +159,7 @@ const MAX_GLASS: usize = 6;
 
 macro_rules! call_sized_macro {
     ($cmacro:ident $($tt:tt)*) => {
-        $cmacro! { [1, 2, 3, 4, 5, 6] $($tt)* }
+        $cmacro! { [0, 1, 2, 3, 4, 5, 6] $($tt)* }
     };
 }
 
@@ -165,8 +167,8 @@ macro_rules! define_sized_compound_prism {
     ([$($n:literal),+]) => {
         paste::paste! {
             #[derive(Debug, Clone, Copy, From)]
-            enum SizedCompoundPrism<V: Vector> {
-                $( [<CompoundPrism $n>](CompoundPrism<V, $n>) ),*
+            enum SizedCompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>> {
+                $( [<CompoundPrism $n>](CompoundPrism<V,S0, SI, SN, $n>) ),*
             }
         }
     };
@@ -205,8 +207,8 @@ macro_rules! define_sized_spectrometer {
     ([$($n:literal),*]) => {
         paste::paste! {
             #[derive(Debug, Clone, Copy, From)]
-            enum SizedSpectrometer<V: Vector, B: Beam<Vector=V>> {
-                $( [<Spectrometer $n>](Spectrometer<V, B, $n>) ),*
+            enum SizedSpectrometer<V: Vector, B: Beam<Vector=V>, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>> {
+                $( [<Spectrometer $n>](Spectrometer<V, B, S0, SI, SN, $n>) ),*
             }
         }
     };
@@ -253,11 +255,23 @@ macro_rules! lossy_from_sized_spectrometer {
     }
 }
 
-impl<V1: Vector, B1: Beam<Vector=V1>, V2: Vector + LossyFrom<V1>, B2: Beam<Vector=V2> + LossyFrom<B1>> LossyFrom<SizedSpectrometer<V1, B1>> for SizedSpectrometer<V2, B2>
-    where
-        V2::Scalar: compound_prism_spectrometer::LossyFrom<V1::Scalar>
+impl<
+        V1: Vector,
+        V2: Vector + LossyFrom<V1>,
+        B1: Beam<Vector = V1>,
+        B2: Beam<Vector = V2> + LossyFrom<B1>,
+        S01: Surface<V1>,
+        S02: Surface<V2> + LossyFrom<S01>,
+        SI1: Surface<V1>,
+        SI2: Surface<V2> + LossyFrom<SI1>,
+        SN1: Surface<V1>,
+        SN2: Surface<V2> + LossyFrom<SN1>,
+    > LossyFrom<SizedSpectrometer<V1, B1, S01, SI1, SN1>>
+    for SizedSpectrometer<V2, B2, S02, SI2, SN2>
+where
+    V2::Scalar: compound_prism_spectrometer::LossyFrom<V1::Scalar>,
 {
-    fn lossy_from(v: SizedSpectrometer<V1, B1>) -> Self {
+    fn lossy_from(v: SizedSpectrometer<V1, B1, S01, SI1, SN1>) -> Self {
         lossy_from_sized_spectrometer!(v)
     }
 }
@@ -266,7 +280,8 @@ impl<V1: Vector, B1: Beam<Vector=V1>, V2: Vector + LossyFrom<V1>, B2: Beam<Vecto
 #[text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)"]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
-    compound_prism: SizedCompoundPrism<Pair<f64>>,
+    compound_prism:
+        SizedCompoundPrism<Pair<f64>, Plane<Pair<f64>>, Plane<Pair<f64>>, CurvedPlane<Pair<f64>>>,
     #[pyo3(get)]
     glasses: Vec<Py<PyGlass>>,
     #[pyo3(get)]
@@ -296,19 +311,33 @@ impl PyCompoundPrism {
         ar_coated: bool,
         py: Python,
     ) -> PyResult<Self> {
-        let (first_angle, angles_rest) = angles.split_first().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("`angles` must have at least 2 elements"))?;
+        let (first_angle, angles_rest) = angles.split_first().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("`angles` must have at least 2 elements")
+        })?;
         if glasses.len() > MAX_GLASS {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!("Maximum of {} prisms are allowed", MAX_GLASS)))
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Maximum of {} prisms are allowed",
+                MAX_GLASS
+            )));
         } else if glasses.len() != angles_rest.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err("len(glasses) + 1 != len(angles)"))
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "len(glasses) + 1 != len(angles)",
+            ));
         } else if glasses.len() != lengths.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err("len(glasses) != len(lengths)"))
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "len(glasses) != len(lengths)",
+            ));
         }
-        let compound_prism = create_sized_compound_prism!{ glasses.len() => CompoundPrism::new(
-            pyglasses_to_glasses(py, &glasses),
+        let slengths = lengths.as_slice();
+        let (last_angle, angles_rest) = angles_rest.split_last().unwrap();
+        let compound_prism = create_sized_compound_prism! { glasses.len() => CompoundPrism::new(
+            glasses[0].as_ref(py).borrow().glass.clone(),
+            pyglasses_to_glasses(py, &glasses[1..]),
             *first_angle,
             angles_rest.try_into().unwrap(),
-            lengths.as_slice().try_into().unwrap(),
+            *last_angle,
+            slengths[0],
+            slengths[1..].try_into().unwrap(),
             curvature,
             height,
             width,
@@ -351,7 +380,8 @@ impl PyCompoundPrism {
         &'p PyArray1<f64>,
         f64,
     )> {
-        let (polys, lens_poly, lens_center, lens_radius) = map_sized_compound_prism!(self.compound_prism => |c| c.polygons());
+        let (polys, lens_poly, lens_center, lens_radius) =
+            map_sized_compound_prism!(self.compound_prism => |c| c.polygons());
         let polys = polys
             .into_iter()
             .map(|[p0, p1, p2, p3]| {
@@ -513,7 +543,13 @@ impl PyObjectProtocol for PyGaussianBeam {
 #[text_signature = "(compound_prism, detector_array, gaussian_beam)"]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
-    spectrometer: SizedSpectrometer<Pair<f64>, GaussianBeam<f64, UniformDistribution<f64>>>,
+    spectrometer: SizedSpectrometer<
+        Pair<f64>,
+        GaussianBeam<f64, UniformDistribution<f64>>,
+        Plane<Pair<f64>>,
+        Plane<Pair<f64>>,
+        CurvedPlane<Pair<f64>>,
+    >,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
     compound_prism: Py<PyCompoundPrism>,
@@ -542,14 +578,15 @@ impl PySpectrometer {
     ) -> PyResult<Self> {
         let gb = gaussian_beam.as_ref(py).try_borrow()?.gaussian_beam.clone();
         let da = detector_array
-                .as_ref(py)
-                .try_borrow()?
-                .detector_array
-                .clone();
+            .as_ref(py)
+            .try_borrow()?
+            .detector_array
+            .clone();
         let scp = compound_prism
             .as_ref(py)
             .try_borrow()?
-            .compound_prism.clone();
+            .compound_prism
+            .clone();
         let spectrometer = create_sized_spectrometer!(scp; gb; da);
         Ok(PySpectrometer {
             compound_prism,
@@ -631,9 +668,9 @@ impl PySpectrometer {
     ) -> PyResult<Option<PyDesignFitness>> {
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
-        let spec: SizedSpectrometer<Pair<f32>, GaussianBeam<f32, UniformDistribution<f32>>> =
+        let spec: SizedSpectrometer<Pair<f32>, _, _, _, _> =
             LossyFrom::lossy_from(self.spectrometer.clone());
-        let fit = py.allow_threads(|| 
+        let fit = py.allow_threads(||
             map_sized_spectrometer!(spec => |spec| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))).map_err(map_cuda_err)?;
         Ok(fit.map(Into::into))
     }
