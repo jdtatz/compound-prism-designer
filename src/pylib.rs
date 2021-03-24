@@ -206,7 +206,8 @@ macro_rules! create_sized_compound_prism {
 macro_rules! define_sized_spectrometer {
     ([$($n:literal),*]) => {
         paste::paste! {
-            #[derive(Debug, Clone, Copy, From)]
+            #[derive(Debug, Clone, Copy, From, WrappedFrom)]
+            #[wrapped_from(trait = "LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
             enum SizedSpectrometer<V: Vector, B: Beam<Vector=V>, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>> {
                 $( [<Spectrometer $n>](Spectrometer<V, B, S0, SI, SN, $n>) ),*
             }
@@ -239,40 +240,6 @@ macro_rules! create_sized_spectrometer {
     };
     ($sized_compound_prism:expr; $beam:ident; $detarr:ident) => {
         call_sized_macro! { create_sized_spectrometer ; $sized_compound_prism; $beam; $detarr }
-    }
-}
-
-macro_rules! lossy_from_sized_spectrometer {
-    ([$($n:literal),*] $v:ident) => {
-        paste::paste! {
-            match $v {
-                $(SizedSpectrometer::[<Spectrometer $n>](s) => SizedSpectrometer::[<Spectrometer $n>](LossyFrom::lossy_from(s)),)*
-            }
-        }
-    };
-    ($v:ident) => {
-        call_sized_macro! { lossy_from_sized_spectrometer $v }
-    }
-}
-
-impl<
-        V1: Vector,
-        V2: Vector + LossyFrom<V1>,
-        B1: Beam<Vector = V1>,
-        B2: Beam<Vector = V2> + LossyFrom<B1>,
-        S01: Surface<V1>,
-        S02: Surface<V2> + LossyFrom<S01>,
-        SI1: Surface<V1>,
-        SI2: Surface<V2> + LossyFrom<SI1>,
-        SN1: Surface<V1>,
-        SN2: Surface<V2> + LossyFrom<SN1>,
-    > LossyFrom<SizedSpectrometer<V1, B1, S01, SI1, SN1>>
-    for SizedSpectrometer<V2, B2, S02, SI2, SN2>
-where
-    V2::Scalar: compound_prism_spectrometer::LossyFrom<V1::Scalar>,
-{
-    fn lossy_from(v: SizedSpectrometer<V1, B1, S01, SI1, SN1>) -> Self {
-        lossy_from_sized_spectrometer!(v)
     }
 }
 

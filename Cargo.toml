@@ -22,6 +22,7 @@ pyo3 = { version="0.13", features = ["extension-module", "abi3-py37"], optional 
 numpy = { version="0.13", optional = true }
 ndarray = { version="0.14", optional = true }
 paste = "1.0.5"
+derive-wrapped-from = { path = "./derive-wrapped-from" }
 
 [dev-dependencies]
 rand = "0.8"

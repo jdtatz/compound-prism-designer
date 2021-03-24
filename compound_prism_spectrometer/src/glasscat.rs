@@ -1,6 +1,6 @@
 use core::fmt::{Display, Formatter, Result, Write};
 
-use crate::utils::{Float, LossyFrom};
+use crate::utils::Float;
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]

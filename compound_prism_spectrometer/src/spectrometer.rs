@@ -63,7 +63,11 @@ pub struct FiberBeam<F: Float> {
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
+#[wrapped_from(
+    trait = "crate::LossyFrom",
+    function = "lossy_from",
+    bound = "V::Scalar: LossyFrom<$V::Scalar>"
+)]
 pub struct LinearDetectorArray<V: Vector> {
     /// The number of bins in the array
     #[wrapped_from(skip)]
@@ -137,7 +141,11 @@ impl<V: Vector> LinearDetectorArray<V> {
 
 /// Positioning of detector array
 #[derive(Debug, PartialEq, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
+#[wrapped_from(
+    trait = "crate::LossyFrom",
+    function = "lossy_from",
+    bound = "V::Scalar: LossyFrom<$V::Scalar>"
+)]
 pub struct DetectorArrayPositioning<V: Vector> {
     /// Position vector of array
     pub position: V,
@@ -241,7 +249,11 @@ pub(crate) fn detector_array_positioning<
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
+#[wrapped_from(
+    trait = "crate::LossyFrom",
+    function = "lossy_from",
+    bound = "V::Scalar: LossyFrom<$V::Scalar>"
+)]
 pub struct Spectrometer<
     V: Vector,
     B: Beam<Vector = V>,

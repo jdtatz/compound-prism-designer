@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, ops::*};
 
-use crate::utils::{Float, LossyFrom};
+use crate::utils::Float;
 
 pub trait Distribution {
     type Item;
@@ -8,7 +8,7 @@ pub trait Distribution {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct DiracDeltaDistribution<T> {
     pub value: T,
 }
@@ -22,7 +22,7 @@ impl<T: Copy> Distribution for DiracDeltaDistribution<T> {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct UniformDistribution<T> {
     pub bounds: (T, T),
 }
@@ -39,7 +39,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct NormalDistribution<T> {
     pub mean: T,
     pub stddev: T,
