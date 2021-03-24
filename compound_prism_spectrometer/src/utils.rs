@@ -58,9 +58,7 @@ impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
 }
 
 impl LossyFrom<()> for () {
-    fn lossy_from(_: ()) -> Self {
-        ()
-    }
+    fn lossy_from(_: ()) -> Self {}
 }
 
 macro_rules! apply_args_reverse {

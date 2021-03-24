@@ -79,7 +79,7 @@ pub trait Vector:
 /// vector in R^2 represented as a 2-tuple
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct Pair<T> {
     pub x: T,
     pub y: T,
@@ -188,7 +188,7 @@ impl<F: Float> Pair<F> {
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, Neg, Add, Sub, Mul, Div, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom",function = "lossy_from")]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct Triplet<T> {
     pub x: T,
     pub y: T,
@@ -340,7 +340,11 @@ pub trait Surface<Point: Vector, UnitVector: Vector = Point>: 'static + Copy {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
+#[wrapped_from(
+    trait = "crate::LossyFrom",
+    function = "lossy_from",
+    bound = "V::Scalar: LossyFrom<$V::Scalar>"
+)]
 pub struct Plane<V: Vector> {
     pub(crate) normal: V,
     pub(crate) midpt: V,
@@ -428,7 +432,11 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
+#[wrapped_from(
+    trait = "crate::LossyFrom",
+    function = "lossy_from",
+    bound = "V::Scalar: LossyFrom<$V::Scalar>"
+)]
 pub struct CurvedPlane<V: Vector> {
     /// The midpt of the Curved Surface / circular segment
     pub(crate) midpt: V,

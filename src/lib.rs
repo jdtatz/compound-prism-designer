@@ -8,6 +8,9 @@
 #[cfg(feature = "pyext")]
 #[macro_use]
 extern crate derive_more;
+#[cfg(feature = "pyext")]
+#[macro_use]
+extern crate derive_wrapped_from;
 
 #[cfg(feature = "cuda")]
 mod cuda_fitness;

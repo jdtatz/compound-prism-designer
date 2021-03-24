@@ -7,19 +7,73 @@ use syn::{punctuated::Punctuated, DeriveInput, Ident, Path, Token, Type, WherePr
 
 #[derive(Debug, FromField)]
 #[darling(attributes(wrapped_from))]
-pub struct LoremField {
+pub struct WrappedFromDeriveField {
     ident: Option<Ident>,
     ty: Type,
     #[darling(default)]
     skip: util::Flag,
 }
 
+fn unnamed_deconstructed_field(i: u32) -> Ident {
+    format_ident!("_{}", i)
+}
+
+fn deconstruct_fields(fields: darling::ast::Fields<&WrappedFromDeriveField>) -> TokenStream {
+    let mut i = 0;
+    let ff = fields.map(|f| {
+        let id = f
+            .ident
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| unnamed_deconstructed_field(i));
+        i += 1;
+        id
+    });
+    quote!( #ff )
+}
+
+fn construct_fields(
+    fields: darling::ast::Fields<&WrappedFromDeriveField>,
+    impl_trait: &Path,
+    function: &Ident,
+) -> TokenStream {
+    let mut i = 0;
+    let ff = fields.map(|f| {
+        let field = f
+            .ident
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| unnamed_deconstructed_field(i));
+        i += 1;
+        let value = if f.skip.is_some() {
+            quote!(#field)
+        } else {
+            quote!(#impl_trait :: #function ( #field ))
+        };
+        if let Some(ref id) = f.ident {
+            quote!( #id : #value )
+        } else {
+            value
+        }
+    });
+    quote!( #ff )
+}
+
+#[derive(Debug, FromVariant)]
+#[darling(attributes(wrapped_from))]
+pub struct WrappedFromDeriveVariant {
+    ident: Ident,
+    fields: darling::ast::Fields<WrappedFromDeriveField>,
+    #[darling(default)]
+    skip: util::Flag,
+}
+
 #[derive(Debug, FromDeriveInput)]
-#[darling(attributes(wrapped_from), supports(struct_any))]
-pub struct Lorem {
+#[darling(attributes(wrapped_from))]
+pub struct WrappedFromDerive {
     ident: Ident,
     generics: syn::Generics,
-    data: ast::Data<util::Ignored, LoremField>,
+    data: ast::Data<WrappedFromDeriveVariant, WrappedFromDeriveField>,
     #[darling(rename = "trait")]
     impl_trait: Path,
     function: Ident,
@@ -54,9 +108,9 @@ impl<'s> syn::visit_mut::VisitMut for RenameBoundAssociatedTypes<'s> {
     // }
 }
 
-impl ToTokens for Lorem {
+impl ToTokens for WrappedFromDerive {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let Lorem {
+        let WrappedFromDerive {
             ref ident,
             ref generics,
             ref data,
@@ -131,35 +185,43 @@ impl ToTokens for Lorem {
             }
         }
 
-        // create the wrapped_from inner expr
-        let struct_fields = data.as_ref().take_struct().expect("Should never be enum");
         let wf_arg = format_ident!("wf");
-        let mut i = -1;
-        let ff = struct_fields.map(|f| {
-            i += 1;
-            let field = if let Some(ref id) = f.ident {
-                quote!(#wf_arg . #id)
-            } else {
-                quote!(#wf_arg . #i)
-            };
-            let value = if f.skip.is_some() {
-                field
-            } else {
-                quote!(#impl_trait :: #function ( #field ))
-            };
-            if let Some(ref id) = f.ident {
-                quote!( #id : #value )
-            } else {
-                value
+        let body = match data.as_ref() {
+            ast::Data::Enum(variants) => {
+                let arms = variants.into_iter().map(|v| {
+                    let vid = &v.ident;
+                    let vpath = quote!( #ident :: #vid );
+                    let vfs = &v.fields.as_ref();
+                    let decon = deconstruct_fields(vfs.clone());
+                    if v.skip.is_some() {
+                        quote! { #vpath #decon => #vpath #decon }
+                    } else {
+                        let wcon = construct_fields(vfs.clone(), &impl_trait, &function);
+                        quote! { #vpath #decon => #vpath #wcon }
+                    }
+                });
+                quote! {
+                    match #wf_arg {
+                        #( #arms ),*
+                    }
+                }
             }
-        });
+            ast::Data::Struct(fields) => {
+                let decon = deconstruct_fields(fields.clone());
+                let wcon = construct_fields(fields.clone(), &impl_trait, &function);
+                quote! {
+                    let #ident #decon = #wf_arg ;
+                    #ident #wcon
+                }
+            }
+        };
 
         let (impl_generics, _, where_clause) = combined_generics.split_for_impl();
 
         tokens.extend(quote! {
             impl #impl_generics #impl_trait < #ident #wf_ty_generics > for #ident #ty_generics #where_clause {
                 fn #function (#wf_arg: #ident #wf_ty_generics) -> Self {
-                    #ident #ff
+                    #body
                 }
             }
         });
@@ -167,7 +229,7 @@ impl ToTokens for Lorem {
 }
 
 pub fn derive_helper_attr(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
-    Lorem::from_derive_input(input)
+    WrappedFromDerive::from_derive_input(input)
         .map(|v| quote! { #v })
         .map_err(|e| e.write_errors())
 }
