@@ -108,6 +108,7 @@ pub trait Float:
     + Sized
     + Copy
     + Clone
+    + LossyFrom<f64>
     + core::fmt::Debug
     + core::fmt::Display
     + core::fmt::LowerExp

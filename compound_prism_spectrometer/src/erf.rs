@@ -3,11 +3,13 @@
     clippy::unreadable_literal,
     clippy::excessive_precision
 )]
-use crate::utils::Float;
+use crate::utils::{Float, LossyFrom};
 
-fn polynomial<F: Float, const N: usize>(z: F, coeff: [f64; N]) -> F {
-    core::array::IntoIter::new(coeff)
-        .map(F::from_f64)
+fn polynomial<F: Float, const N: usize>(z: F, coeff: [F; N]) -> F {
+    // core::array::IntoIter::new(coeff)
+    coeff
+        .iter()
+        .copied()
         .reduce(|s, c| s.mul_add(z, c))
         .expect("`polynomial` called with a zero-sized array")
 }
@@ -55,8 +57,8 @@ pub fn norminv<F: Float>(x: F) -> F {
         x
     };
     let v = -(F::from_u32(2) * u).ln();
-    let p = polynomial(v, SHAW_P);
-    let q = polynomial(v, SHAW_Q);
+    let p = polynomial(v, LossyFrom::lossy_from(SHAW_P));
+    let q = polynomial(v, LossyFrom::lossy_from(SHAW_Q));
     (v * p / q).copy_sign(x - F::from_u32_ratio(1, 2))
 }
 
@@ -98,8 +100,8 @@ pub fn fast_norminv<F: Float>(u: F) -> F {
         x += F::from_u32(2);
     }
     let v = -F::ln(x);
-    let p = polynomial(v, FAST_SHAW_P);
-    let q = polynomial(v, FAST_SHAW_Q);
+    let p = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_P));
+    let q = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_Q));
     (-(p / q)) * v.copy_sign(half_minus_u)
 }
 
