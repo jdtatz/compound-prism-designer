@@ -15,7 +15,10 @@ impl<F: Float, const N: usize> Glass<F, N> {
     ///  * `w` - wavelength in micrometers
     #[inline(always)]
     pub fn calc_n(self, w: F) -> F {
-        core::array::IntoIter::new(self.coefficents)
+        // core::array::IntoIter::new(self.coefficents)
+        self.coefficents
+            .iter()
+            .copied()
             .reduce(|s, c| s.mul_add(w, c))
             .unwrap()
     }

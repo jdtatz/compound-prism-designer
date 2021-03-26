@@ -7,7 +7,7 @@ command = "cargo"
 args = ["fmt"]
 
 [tasks.kernel]
-toolchain = "nightly-2021-03-01"
+toolchain = "nightly"
 command = "cargo"
 args = [
     "rustc",
@@ -33,7 +33,7 @@ args = [
     "-Ctarget-feature=+ptx60",
     "-Clinker=echo",
     "-Z", "no-link",
-    "-Z", "mir-opt-level=3",
+    "-Z", "mir-opt-level=4",
     "-Z", "combine_cgu",
 ]
 
