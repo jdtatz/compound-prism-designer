@@ -1,6 +1,11 @@
 [config]
 default_to_workspace = false
 
+[tasks.check]
+# env = {RUSTFLAGS = "-Z macro-backtrace" }
+command = "cargo"
+args = ["check", "--all-features", "--all-targets"]
+
 [tasks.format]
 dependencies = []
 command = "cargo"
@@ -35,6 +40,7 @@ args = [
     "-Z", "no-link",
     "-Z", "mir-opt-level=4",
     "-Z", "combine_cgu",
+    "-Z", "mutable-noalias=yes"
 ]
 
 [tasks.verify-kernel]
@@ -50,6 +56,11 @@ args = ["criterion", "--features=cuda", "-p", "compound_prism_designer"]
 [tasks.test]
 command = "cargo"
 args = ["test", "--workspace", "--exclude", "compound_prism_designer_kernel"]
+
+[tasks.test-derive]
+env = { RUST_BACKTRACE = "full" }
+command = "cargo"
+args = ["test", "--package", "derive-wrapped-from", "--lib", "--", "--nocapture"]
 
 [tasks.build-python]
 command = "maturin"

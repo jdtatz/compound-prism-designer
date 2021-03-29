@@ -1,8 +1,8 @@
+use crate::distribution::Distribution;
 use crate::erf::norminv;
 use crate::geom::{Mat2, Pair, Surface, Vector};
 use crate::qrng::QuasiRandom;
 use crate::utils::Float;
-use crate::{distribution::Distribution, utils::LossyFrom};
 use crate::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 /// Collimated Polychromatic Gaussian Beam
@@ -63,11 +63,7 @@ pub struct FiberBeam<F: Float> {
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(
-    trait = "crate::LossyFrom",
-    function = "lossy_from",
-    bound = "V::Scalar: LossyFrom<$V::Scalar>"
-)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct LinearDetectorArray<V: Vector> {
     /// The number of bins in the array
     #[wrapped_from(skip)]
@@ -124,7 +120,7 @@ impl<V: Vector> LinearDetectorArray<V> {
         }
     }
 
-    pub fn bounds<'s>(&'s self) -> impl ExactSizeIterator<Item = [V::Scalar; 2]> + 's {
+    pub fn bounds(&self) -> impl ExactSizeIterator<Item = [V::Scalar; 2]> + '_ {
         (0..self.bin_count).map(move |i| {
             let i = V::Scalar::from_u32(i);
             let lb = self.linear_intercept + self.linear_slope * i;
@@ -141,11 +137,7 @@ impl<V: Vector> LinearDetectorArray<V> {
 
 /// Positioning of detector array
 #[derive(Debug, PartialEq, Clone, Copy, WrappedFrom)]
-#[wrapped_from(
-    trait = "crate::LossyFrom",
-    function = "lossy_from",
-    bound = "V::Scalar: LossyFrom<$V::Scalar>"
-)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct DetectorArrayPositioning<V: Vector> {
     /// Position vector of array
     pub position: V,
@@ -249,11 +241,7 @@ pub(crate) fn detector_array_positioning<
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(
-    trait = "crate::LossyFrom",
-    function = "lossy_from",
-    bound = "V::Scalar: LossyFrom<$V::Scalar>"
-)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct Spectrometer<
     V: Vector,
     B: Beam<Vector = V>,
@@ -317,11 +305,11 @@ impl<
     ///  * `wavelength` - the wavelength of the light ray
     ///  * `initial_y` - the initial y value of the ray
     #[cfg(not(target_arch = "nvptx64"))]
-    pub fn trace_ray_path<'s>(
-        &'s self,
+    pub fn trace_ray_path(
+        &self,
         wavelength: V::Scalar,
         initial_y: V::Scalar,
-    ) -> impl Iterator<Item = Result<V, RayTraceError>> + 's {
+    ) -> impl Iterator<Item = Result<V, RayTraceError>> {
         Ray::new_from_start(initial_y).trace(wavelength, self.compound_prism, self.detector)
     }
 

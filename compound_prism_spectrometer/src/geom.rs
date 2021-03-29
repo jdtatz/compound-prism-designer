@@ -1,6 +1,6 @@
 use crate::{
     debug_assert_almost_eq,
-    utils::{almost_eq, array_prepend, Float, LossyFrom},
+    utils::{almost_eq, array_prepend, Float},
 };
 use core::fmt::Debug;
 use core::ops::{Add, Div, Mul, Neg, Sub};
@@ -340,11 +340,7 @@ pub trait Surface<Point: Vector, UnitVector: Vector = Point>: 'static + Copy {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(
-    trait = "crate::LossyFrom",
-    function = "lossy_from",
-    bound = "V::Scalar: LossyFrom<$V::Scalar>"
-)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct Plane<V: Vector> {
     pub(crate) normal: V,
     pub(crate) midpt: V,
@@ -432,11 +428,7 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(
-    trait = "crate::LossyFrom",
-    function = "lossy_from",
-    bound = "V::Scalar: LossyFrom<$V::Scalar>"
-)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct CurvedPlane<V: Vector> {
     /// The midpt of the Curved Surface / circular segment
     pub(crate) midpt: V,

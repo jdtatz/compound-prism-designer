@@ -27,29 +27,33 @@ impl<T, U: LossyFrom<T>> LossyInto<U> for T {
     }
 }
 
-impl LossyFrom<f32> for f32 {
-    fn lossy_from(v: f32) -> Self {
-        v
-    }
+// For once `specialization` is stabilized
+// impl<T, U: From<T>> LossyFrom<T> for U {
+//     default fn lossy_from(v: T) -> Self {
+//         From::from(v)
+//     }
+// }
+
+macro_rules! primative_lossy_conv {
+    ( $($t:ty),+ ) => {
+        primative_lossy_conv! { { $($t),+ } => { $($t),+ } }
+    };
+    ( { $($from:ty),+ } => $right:tt ) => {
+        $( primative_lossy_conv! { $from => $right } )+
+    };
+    ( $from:ty => { $($to:ty),+ } ) => {
+        $( primative_lossy_conv! { $from => $to } )+
+    };
+    ( $from:ty => $to:ty ) => {
+        impl LossyFrom<$from> for $to {
+            fn lossy_from(v: $from) -> Self {
+                v as $to
+            }
+        }
+    };
 }
 
-impl LossyFrom<f64> for f64 {
-    fn lossy_from(v: f64) -> Self {
-        v
-    }
-}
-
-impl LossyFrom<f32> for f64 {
-    fn lossy_from(v: f32) -> Self {
-        v as f64
-    }
-}
-
-impl LossyFrom<f64> for f32 {
-    fn lossy_from(v: f64) -> Self {
-        v as f32
-    }
-}
+primative_lossy_conv! { f32, f64, u32, i32 }
 
 impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
     fn lossy_from(t: [T; N]) -> Self {
@@ -57,58 +61,17 @@ impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
     }
 }
 
-impl LossyFrom<()> for () {
-    fn lossy_from(_: ()) -> Self {}
-}
-
-macro_rules! apply_args_reverse {
-    ($macro_id:tt [] $($reversed:tt)*) => {
-        $macro_id!($($reversed) *);
-    };
-    ($macro_id:tt [$first:tt $($rest:tt)*] $($reversed:tt)*) => {
-        apply_args_reverse!($macro_id [$($rest)*] $first $($reversed)*);
-    };
-    // Entry point, use brackets to recursively reverse above.
-    ($macro_id:tt, $($t:tt)*) => {
-        apply_args_reverse!($macro_id [ $($t)* ]);
-    };
-}
-
-macro_rules! impl_lossy_from_tuple {
-    ( $($i:literal)* ) => {
-        paste::paste! {
-            impl < $( [<T $i>], [<U $i>]: LossyFrom< [<T $i>] > ),* > LossyFrom< ( $( [<T $i>] ),*, ) > for  ( $( [<U $i>] ),*, ) {
-                fn lossy_from(t: ( $( [<T $i>] ),*, ) ) -> Self {
-                    (
-                        $(
-                            LossyFrom::lossy_from(t . $i)
-                        ),*,
-                    )
-                }
-            }
-        }
-    }
-}
-
-macro_rules! build_impl_lossy_from_tuple {
-    () => {};
-    ($n:literal $($i:literal)* ) => {
-        build_impl_lossy_from_tuple! { $($i)* }
-        apply_args_reverse! { impl_lossy_from_tuple, $n $($i)* }
-    };
-    ( [$($i:literal),*] ) => {
-        apply_args_reverse! { build_impl_lossy_from_tuple, $($i)* }
-    };
-}
-
-build_impl_lossy_from_tuple! { [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] }
+wrapped_from_tuples! { LossyFrom::lossy_from for 0..12 }
 
 pub trait Float:
     'static
     + Sized
     + Copy
     + Clone
+    + LossyFrom<u32>
+    + LossyInto<u32>
     + LossyFrom<f64>
+    + LossyInto<f64>
     + core::fmt::Debug
     + core::fmt::Display
     + core::fmt::LowerExp
@@ -126,11 +89,21 @@ pub trait Float:
     + Rem<Output = Self>
     + RemAssign
 {
-    fn from_f64(v: f64) -> Self;
-    fn from_u32(v: u32) -> Self;
-    fn from_u32_ratio(n: u32, d: u32) -> Self;
-    fn to_f64(self) -> f64;
-    fn to_u32(self) -> u32;
+    fn from_f64(v: f64) -> Self {
+        Self::lossy_from(v)
+    }
+    fn from_u32(v: u32) -> Self {
+        Self::lossy_from(v)
+    }
+    fn from_u32_ratio(n: u32, d: u32) -> Self {
+        Self::lossy_from(n) / Self::lossy_from(d)
+    }
+    fn to_f64(self) -> f64 {
+        self.lossy_into()
+    }
+    fn to_u32(self) -> u32 {
+        self.lossy_into()
+    }
     fn zero() -> Self;
     fn one() -> Self;
     fn infinity() -> Self;
@@ -209,26 +182,6 @@ macro_rules! cuda_specific {
 }
 
 impl Float for f32 {
-    fn from_f64(v: f64) -> Self {
-        v as f32
-    }
-
-    fn from_u32(v: u32) -> Self {
-        v as f32
-    }
-
-    fn from_u32_ratio(n: u32, d: u32) -> Self {
-        (n as f32) / (d as f32)
-    }
-
-    fn to_f64(self) -> f64 {
-        self as f64
-    }
-
-    fn to_u32(self) -> u32 {
-        self as u32
-    }
-
     fn zero() -> Self {
         0_f32
     }
@@ -318,26 +271,6 @@ impl Float for f32 {
 }
 
 impl Float for f64 {
-    fn from_f64(v: f64) -> Self {
-        v
-    }
-
-    fn from_u32(v: u32) -> Self {
-        v as f64
-    }
-
-    fn from_u32_ratio(n: u32, d: u32) -> Self {
-        (n as f64) / (d as f64)
-    }
-
-    fn to_f64(self) -> f64 {
-        self
-    }
-
-    fn to_u32(self) -> u32 {
-        self as u32
-    }
-
     fn zero() -> Self {
         0_f64
     }

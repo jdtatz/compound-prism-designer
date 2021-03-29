@@ -45,11 +45,7 @@ pub trait DetectorArray<Point: Vector, UnitVector: Vector = Point>:
 
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(
-    trait = "crate::LossyFrom",
-    function = "lossy_from",
-    bound = "V::Scalar: LossyFrom<$V::Scalar>"
-)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct CompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>
 {
     /// First glass
@@ -282,6 +278,7 @@ impl<V: Vector> Ray<V> {
         ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
         n1 = n2;
 
+        // for (glass, plane) in core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces)) {
         for i in 0..N {
             let glass = cmpnd.glasses[i];
             let plane = cmpnd.isurfaces[i];
