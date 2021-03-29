@@ -107,9 +107,9 @@ class CompoundPrismSpectrometerProblem(Problem):
             nglass = nglass_or_const_glasses
             self._glasses = None
             self._numpy_dtype = np.dtype([
-                ("glass_find", (np.float64, nglass)),
-                ("angles", (np.float64, nglass + 1)),
-                ("lengths", (np.float64, nglass)),
+                ("glass_find", (np.float64, (nglass,))),
+                ("angles", (np.float64, (nglass + 1,))),
+                ("lengths", (np.float64, (nglass,))),
                 ("curvature", np.float64),
                 ("height", np.float64),
                 ("normalized_y_mean", np.float64),
@@ -131,8 +131,8 @@ class CompoundPrismSpectrometerProblem(Problem):
             self._glasses = glasses
             nglass = len(self._glasses)
             self._numpy_dtype = np.dtype([
-                ("angles", (np.float64, nglass + 1)),
-                ("lengths", (np.float64, nglass)),
+                ("angles", (np.float64, (nglass + 1,))),
+                ("lengths", (np.float64, (nglass,))),
                 ("curvature", np.float64),
                 ("height", np.float64),
                 ("normalized_y_mean", np.float64),
