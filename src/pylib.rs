@@ -97,7 +97,7 @@ fn pyglasses_to_glasses<const N: usize>(
 ) -> [Glass<f64, 6>; N] {
     let pyglasses: &[Py<PyGlass>; N] = pyglasses.try_into().unwrap();
     let pyglasses: [&Py<PyGlass>; N] = pyglasses.each_ref();
-    pyglasses.map(|pg| pg.as_ref(py).borrow().glass.clone())
+    pyglasses.map(|pg| pg.as_ref(py).borrow().glass)
 }
 
 #[pyclass(name = "DesignFitness", module = "compound_prism_designer")]
@@ -298,7 +298,7 @@ impl PyCompoundPrism {
         let slengths = lengths.as_slice();
         let (last_angle, angles_rest) = angles_rest.split_last().unwrap();
         let compound_prism = create_sized_compound_prism! { glasses.len() => CompoundPrism::new(
-            glasses[0].as_ref(py).borrow().glass.clone(),
+            glasses[0].as_ref(py).borrow().glass,
             pyglasses_to_glasses(py, &glasses[1..]),
             *first_angle,
             angles_rest.try_into().unwrap(),
@@ -543,17 +543,9 @@ impl PySpectrometer {
         gaussian_beam: Py<PyGaussianBeam>,
         py: Python,
     ) -> PyResult<Self> {
-        let gb = gaussian_beam.as_ref(py).try_borrow()?.gaussian_beam.clone();
-        let da = detector_array
-            .as_ref(py)
-            .try_borrow()?
-            .detector_array
-            .clone();
-        let scp = compound_prism
-            .as_ref(py)
-            .try_borrow()?
-            .compound_prism
-            .clone();
+        let gb = gaussian_beam.as_ref(py).try_borrow()?.gaussian_beam;
+        let da = detector_array.as_ref(py).try_borrow()?.detector_array;
+        let scp = compound_prism.as_ref(py).try_borrow()?.compound_prism;
         let spectrometer = create_sized_spectrometer!(scp; gb; da);
         Ok(PySpectrometer {
             compound_prism,
@@ -636,7 +628,7 @@ impl PySpectrometer {
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
         let spec: SizedSpectrometer<Pair<f32>, _, _, _, _> =
-            LossyFrom::lossy_from(self.spectrometer.clone());
+            LossyFrom::lossy_from(self.spectrometer);
         let fit = py.allow_threads(||
             map_sized_spectrometer!(spec => |spec| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))).map_err(map_cuda_err)?;
         Ok(fit.map(Into::into))
