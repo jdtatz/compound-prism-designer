@@ -122,7 +122,7 @@ impl<V: Vector, const N: usize> CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane
     pub fn polygons(&self) -> (Vec<[V; 4]>, [V; 4], V, V::Scalar) {
         let mut poly = Vec::with_capacity(N);
         let (mut u0, mut l0) = self.surface0.end_points(self.height);
-        for s in self.isurfaces[1..].iter() {
+        for s in self.isurfaces.iter() {
             let (u1, l1) = s.end_points(self.height);
             poly.push([l0, u0, u1, l1]);
             u0 = u1;

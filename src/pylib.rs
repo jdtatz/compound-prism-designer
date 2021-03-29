@@ -192,7 +192,7 @@ macro_rules! map_sized_compound_prism {
 macro_rules! create_sized_compound_prism {
     ([$($n:literal),*]; $len:expr => $create:expr) => {
         paste::paste! {
-            match $len {
+            match ($len - 1) {
                 $($n => SizedCompoundPrism::[<CompoundPrism $n>]($create) ,)*
                 _ => unreachable!("Programmer Error during CompoundPrism creation"),
             }
