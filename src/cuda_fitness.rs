@@ -1,23 +1,15 @@
 use crate::fitness::DesignFitness;
 use compound_prism_spectrometer::*;
-use once_cell::sync::{Lazy, OnceCell};
-use parking_lot::Mutex;
+use parking_lot::{const_mutex, Mutex};
 use rustacuda::context::ContextStack;
 use rustacuda::memory::{DeviceBox, DeviceBuffer, DeviceCopy};
 use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 
-const PTX_STR: &str = include_str!("kernel.ptx");
-
-// post-processed generated ptx
-static PTX: Lazy<CString> = Lazy::new(|| {
-    // switch from slow division into fast but still very accurate division
-    // and flushes subnormal values to 0
-    let s = PTX_STR.replace("div.rn.f32", "div.approx.ftz.f32");
-    CString::new(s).unwrap()
-});
+const PTX_BYTES: &[u8] = concat!(include_str!("kernel.ptx"), "\0").as_bytes();
+// const PTX: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(PTX_BYTES) };
 
 // const MAX_N: usize = 256;
 // const MAX_M: usize = 16_384;
@@ -50,7 +42,9 @@ struct CudaFitnessContext {
 impl CudaFitnessContext {
     fn new(ctxt: Context) -> rustacuda::error::CudaResult<Self> {
         ContextStack::push(&ctxt)?;
-        let module = Module::load_from_string(PTX.as_c_str())?;
+        let ptx_cstr = CStr::from_bytes_with_nul(PTX_BYTES)
+            .unwrap_or_else(|_| unreachable!("Invalid PTX CStr bytes, this should never happen"));
+        let module = Module::load_from_string(ptx_cstr)?;
         let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
         Ok(Self {
             ctxt,
@@ -113,18 +107,29 @@ impl CudaFitnessContext {
 
 unsafe impl Send for CudaFitnessContext {}
 
-static CACHED_CUDA_FITNESS_CONTEXT: OnceCell<Mutex<CudaFitnessContext>> = OnceCell::new();
+static CACHED_CUDA_FITNESS_CONTEXT: Mutex<Option<CudaFitnessContext>> = const_mutex(None);
 
 pub fn set_cached_cuda_context(ctxt: Context) -> rustacuda::error::CudaResult<()> {
-    if let Some(mutex) = CACHED_CUDA_FITNESS_CONTEXT.get() {
-        let mut guard = mutex.lock();
-        let new_state = CudaFitnessContext::new(ctxt)?;
-        *guard = new_state;
-    } else {
-        CACHED_CUDA_FITNESS_CONTEXT
-            .get_or_try_init(|| CudaFitnessContext::new(ctxt).map(Mutex::new))?;
-    }
+    let new_ctxt = CudaFitnessContext::new(ctxt)?;
+    let prev = CACHED_CUDA_FITNESS_CONTEXT.lock().replace(new_ctxt);
+    drop(prev);
     Ok(())
+}
+
+fn get_or_try_insert_with<'o: 't, 't, T, F, E>(
+    opt: &'o mut Option<T>,
+    with_fn: F,
+) -> Result<&'t mut T, E>
+where
+    F: FnOnce() -> Result<T, E>,
+{
+    match opt {
+        Some(t) => Ok(t),
+        o => {
+            let t = with_fn()?;
+            Ok(o.get_or_insert(t))
+        }
+    }
 }
 
 pub fn cuda_fitness<
@@ -148,9 +153,8 @@ where
     let max_err = F::from_u32_ratio(5, 1000);
     let max_err_sq = max_err * max_err;
 
-    let mutex = CACHED_CUDA_FITNESS_CONTEXT
-        .get_or_try_init(|| CudaFitnessContext::new(quick_init()?).map(Mutex::new))?;
-    let mut state = mutex.lock();
+    let mut lock = CACHED_CUDA_FITNESS_CONTEXT.lock();
+    let state = get_or_try_insert_with(&mut *lock, || CudaFitnessContext::new(quick_init()?))?;
 
     let nbin = spectrometer.detector.bin_count() as usize;
     // p(d=D)

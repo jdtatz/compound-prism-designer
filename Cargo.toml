@@ -16,8 +16,7 @@ compound_prism_spectrometer = { path = "./compound_prism_spectrometer", features
 derive_more = "0.99"
 libm = "0.2"
 rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update", optional = true }
-once_cell = { version="1.4", features=["parking_lot"], optional = true }
-parking_lot = { version = "0.11",optional = true }
+parking_lot = { version = "0.11", optional = true }
 pyo3 = { version="0.13", features = ["extension-module", "abi3-py37"], optional = true }
 numpy = { version="0.13", optional = true }
 ndarray = { version="0.14", optional = true }
@@ -35,7 +34,7 @@ pprof = { version = "0.4", features = ["flamegraph", "protobuf"] }
 
 [features]
 default = ["cuda"]
-cuda = ["rustacuda", "once_cell", "parking_lot"]
+cuda = ["rustacuda", "parking_lot"]
 pyext = ["pyo3", "numpy", "ndarray"]
 
 [[bench]]
