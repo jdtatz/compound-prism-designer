@@ -259,21 +259,13 @@ mod tests {
         let spec =
             Spectrometer::new(beam, prism, detarr).expect("This is a valid spectrometer design.");
 
-        let v = fitness(&spec, 16_384, 16_384);
-        assert!(
-            utils::almost_eq(v.size, 41.3241, 1e-3),
-            "Size is incorrect. {} ≉  41.3",
-            v.size
-        );
-        assert!(
-            utils::almost_eq(v.info, 0.7407094438094362, 1e-2),
-            "Mutual information is incorrect. {} ≉  0.74",
-            v.info
-        );
-        assert!(
-            utils::almost_eq(v.deviation, 0.377159, 1e-3),
-            "Deviation is incorrect. {} ≉  0.377",
-            v.deviation
-        );
+        let DesignFitness {
+            size,
+            info,
+            deviation,
+        } = fitness(&spec, 16_384, 16_384);
+        float_eq::assert_float_eq!(size, 41.3, rmax <= 5e-3);
+        float_eq::assert_float_eq!(info, 0.7407, rmax <= 1e-2);
+        float_eq::assert_float_eq!(deviation, 0.377159, rmax <= 1e-3);
     }
 }

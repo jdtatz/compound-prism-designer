@@ -135,7 +135,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
         .unwrap()
         .unwrap();
-    assert_almost_eq!(cpu_fitness.info as f64, gpu_fitness.info as f64, 1e-2);
+    float_eq::assert_float_eq!(
+        cpu_fitness.info as f64,
+        gpu_fitness.info as f64,
+        rmax <= 1e-2
+    );
 
     c.bench_function("known_design_example", |b| {
         b.iter(|| fitness(&spec, 16_384, 16_384));

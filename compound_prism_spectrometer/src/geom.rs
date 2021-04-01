@@ -1,7 +1,4 @@
-use crate::{
-    debug_assert_almost_eq,
-    utils::{almost_eq, array_prepend, Float},
-};
+use crate::utils::{array_prepend, Float};
 use core::fmt::Debug;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -65,10 +62,10 @@ pub trait Vector:
 
     /// is it a unit vector, ||v|| ≅? 1
     fn check_unit(self) -> bool {
-        almost_eq(
+        float_eq::float_eq!(
             self.norm(),
             Self::Scalar::one(),
-            Self::Scalar::from_u32_ratio(1, 1000),
+            rmax <= Self::Scalar::from_u32_ratio(1, 1000),
         )
     }
 
@@ -390,10 +387,11 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
         normal,
         V::from_xy(-V::Scalar::one(), V::Scalar::zero()).rotate_xy(first_angle)
     );
-    debug_assert_almost_eq!(
-        normal.tan_xy().abs(),
-        first_angle.tan().abs(),
-        V::Scalar::from_u32_ratio(1, 10000000)
+    #[cfg(all(test, debug_assertions))]
+    float_eq::assert_float_eq!(
+        normal.tan_xy().abs().to_f64(),
+        first_angle.tan().abs().to_f64(),
+        rmax <= 1e-5
     );
     let first = Plane {
         height,
@@ -477,10 +475,11 @@ impl<V: Vector> CurvedPlane<V> {
     }
 
     fn is_along_arc(&self, pt: V) -> bool {
-        debug_assert_almost_eq!(
-            (pt - self.center).norm(),
-            self.radius,
-            V::Scalar::from_u32_ratio(1, 1000000)
+        #[cfg(all(test, debug_assertions))]
+        float_eq::assert_float_eq!(
+            (pt - self.center).norm().to_f64(),
+            self.radius.to_f64(),
+            rmax <= 1e-5
         );
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
