@@ -156,6 +156,7 @@ unsafe fn kernel<
     qrng.next_by(laneid);
     let max_evals = max_evals - (max_evals % 32);
     while index < max_evals {
+        count += F::from_u32(32);
         let q = qrng.next_by(32);
         let ray = spectrometer.beam.inverse_cdf_ray(q);
         let (mut bin_index, t) = ray
@@ -174,22 +175,17 @@ unsafe fn kernel<
             }
             det_count -= warp_ballot(bin_index == min_index);
             let bin_t = if bin_index == min_index { t } else { F::zero() };
-            let welford = if laneid == 0 {
-                let mut w = shared[min_index as usize];
-                w.skip(count);
-                w.next_sample(bin_t);
-                w
+            let mut welford = if laneid == 0 {
+                shared[min_index as usize]
             } else {
-                Welford {
-                    count: F::one(),
-                    mean: bin_t,
-                    m2: F::zero(),
-                }
+                Welford::NEW
             };
-            let welford = warp_fold(welford, |mut w1, w2| {
+            welford.next_sample(bin_t);
+            welford = warp_fold(welford, |mut w1, w2| {
                 w1.combine(w2);
                 w1
             });
+            welford.skip(count);
             if laneid == 0 {
                 shared[min_index as usize] = welford;
             }
@@ -204,7 +200,6 @@ unsafe fn kernel<
             break;
         }
         index += 32;
-        count += F::from_u32(32);
     }
     warp_sync(ALL_MEMBER_MASK);
     let probability = from_raw_parts_mut(probability_ptr.add((nbin * id) as usize), nbin as usize);

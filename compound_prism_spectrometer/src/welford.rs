@@ -9,6 +9,11 @@ pub struct Welford<F> {
 }
 
 impl<F: Float> Welford<F> {
+    pub const NEW: Self = Welford {
+        count: F::ZERO,
+        mean: F::ZERO,
+        m2: F::ZERO,
+    };
     pub fn new() -> Self {
         Welford {
             count: F::zero(),
