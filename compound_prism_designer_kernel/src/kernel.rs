@@ -191,7 +191,8 @@ unsafe fn kernel<F: CudaFloat, V: Vector<Scalar = F>, B: Beam<Vector = V>>(
                 bin_index = nbin;
             }
         }
-        if finished {
+        // ensure convergence in the case of non-associative behavior in the floating point finished result
+        if warp_ballot(finished) > 0 {
             break;
         }
         index += 32;
