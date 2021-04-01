@@ -21,12 +21,13 @@ parking_lot = { version = "0.11",optional = true }
 pyo3 = { version="0.13", features = ["extension-module", "abi3-py37"], optional = true }
 numpy = { version="0.13", optional = true }
 ndarray = { version="0.14", optional = true }
-paste = "1.0.5"
+paste = "1.0"
 derive-wrapped-from = { path = "./derive-wrapped-from" }
 
 [dev-dependencies]
 rand = "0.8"
 rand_xoshiro = "0.6"
+float_eq = "0.5"
 criterion = "0.3"
 
 [target.'cfg(unix)'.dev-dependencies]

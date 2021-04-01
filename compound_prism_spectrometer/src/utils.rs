@@ -88,7 +88,10 @@ pub trait Float:
     + DivAssign
     + Rem<Output = Self>
     + RemAssign
+    + float_eq::FloatEq<Epsilon = Self>
 {
+    const ZERO: Self;
+    const ONE: Self;
     fn from_f64(v: f64) -> Self {
         Self::lossy_from(v)
     }
@@ -104,8 +107,12 @@ pub trait Float:
     fn to_u32(self) -> u32 {
         self.lossy_into()
     }
-    fn zero() -> Self;
-    fn one() -> Self;
+    fn zero() -> Self {
+        Self::ZERO
+    }
+    fn one() -> Self {
+        Self::ONE
+    }
     fn infinity() -> Self;
     fn is_finite(self) -> bool;
     fn is_infinite(self) -> bool;
@@ -182,6 +189,9 @@ macro_rules! cuda_specific {
 }
 
 impl Float for f32 {
+    const ZERO: Self = 0f32;
+    const ONE: Self = 1f32;
+
     fn zero() -> Self {
         0_f32
     }
@@ -213,7 +223,7 @@ impl Float for f32 {
     fn copy_sign(self, sign: Self) -> Self {
         cuda_specific!(
             core::intrinsics::copysignf32(self, sign),
-            self.copysign(sign)
+            libm::copysignf(self, sign)
         );
     }
 
@@ -271,6 +281,9 @@ impl Float for f32 {
 }
 
 impl Float for f64 {
+    const ZERO: Self = 0f64;
+    const ONE: Self = 1f64;
+
     fn zero() -> Self {
         0_f64
     }
@@ -302,7 +315,7 @@ impl Float for f64 {
     fn copy_sign(self, sign: Self) -> Self {
         cuda_specific!(
             core::intrinsics::copysignf64(self, sign),
-            self.copysign(sign)
+            libm::copysign(self, sign)
         );
     }
 
@@ -357,41 +370,4 @@ impl Float for f64 {
     fn floor(self) -> Self {
         cuda_specific!(core::intrinsics::floorf64(self), self.floor());
     }
-}
-
-pub fn almost_eq<F: Float>(a: F, b: F, acc: F) -> bool {
-    // only true if a and b are infinite with same
-    // sign
-    if a.is_infinite() && b.is_infinite() {
-        return a.is_sign_positive() == b.is_sign_positive();
-    }
-    // NANs are never equal
-    if a.is_nan() || b.is_nan() {
-        return false;
-    }
-    (a - b).abs() < acc
-}
-
-#[macro_export]
-macro_rules! assert_almost_eq {
-    ($a:expr, $b:expr, $prec:expr) => {
-        if !$crate::utils::almost_eq($a, $b, $prec) {
-            panic!(
-                "assertion failed: `abs(left - right) < {:e}`, (left: `{}`, right: `{}`), abs(left - right) = {:.2e}",
-                $prec, $a, $b, ($a - $b).abs()
-            );
-        }
-    };
-    ($a:expr, $b:expr) => {
-        $crate::assert_almost_eq!($a, $b, core::f64::EPSILON)
-    };
-}
-
-#[macro_export]
-macro_rules! debug_assert_almost_eq {
-    ($($inner:tt)*) => {
-        #[cfg(debug_assertions)] {
-            $crate::assert_almost_eq!($($inner)*)
-        }
-    };
 }

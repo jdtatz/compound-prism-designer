@@ -108,105 +108,73 @@ pub fn fast_norminv<F: Float>(u: F) -> F {
 #[cfg(test)]
 mod test {
     use super::*;
-    use approx::assert_relative_eq as assert_almost_eq;
+    use float_eq::assert_float_eq as assert_almost_eq;
     use statrs::distribution::{InverseCDF, Normal};
 
     #[test]
     fn test_shaw() {
         let n = Normal::new(0.0, 1.0).unwrap();
 
-        assert_almost_eq!(norminv(1e-100), n.inverse_cdf(1e-100), max_relative = 2e-1);
-        assert_almost_eq!(norminv(1e-60), n.inverse_cdf(1e-60), max_relative = 2e-2);
-        assert_almost_eq!(norminv(1e-30), n.inverse_cdf(1e-30), max_relative = 1e-3);
-        assert_almost_eq!(norminv(1e-20), n.inverse_cdf(1e-20), max_relative = 1e-5);
-        assert_almost_eq!(norminv(1e-15), n.inverse_cdf(1e-15), max_relative = 5e-9);
-        assert_almost_eq!(norminv(1e-10), n.inverse_cdf(1e-10), max_relative = 5e-9);
-        assert_almost_eq!(norminv(1e-5), n.inverse_cdf(1e-5), max_relative = 2e-9);
-        assert_almost_eq!(norminv(0.1), n.inverse_cdf(0.1), max_relative = 1e-9);
-        assert_almost_eq!(norminv(0.2), n.inverse_cdf(0.2), max_relative = 1e-9);
-        assert_almost_eq!(norminv(0.5), n.inverse_cdf(0.5), max_relative = 1e-9);
-        assert_almost_eq!(norminv(0.7), n.inverse_cdf(0.7), max_relative = 1e-9);
-        assert_almost_eq!(norminv(0.9), n.inverse_cdf(0.9), max_relative = 1e-9);
-        assert_almost_eq!(norminv(0.99), n.inverse_cdf(0.99), max_relative = 2.04e-9);
-        assert_almost_eq!(norminv(0.999), n.inverse_cdf(0.999), max_relative = 2.5e-9);
-        assert_almost_eq!(norminv(0.9999), n.inverse_cdf(0.9999), max_relative = 4e-9);
+        assert_almost_eq!(norminv(1e-100), n.inverse_cdf(1e-100), rmax <= 2e-1);
+        assert_almost_eq!(norminv(1e-60), n.inverse_cdf(1e-60), rmax <= 2e-2);
+        assert_almost_eq!(norminv(1e-30), n.inverse_cdf(1e-30), rmax <= 1e-3);
+        assert_almost_eq!(norminv(1e-20), n.inverse_cdf(1e-20), rmax <= 1e-5);
+        assert_almost_eq!(norminv(1e-15), n.inverse_cdf(1e-15), rmax <= 5e-9);
+        assert_almost_eq!(norminv(1e-10), n.inverse_cdf(1e-10), rmax <= 5e-9);
+        assert_almost_eq!(norminv(1e-5), n.inverse_cdf(1e-5), rmax <= 2e-9);
+        assert_almost_eq!(norminv(0.1), n.inverse_cdf(0.1), rmax <= 1e-9);
+        assert_almost_eq!(norminv(0.2), n.inverse_cdf(0.2), rmax <= 1e-9);
+        assert_almost_eq!(norminv(0.5), n.inverse_cdf(0.5), rmax <= 1e-9);
+        assert_almost_eq!(norminv(0.7), n.inverse_cdf(0.7), rmax <= 1e-9);
+        assert_almost_eq!(norminv(0.9), n.inverse_cdf(0.9), rmax <= 1e-9);
+        assert_almost_eq!(norminv(0.99), n.inverse_cdf(0.99), rmax <= 2.04e-9);
+        assert_almost_eq!(norminv(0.999), n.inverse_cdf(0.999), rmax <= 2.5e-9);
+        assert_almost_eq!(norminv(0.9999), n.inverse_cdf(0.9999), rmax <= 4e-9);
     }
 
     #[test]
     fn test_fast_shaw() {
         let n = Normal::new(0.0, 1.0).unwrap();
 
-        assert_almost_eq!(
-            fast_norminv(1e-100),
-            n.inverse_cdf(1e-100),
-            max_relative = 1e-1
-        );
-        assert_almost_eq!(
-            fast_norminv(1e-60),
-            n.inverse_cdf(1e-60),
-            max_relative = 1e-2
-        );
-        assert_almost_eq!(
-            fast_norminv(1e-30),
-            n.inverse_cdf(1e-30),
-            max_relative = 1e-3
-        );
-        assert_almost_eq!(
-            fast_norminv(1e-20),
-            n.inverse_cdf(1e-20),
-            max_relative = 1e-4
-        );
-        assert_almost_eq!(
-            fast_norminv(1e-15),
-            n.inverse_cdf(1e-15),
-            max_relative = 5e-5
-        );
-        assert_almost_eq!(
-            fast_norminv(1e-10),
-            n.inverse_cdf(1e-10),
-            max_relative = 5e-5
-        );
-        assert_almost_eq!(fast_norminv(1e-5), n.inverse_cdf(1e-5), max_relative = 2e-8);
-        assert_almost_eq!(fast_norminv(0.1), n.inverse_cdf(0.1), max_relative = 3e-8);
-        assert_almost_eq!(fast_norminv(0.2), n.inverse_cdf(0.2), max_relative = 3e-8);
-        assert_almost_eq!(fast_norminv(0.5), n.inverse_cdf(0.5), max_relative = 3e-8);
-        assert_almost_eq!(fast_norminv(0.7), n.inverse_cdf(0.7), max_relative = 3e-8);
-        assert_almost_eq!(fast_norminv(0.9), n.inverse_cdf(0.9), max_relative = 3e-8);
-        assert_almost_eq!(fast_norminv(0.99), n.inverse_cdf(0.99), max_relative = 3e-8);
-        assert_almost_eq!(
-            fast_norminv(0.999),
-            n.inverse_cdf(0.999),
-            max_relative = 3e-8
-        );
-        assert_almost_eq!(
-            fast_norminv(0.9999),
-            n.inverse_cdf(0.9999),
-            max_relative = 3e-8
-        );
+        assert_almost_eq!(fast_norminv(1e-100), n.inverse_cdf(1e-100), rmax <= 1e-1);
+        assert_almost_eq!(fast_norminv(1e-60), n.inverse_cdf(1e-60), rmax <= 1e-2);
+        assert_almost_eq!(fast_norminv(1e-30), n.inverse_cdf(1e-30), rmax <= 1e-3);
+        assert_almost_eq!(fast_norminv(1e-20), n.inverse_cdf(1e-20), rmax <= 1e-4);
+        assert_almost_eq!(fast_norminv(1e-15), n.inverse_cdf(1e-15), rmax <= 5e-5);
+        assert_almost_eq!(fast_norminv(1e-10), n.inverse_cdf(1e-10), rmax <= 5e-5);
+        assert_almost_eq!(fast_norminv(1e-5), n.inverse_cdf(1e-5), rmax <= 2e-8);
+        assert_almost_eq!(fast_norminv(0.1), n.inverse_cdf(0.1), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.2), n.inverse_cdf(0.2), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.5), n.inverse_cdf(0.5), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.7), n.inverse_cdf(0.7), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.9), n.inverse_cdf(0.9), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.99), n.inverse_cdf(0.99), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.999), n.inverse_cdf(0.999), rmax <= 3e-8);
+        assert_almost_eq!(fast_norminv(0.9999), n.inverse_cdf(0.9999), rmax <= 3e-8);
         assert_almost_eq!(
             fast_norminv(1.0 - 1e-5),
             n.inverse_cdf(1.0 - 1e-5),
-            max_relative = 4e-8
+            rmax <= 4e-8
         );
         assert_almost_eq!(
             fast_norminv(1.0 - 1e-10),
             n.inverse_cdf(1.0 - 1e-10),
-            max_relative = 4e-8
+            rmax <= 4e-8
         );
         assert_almost_eq!(
             fast_norminv(1.0 - 1e-11),
             n.inverse_cdf(1.0 - 1e-11),
-            max_relative = 3e-7
+            rmax <= 3e-7
         );
         assert_almost_eq!(
             fast_norminv(1.0 - 1e-15),
             n.inverse_cdf(1.0 - 1e-15),
-            max_relative = 1e-5
+            rmax <= 1e-5
         );
         assert_almost_eq!(
             fast_norminv(1.0 - 1e-16),
             n.inverse_cdf(1.0 - 1e-16),
-            max_relative = 1e-4
+            rmax <= 1e-4
         );
     }
 }
