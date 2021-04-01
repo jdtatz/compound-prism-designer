@@ -22,9 +22,15 @@ fn map_ray_trace_err(err: compound_prism_spectrometer::RayTraceError) -> PyErr {
     >>::into(err))
 }
 
+create_exception!(
+    compound_prism_designer,
+    CudaError,
+    pyo3::exceptions::PyException
+);
+
 #[cfg(feature = "cuda")]
 fn map_cuda_err(err: rustacuda::error::CudaError) -> PyErr {
-    RayTraceError::new_err(err.to_string())
+    CudaError::new_err(err.to_string())
 }
 
 #[pyclass(name = "Glass", module = "compound_prism_designer")]
@@ -678,6 +684,8 @@ impl PyObjectProtocol for PySpectrometer {
 #[pymodule]
 fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
     m.add("RayTraceError", py.get_type::<RayTraceError>())?;
+    #[cfg(feature = "cuda")]
+    m.add("CudaError", py.get_type::<CudaError>())?;
     m.add_class::<PyGlass>()?;
     m.add_class::<PyDesignFitness>()?;
     m.add_class::<PyCompoundPrism>()?;
