@@ -240,7 +240,7 @@ impl Float for f32 {
     }
 
     fn ln(self) -> Self {
-        libm::logf(self)
+        cuda_specific!(<f32 as nvptx_sys::Float>::ln(self), libm::logf(self));
     }
 
     fn log2(self) -> Self {
