@@ -118,14 +118,6 @@ unsafe fn kernel<
     let warpid = tid / 32;
     let nwarps = blockDim::x() / 32;
     let laneid = nvptx_sys::laneid();
-    let shared_spectrometer_ptr;
-    asm!(
-        ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
-        ptr = out(reg64) shared_spectrometer_ptr,
-        size = const core::mem::size_of::<Spectrometer<V, B, S0, SI, SN, N>>(),
-        options(readonly, nostack, preserves_flags)
-    );
-    let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
 
     let (ptr, _dyn_mem) = dynamic_shared_memory();
     let ptr = ptr as *mut Welford<F>;
@@ -213,6 +205,15 @@ macro_rules! gen_kernel {
                 spectrometer: &Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n>,
                 prob: *mut $fty,
             ) {
+                let shared_spectrometer_ptr;
+                asm!(
+                    ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
+                    ptr = out(reg64) shared_spectrometer_ptr,
+                    size = const core::mem::size_of::<Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n>>(),
+                    options(readonly, nostack, preserves_flags)
+                );
+                let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
+
                 kernel(seed, max_evals, spectrometer, prob)
             }
         }
