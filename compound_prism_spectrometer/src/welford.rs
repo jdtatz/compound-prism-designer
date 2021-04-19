@@ -64,3 +64,21 @@ impl<F: Float> Default for Welford<F> {
         Self::new()
     }
 }
+
+impl<F: Float> core::ops::Add for Welford<F> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let count = self.count + rhs.count;
+        let delta = rhs.mean - self.mean;
+        let mean = (self.count * self.mean + rhs.count * rhs.mean) / count;
+        let m2 = self.m2 + rhs.m2 + delta.sqr() * self.count * rhs.count / count;
+        Welford { count, mean, m2 }
+    }
+}
+
+impl<F: Float> core::ops::AddAssign for Welford<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.combine(rhs)
+    }
+}

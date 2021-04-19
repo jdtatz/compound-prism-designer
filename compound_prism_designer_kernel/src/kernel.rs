@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![cfg(target_arch = "nvptx64")]
-#![feature(abi_ptx, link_llvm_intrinsics, asm)]
+#![feature(abi_ptx, asm)]
 
 use compound_prism_spectrometer::{
     Beam, CurvedPlane, DetectorArray, Float, GaussianBeam, Pair, Plane, Qrng, Spectrometer,
@@ -9,18 +9,12 @@ use compound_prism_spectrometer::{
 };
 use core::slice::from_raw_parts_mut;
 use nvptx_sys::{
-    blockDim, blockIdx, dynamic_shared_memory, syncthreads, threadIdx, Shuffle, ALL_MEMBER_MASK,
+    blockDim, blockIdx, dynamic_shared_memory, syncthreads, threadIdx, vote_any, vote_ballot,
+    warp_sync, Shuffle, ALL_MEMBER_MASK,
 };
 
-extern "C" {
-    #[link_name = "llvm.nvvm.vote.ballot.sync"]
-    fn vote_ballot_sync(lane_mask: u32, pred: bool) -> u32;
-    #[link_name = "llvm.nvvm.bar.warp.sync"]
-    fn warp_sync(membermask: u32);
-}
-
 unsafe fn warp_ballot(pred: bool) -> u32 {
-    vote_ballot_sync(0xFFFFFFFFu32, pred).count_ones()
+    vote_ballot(ALL_MEMBER_MASK, pred).count_ones()
 }
 
 trait Shareable: 'static + Copy + Sized + Send {
@@ -39,7 +33,7 @@ impl Shareable for i32 {
 
 impl Shareable for u32 {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
-        core::mem::transmute(core::mem::transmute::<u32, i32>(self).shfl_bfly_sync(lane_mask))
+        Shuffle::shfl_bfly(self, ALL_MEMBER_MASK, lane_mask)
     }
 }
 
@@ -88,11 +82,11 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     let dest = dest as *mut u32;
     let src = src as *const T as *const u32;
     let count = (core::mem::size_of::<T>() / core::mem::size_of::<u32>()) as u32;
-    let mut id = threadIdx::x() as u32;
+    let mut id = threadIdx::x();
     while id < count {
         dest.add(id as usize)
             .write_volatile(src.add(id as usize).read_volatile());
-        id += blockDim::x() as u32;
+        id += blockDim::x();
     }
     syncthreads();
     &*(dest as *const T)
@@ -120,10 +114,10 @@ unsafe fn kernel<
     const PHI: f64 = 1.61803398874989484820458683436563;
     const ALPHA: f64 = 1_f64 / PHI;
 
-    let tid = threadIdx::x() as u32;
+    let tid = threadIdx::x();
     let warpid = tid / 32;
-    let nwarps = blockDim::x() as u32 / 32;
-    let laneid = nvptx_sys::laneid() as u32;
+    let nwarps = blockDim::x() / 32;
+    let laneid = nvptx_sys::laneid();
     let shared_spectrometer_ptr;
     asm!(
         ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
@@ -145,7 +139,7 @@ unsafe fn kernel<
     }
     warp_sync(ALL_MEMBER_MASK);
 
-    let id = (blockIdx::x() as u32) * nwarps + warpid;
+    let id = (blockIdx::x()) * nwarps + warpid;
 
     let u = (F::from_u32(id)).mul_add(F::from_f64(ALPHA), seed).fract();
     let wavelength = spectrometer.beam.inverse_cdf_wavelength(u);
@@ -181,10 +175,7 @@ unsafe fn kernel<
                 Welford::NEW
             };
             welford.next_sample(bin_t);
-            welford = warp_fold(welford, |mut w1, w2| {
-                w1.combine(w2);
-                w1
-            });
+            welford = warp_fold(welford, |w1, w2| w1 + w2);
             welford.skip(count);
             if laneid == 0 {
                 shared[min_index as usize] = welford;
@@ -196,7 +187,7 @@ unsafe fn kernel<
             }
         }
         // ensure convergence in the case of non-associative behavior in the floating point finished result
-        if warp_ballot(finished) > 0 {
+        if vote_any(ALL_MEMBER_MASK, finished) {
             break;
         }
         index += 32;
