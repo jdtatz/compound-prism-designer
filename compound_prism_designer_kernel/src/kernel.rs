@@ -4,13 +4,13 @@
 #![feature(abi_ptx, asm)]
 
 use compound_prism_spectrometer::{
-    Beam, CurvedPlane, DetectorArray, Float, GaussianBeam, Pair, Plane, Qrng, Spectrometer,
-    Surface, UniformDistribution, Vector, Welford,
+    Beam, CurvedPlane, DetectorArray, Float, FloatExt, GaussianBeam, Pair, Plane, Qrng,
+    Spectrometer, Surface, UniformDistribution, Vector, Welford,
 };
 use core::slice::from_raw_parts_mut;
 use nvptx_sys::{
     blockDim, blockIdx, dynamic_shared_memory, syncthreads, threadIdx, vote_any, vote_ballot,
-    warp_sync, Shuffle, ALL_MEMBER_MASK,
+    warp_sync, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
 };
 
 unsafe fn warp_ballot(pred: bool) -> u32 {
@@ -21,9 +21,9 @@ trait Shareable: 'static + Copy + Sized + Send {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self;
 }
 
-trait CudaFloat: Shareable + Float {}
+trait CudaFloat: Shareable + Float + FloatExt {}
 
-impl<T: Shareable + Float> CudaFloat for T {}
+impl<T: Shareable + Float + FloatExt> CudaFloat for T {}
 
 impl Shareable for i32 {
     unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
@@ -57,6 +57,12 @@ impl Shareable for f64 {
         let lo = lo.shfl_bfly_sync(lane_mask);
         let hi = hi.shfl_bfly_sync(lane_mask);
         core::mem::transmute([lo, hi])
+    }
+}
+
+impl<F: FastNum + Shareable> Shareable for FastFloat<F> {
+    unsafe fn shfl_bfly_sync(self, lane_mask: u32) -> Self {
+        Self(Shareable::shfl_bfly_sync(*self, lane_mask))
     }
 }
 
@@ -133,7 +139,9 @@ unsafe fn kernel<
 
     let id = (blockIdx::x()) * nwarps + warpid;
 
-    let u = (F::from_u32(id)).mul_add(F::from_f64(ALPHA), seed).fract();
+    let u = (F::lossy_from(id))
+        .mul_add(F::lossy_from(ALPHA), seed)
+        .fract();
     let wavelength = spectrometer.beam.inverse_cdf_wavelength(u);
 
     let mut count = F::zero();
@@ -142,7 +150,7 @@ unsafe fn kernel<
     qrng.next_by(laneid);
     let max_evals = max_evals - (max_evals % 32);
     while index < max_evals {
-        count += F::from_u32(32);
+        count += F::lossy_from(32);
         let q = qrng.next_by(32);
         let ray = spectrometer.beam.inverse_cdf_ray(q);
         let (mut bin_index, t) = ray
@@ -173,7 +181,7 @@ unsafe fn kernel<
                 shared[min_index as usize] = welford;
             }
             warp_sync(ALL_MEMBER_MASK);
-            finished = finished && welford.sem_le_error_threshold(F::from_f64(MAX_ERR_SQR));
+            finished = finished && welford.sem_le_error_threshold(F::lossy_from(MAX_ERR_SQR));
             if bin_index == min_index {
                 bin_index = nbin;
             }
@@ -196,10 +204,10 @@ unsafe fn kernel<
 }
 
 macro_rules! gen_kernel {
-    (@inner $fty:ident $n:expr) => {
+    (@inner $fty:ty ; $fname:ident $n:expr) => {
         paste::paste! {
             #[no_mangle]
-            pub unsafe extern "ptx-kernel" fn  [<prob_dets_given_wavelengths_ $fty _ $n>] (
+            pub unsafe extern "ptx-kernel" fn  [<prob_dets_given_wavelengths_ $fname _ $n>] (
                 seed: $fty,
                 max_evals: u32,
                 spectrometer: &Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n>,
@@ -219,8 +227,8 @@ macro_rules! gen_kernel {
         }
     };
     ([$($n:expr),*]) => {
-        $( gen_kernel!(@inner f32 $n); )*
-        $( gen_kernel!(@inner f64 $n); )*
+        $( gen_kernel!(@inner FastFloat<f32> ;  f32 $n); )*
+        $( gen_kernel!(@inner FastFloat<f64>; f64 $n); )*
     };
 }
 

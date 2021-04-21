@@ -1,4 +1,4 @@
-use crate::utils::{array_prepend, Float};
+use crate::utils::*;
 use core::fmt::Debug;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -14,7 +14,7 @@ pub trait Vector:
     + Mul<<Self as Vector>::Scalar, Output = Self>
     + Div<<Self as Vector>::Scalar, Output = Self>
 {
-    type Scalar: Copy + Float;
+    type Scalar: Copy + FloatExt;
 
     fn x(self) -> Self::Scalar;
 
@@ -82,7 +82,7 @@ pub struct Pair<T> {
     pub y: T,
 }
 
-impl<F: Float> Vector for Pair<F> {
+impl<F: FloatExt> Vector for Pair<F> {
     type Scalar = F;
 
     fn x(self) -> Self::Scalar {
@@ -174,7 +174,7 @@ impl<F: Float> Vector for Pair<F> {
     }
 }
 
-impl<F: Float> Pair<F> {
+impl<F: FloatExt> Pair<F> {
     pub fn from_vector<V: Vector<Scalar = F>>(vector: V) -> Self {
         Pair {
             x: vector.x(),
@@ -192,7 +192,7 @@ pub struct Triplet<T> {
     pub z: T,
 }
 
-impl<F: Float> Vector for Triplet<F> {
+impl<F: FloatExt> Vector for Triplet<F> {
     type Scalar = F;
 
     fn x(self) -> Self::Scalar {
@@ -299,9 +299,9 @@ impl<F: Float> Vector for Triplet<F> {
 
 /// Matrix in R^(2x2) in row major order
 #[derive(Debug, Clone, Copy)]
-pub struct Mat2<F: Float>([F; 4]);
+pub struct Mat2<F: FloatExt>([F; 4]);
 
-impl<F: Float> Mat2<F> {
+impl<F: FloatExt> Mat2<F> {
     /// New Matrix from the two given columns
     pub fn new_from_cols(col1: Pair<F>, col2: Pair<F>) -> Self {
         Self([col1.x, col2.x, col1.y, col2.y])
@@ -319,7 +319,7 @@ impl<F: Float> Mat2<F> {
     }
 }
 
-impl<F: Float> core::ops::Mul<Pair<F>> for Mat2<F> {
+impl<F: FloatExt> core::ops::Mul<Pair<F>> for Mat2<F> {
     type Output = Pair<F>;
 
     /// Matrix x Vector -> Vector multiplication
@@ -389,9 +389,9 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     );
     #[cfg(all(test, debug_assertions))]
     float_eq::assert_float_eq!(
-        normal.tan_xy().abs().to_f64(),
-        first_angle.tan().abs().to_f64(),
-        rmax <= 1e-5
+        normal.tan_xy().abs(),
+        first_angle.tan().abs(),
+        rmax <= LossyFrom::lossy_from(1e-5f64)
     );
     let first = Plane {
         height,
@@ -477,17 +477,17 @@ impl<V: Vector> CurvedPlane<V> {
     fn is_along_arc(&self, pt: V) -> bool {
         #[cfg(all(test, debug_assertions))]
         float_eq::assert_float_eq!(
-            (pt - self.center).norm().to_f64(),
-            self.radius.to_f64(),
-            rmax <= 1e-5
+            (pt - self.center).norm(),
+            self.radius,
+            rmax <= LossyFrom::lossy_from(1e-5f64)
         );
         (pt - self.midpt).norm_squared() <= self.max_dist_sq
     }
 
     #[cfg(not(target_arch = "nvptx64"))]
     pub(crate) fn end_points(&self, height: V::Scalar) -> (V, V) {
-        let theta_2 = V::Scalar::from_u32(2)
-            * (self.max_dist_sq.sqrt() / (V::Scalar::from_u32(2) * self.radius)).asin();
+        let theta_2 = V::Scalar::lossy_from(2)
+            * (self.max_dist_sq.sqrt() / (V::Scalar::lossy_from(2) * self.radius)).asin();
         let r = self.midpt - self.center;
         let u = self.center + r.rotate_xy(theta_2);
         let l = self.center + r.rotate_xy(-theta_2);

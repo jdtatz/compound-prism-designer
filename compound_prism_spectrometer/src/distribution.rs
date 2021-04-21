@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, ops::*};
 
-use crate::utils::Float;
+use crate::utils::*;
 
 pub trait Distribution {
     type Item;
@@ -45,7 +45,7 @@ pub struct NormalDistribution<T> {
     pub stddev: T,
 }
 
-impl<F: Float> Distribution for NormalDistribution<F> {
+impl<F: FloatExt> Distribution for NormalDistribution<F> {
     type Item = F;
 
     fn inverse_cdf(&self, p: Self::Item) -> Self::Item {

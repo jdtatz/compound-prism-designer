@@ -1,4 +1,4 @@
-use crate::utils::Float;
+use crate::utils::*;
 /*
 #![feature(const_fn_floating_point_arithmetic)]
 
@@ -175,11 +175,11 @@ pub trait QuasiRandom: Copy {
     fn mul_by_int(self, rhs: u32) -> Self;
 }
 
-impl<F: Float> QuasiRandom for F {
+impl<F: FloatExt> QuasiRandom for F {
     type Scalar = F;
 
     fn alpha() -> Self {
-        F::from_f64(ALPHA_1)
+        LossyFrom::lossy_from(ALPHA_1)
     }
 
     fn from_scalar(scalar: Self::Scalar) -> Self {
@@ -191,15 +191,15 @@ impl<F: Float> QuasiRandom for F {
     }
 
     fn mul_by_int(self, rhs: u32) -> Self {
-        self * F::from_u32(rhs)
+        self * F::lossy_from(rhs)
     }
 }
 
-impl<F: Float> QuasiRandom for [F; 2] {
+impl<F: FloatExt> QuasiRandom for [F; 2] {
     type Scalar = F;
 
     fn alpha() -> Self {
-        [F::from_f64(ALPHA_2[0]), F::from_f64(ALPHA_2[1])]
+        LossyFrom::lossy_from(ALPHA_2)
     }
 
     fn from_scalar(scalar: Self::Scalar) -> Self {
@@ -212,20 +212,16 @@ impl<F: Float> QuasiRandom for [F; 2] {
     }
 
     fn mul_by_int(self, rhs: u32) -> Self {
-        let rhs = F::from_u32(rhs);
+        let rhs = F::lossy_from(rhs);
         [self[0] * rhs, self[1] * rhs]
     }
 }
 
-impl<F: Float> QuasiRandom for [F; 3] {
+impl<F: FloatExt> QuasiRandom for [F; 3] {
     type Scalar = F;
 
     fn alpha() -> Self {
-        [
-            F::from_f64(ALPHA_3[0]),
-            F::from_f64(ALPHA_3[1]),
-            F::from_f64(ALPHA_3[2]),
-        ]
+        LossyFrom::lossy_from(ALPHA_3)
     }
 
     fn from_scalar(scalar: Self::Scalar) -> Self {
@@ -239,7 +235,7 @@ impl<F: Float> QuasiRandom for [F; 3] {
     }
 
     fn mul_by_int(self, rhs: u32) -> Self {
-        let rhs = F::from_u32(rhs);
+        let rhs = F::lossy_from(rhs);
         [self[0] * rhs, self[1] * rhs, self[2] * rhs]
     }
 }
