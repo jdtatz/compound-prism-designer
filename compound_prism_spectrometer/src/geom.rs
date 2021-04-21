@@ -16,13 +16,13 @@ pub trait Vector:
 {
     type Scalar: Copy + FloatExt;
 
+    const ZERO: Self;
+
     fn x(self) -> Self::Scalar;
 
     fn y(self) -> Self::Scalar;
 
     fn z(self) -> Self::Scalar;
-
-    fn zero() -> Self;
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self;
 
@@ -35,17 +35,29 @@ pub trait Vector:
 
     fn rot_180_xy(self) -> Self;
 
-    fn cos_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar;
+    fn cos_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
+        self.x() / hypotenuse
+    }
 
-    fn sec_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar;
+    fn sec_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
+        hypotenuse / self.x()
+    }
 
-    fn sin_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar;
+    fn sin_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
+        self.y() / hypotenuse
+    }
 
-    fn csc_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar;
+    fn csc_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
+        hypotenuse / self.y()
+    }
 
-    fn tan_xy(self) -> Self::Scalar;
+    fn tan_xy(self) -> Self::Scalar {
+        self.y() / self.x()
+    }
 
-    fn cot_xy(self) -> Self::Scalar;
+    fn cot_xy(self) -> Self::Scalar {
+        self.x() / self.y()
+    }
 
     /// dot product of two vectors, a • b
     fn dot(self, other: Self) -> Self::Scalar;
@@ -85,6 +97,11 @@ pub struct Pair<T> {
 impl<F: FloatExt> Vector for Pair<F> {
     type Scalar = F;
 
+    const ZERO: Self = Self {
+        x: Self::Scalar::ZERO,
+        y: Self::Scalar::ZERO,
+    };
+
     fn x(self) -> Self::Scalar {
         self.x
     }
@@ -94,14 +111,7 @@ impl<F: FloatExt> Vector for Pair<F> {
     }
 
     fn z(self) -> Self::Scalar {
-        Self::Scalar::zero()
-    }
-
-    fn zero() -> Self {
-        Self {
-            x: Self::Scalar::zero(),
-            y: Self::Scalar::zero(),
-        }
+        Self::Scalar::ZERO
     }
 
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
@@ -134,30 +144,6 @@ impl<F: FloatExt> Vector for Pair<F> {
             x: -self.x,
             y: -self.y,
         }
-    }
-
-    fn cos_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        self.x / hypotenuse
-    }
-
-    fn sec_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        hypotenuse / self.x
-    }
-
-    fn sin_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        self.y / hypotenuse
-    }
-
-    fn csc_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        hypotenuse / self.y
-    }
-
-    fn tan_xy(self) -> Self::Scalar {
-        self.y / self.x
-    }
-
-    fn cot_xy(self) -> Self::Scalar {
-        self.x / self.y
     }
 
     /// dot product of two vectors, a • b
@@ -195,6 +181,12 @@ pub struct Triplet<T> {
 impl<F: FloatExt> Vector for Triplet<F> {
     type Scalar = F;
 
+    const ZERO: Self = Self {
+        x: Self::Scalar::ZERO,
+        y: Self::Scalar::ZERO,
+        z: Self::Scalar::ZERO,
+    };
+
     fn x(self) -> Self::Scalar {
         self.x
     }
@@ -207,19 +199,11 @@ impl<F: FloatExt> Vector for Triplet<F> {
         self.z
     }
 
-    fn zero() -> Self {
-        Self {
-            x: Self::Scalar::zero(),
-            y: Self::Scalar::zero(),
-            z: Self::Scalar::zero(),
-        }
-    }
-
     fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
         Self {
             x,
             y,
-            z: Self::Scalar::zero(),
+            z: Self::Scalar::ZERO,
         }
     }
 
@@ -229,7 +213,7 @@ impl<F: FloatExt> Vector for Triplet<F> {
         Self {
             x: cos,
             y: sin,
-            z: Self::Scalar::zero(),
+            z: Self::Scalar::ZERO,
         }
     }
 
@@ -256,30 +240,6 @@ impl<F: FloatExt> Vector for Triplet<F> {
             y: -self.y,
             z: self.z,
         }
-    }
-
-    fn cos_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        self.x / hypotenuse
-    }
-
-    fn sec_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        hypotenuse / self.x
-    }
-
-    fn sin_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        self.y / hypotenuse
-    }
-
-    fn csc_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar {
-        hypotenuse / self.y
-    }
-
-    fn tan_xy(self) -> Self::Scalar {
-        self.y / self.x
-    }
-
-    fn cot_xy(self) -> Self::Scalar {
-        self.x / self.y
     }
 
     /// dot product of two vectors, a • b
@@ -350,7 +310,7 @@ impl<V: Vector> Plane<V> {
         let dx = self.normal.tan_xy() * height * V::Scalar::lossy_from(0.5f64);
         let ux = self.midpt.x() - dx;
         let lx = self.midpt.x() + dx;
-        (V::from_xy(ux, height), V::from_xy(lx, V::Scalar::zero()))
+        (V::from_xy(ux, height), V::from_xy(lx, V::Scalar::ZERO))
     }
 }
 
@@ -359,12 +319,12 @@ impl<V: Vector> Surface<V> for Plane<V> {
         let (origin, direction) = ray;
         debug_assert!(direction.check_unit());
         let ci = -direction.dot(self.normal);
-        if ci <= V::Scalar::zero() {
+        if ci <= V::Scalar::ZERO {
             return None;
         }
         let d = (origin - self.midpt).dot(self.normal) / ci;
         let p = direction.mul_add(d, origin);
-        if p.y() <= V::Scalar::zero() || self.height <= p.y() {
+        if p.y() <= V::Scalar::ZERO || self.height <= p.y() {
             None
         } else {
             Some((p, self.normal))
@@ -385,7 +345,7 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     let normal = V::angled_xy(first_angle).rot_180_xy();
     debug_assert_eq!(
         normal,
-        V::from_xy(-V::Scalar::one(), V::Scalar::zero()).rotate_xy(first_angle)
+        V::from_xy(-V::Scalar::one(), V::Scalar::ZERO).rotate_xy(first_angle)
     );
     #[cfg(all(test, debug_assertions))]
     float_eq::assert_float_eq!(
@@ -443,10 +403,9 @@ pub struct CurvedPlane<V: Vector> {
 impl<V: Vector> CurvedPlane<V> {
     pub(crate) fn new(signed_curvature: V::Scalar, height: V::Scalar, chord: Plane<V>) -> Self {
         debug_assert!(
-            V::Scalar::one() >= signed_curvature.abs()
-                && signed_curvature.abs() > V::Scalar::zero()
+            V::Scalar::one() >= signed_curvature.abs() && signed_curvature.abs() > V::Scalar::ZERO
         );
-        debug_assert!(height > V::Scalar::zero());
+        debug_assert!(height > V::Scalar::ZERO);
         let chord_length = chord.normal.sec_xy(height).abs();
         let radius = chord_length * V::Scalar::lossy_from(0.5f64) / signed_curvature.abs();
         let apothem =
@@ -507,7 +466,7 @@ impl<V: Vector> CurvedPlane<V> {
         );
         (
             V::from_xy(u.x(), height),
-            V::from_xy(l.x(), V::Scalar::zero()),
+            V::from_xy(l.x(), V::Scalar::ZERO),
         )
     }
 }
@@ -519,7 +478,7 @@ impl<V: Vector> Surface<V> for CurvedPlane<V> {
         let delta = origin - self.center;
         let ud = direction.dot(delta);
         let discriminant = ud * ud - delta.norm_squared() + self.radius * self.radius;
-        if discriminant <= V::Scalar::zero() {
+        if discriminant <= V::Scalar::ZERO {
             return None;
         }
         let d = if self.direction {
@@ -527,7 +486,7 @@ impl<V: Vector> Surface<V> for CurvedPlane<V> {
         } else {
             -ud - discriminant.sqrt()
         };
-        if d <= V::Scalar::zero() {
+        if d <= V::Scalar::ZERO {
             return None;
         }
         let p = direction.mul_add(d, origin);
