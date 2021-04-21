@@ -9,7 +9,7 @@ fn vector_quasi_monte_carlo_integration<V, Q, F>(
     vector_fn: F,
 ) -> Vec<Welford<V>>
 where
-    V: Float,
+    V: FloatExt,
     Q: QuasiRandom<Scalar = V>,
     F: Fn(Q) -> Option<(usize, V)>,
 {
@@ -34,7 +34,7 @@ where
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
-pub struct DesignFitness<F: Float> {
+pub struct DesignFitness<F> {
     pub size: F,
     pub info: F,
     pub deviation: F,

@@ -12,16 +12,17 @@ crate-type = ["rlib"]
 [dependencies]
 derive_more = "0.99"
 libm = "0.2"
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 rustacuda_core = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update" }
 paste = "1.0"
 derive-wrapped-from = { path = "../derive-wrapped-from" }
 float_eq = { version = "0.5", default-features = false }
 
 [target.'cfg(target_arch="nvptx64")'.dependencies]
-nvptx-sys = { git = "https://github.com/jdtatz/nvptx-sys.git", features = ["fast-math"] }
+nvptx-sys = { git = "https://github.com/jdtatz/nvptx-sys.git" }
 
 [dev-dependencies]
 statrs = "0.13"
 
 [features]
-std = ["float_eq/std"]
+std = ["num-traits/std", "float_eq/std"]

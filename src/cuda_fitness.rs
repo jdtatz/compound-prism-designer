@@ -54,7 +54,7 @@ impl CudaFitnessContext {
     }
 
     fn launch_p_dets_l_ws<
-        F: Float + DeviceCopy,
+        F: FloatExt + DeviceCopy,
         V: Vector<Scalar = F>,
         B: Beam<Vector = V>,
         S0: Surface<V>,
@@ -87,7 +87,7 @@ impl CudaFitnessContext {
         let stream = &self.stream;
         unsafe {
             launch!(function<<<max_n / nwarp, 32 * nwarp, dynamic_shared_mem, stream>>>(
-                F::from_f64(seed),
+                F::lossy_from(seed),
                 max_eval,
                 dev_spec.as_device_ptr(),
                 dev_probs.as_device_ptr()
@@ -133,7 +133,7 @@ where
 }
 
 pub fn cuda_fitness<
-    F: Float + DeviceCopy,
+    F: FloatExt + DeviceCopy,
     V: Vector<Scalar = F>,
     B: Beam<Vector = V>,
     S0: Surface<V>,

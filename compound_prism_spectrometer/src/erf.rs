@@ -3,9 +3,9 @@
     clippy::unreadable_literal,
     clippy::excessive_precision
 )]
-use crate::utils::{Float, LossyFrom};
+use crate::utils::*;
 
-fn polynomial<F: Float, const N: usize>(z: F, coeff: [F; N]) -> F {
+fn polynomial<F: FloatExt, const N: usize>(z: F, coeff: [F; N]) -> F {
     // core::array::IntoIter::new(coeff)
     coeff
         .iter()
@@ -49,14 +49,14 @@ const SHAW_Q: [f64; 8] = [
 /// arXiv:0901.0638 [q-fin.CP]
 /// Quantile Mechanics II: Changes of Variables in Monte Carlo methods and GPU-Optimized Normal Quantiles
 /// William T. Shaw, Thomas Luu, Nick Brickman
-pub fn norminv<F: Float>(x: F) -> F {
+pub fn norminv<F: FloatExt>(x: F) -> F {
     // F::from_f64(-core::f64::consts::SQRT_2 * statrs::function::erf::erfc_inv(2.0 * x.to_f64()))
     let u = if x > F::from_u32_ratio(1, 2) {
         F::one() - x
     } else {
         x
     };
-    let v = -(F::from_u32(2) * u).ln();
+    let v = -(F::lossy_from(2u32) * u).ln();
     let p = polynomial(v, LossyFrom::lossy_from(SHAW_P));
     let q = polynomial(v, LossyFrom::lossy_from(SHAW_Q));
     (v * p / q).copy_sign(x - F::from_u32_ratio(1, 2))
@@ -93,11 +93,11 @@ const FAST_SHAW_Q: [f64; 7] = [
 /// arXiv:0901.0638v5 [q-fin.CP]
 /// Quantile Mechanics II: Changes of Variables in Monte Carlo methods and GPU-Optimized Normal Quantiles
 /// William T. Shaw, Thomas Luu, Nick Brickman
-pub fn fast_norminv<F: Float>(u: F) -> F {
+pub fn fast_norminv<F: FloatExt>(u: F) -> F {
     let half_minus_u = F::from_u32_ratio(1, 2) - u;
-    let mut x = (u * F::from_u32(2)).copy_sign(half_minus_u);
+    let mut x = (u * F::lossy_from(2u32)).copy_sign(half_minus_u);
     if half_minus_u < F::zero() {
-        x += F::from_u32(2);
+        x += F::lossy_from(2u32);
     }
     let v = -F::ln(x);
     let p = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_P));

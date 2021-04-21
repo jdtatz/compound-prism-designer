@@ -1,8 +1,5 @@
-#![allow(clippy::needless_return)]
 use core::mem::swap;
-use core::ops::{
-    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
-};
+pub use num_traits::{Float, NumAssign, One, Zero};
 
 pub fn array_prepend<T, const N: usize>(first: T, mut rest: [T; N]) -> ([T; N], T) {
     let mut swapped = first;
@@ -63,11 +60,30 @@ impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
 
 wrapped_from_tuples! { LossyFrom::lossy_from for 0..12 }
 
-pub trait Float:
+pub trait ApproxEq:
+    float_eq::FloatEqUlpsEpsilon
+    + float_eq::FloatEq<Epsilon = Self>
+    + float_eq::FloatEqDebugUlpsDiff<DebugUlpsDiff = Self::DebugUlpsDiffTy>
+    + float_eq::AssertFloatEq<DebugAbsDiff = Self, DebugEpsilon = Self>
+{
+    type DebugUlpsDiffTy: core::fmt::Debug;
+}
+
+impl<T> ApproxEq for T
+where
+    T: float_eq::FloatEqUlpsEpsilon
+        + float_eq::FloatEq<Epsilon = Self>
+        + float_eq::FloatEqDebugUlpsDiff
+        + float_eq::AssertFloatEq<DebugAbsDiff = Self, DebugEpsilon = Self>,
+    <T as float_eq::FloatEqDebugUlpsDiff>::DebugUlpsDiff: core::fmt::Debug,
+{
+    type DebugUlpsDiffTy = <T as float_eq::FloatEqDebugUlpsDiff>::DebugUlpsDiff;
+}
+
+pub trait FloatExt:
     'static
-    + Sized
-    + Copy
-    + Clone
+    + Float
+    + NumAssign
     + LossyFrom<u32>
     + LossyInto<u32>
     + LossyFrom<f64>
@@ -75,60 +91,22 @@ pub trait Float:
     + core::fmt::Debug
     + core::fmt::Display
     + core::fmt::LowerExp
-    + PartialEq
-    + PartialOrd
-    + Neg<Output = Self>
-    + Add<Output = Self>
-    + AddAssign
-    + Sub<Output = Self>
-    + SubAssign
-    + Mul<Output = Self>
-    + MulAssign
-    + Div<Output = Self>
-    + DivAssign
-    + Rem<Output = Self>
-    + RemAssign
-    + float_eq::FloatEq<Epsilon = Self>
+    + ApproxEq
 {
+    type BitRepr: 'static + Sized + Copy + core::fmt::Debug + num_traits::Unsigned;
     const ZERO: Self;
     const ONE: Self;
-    fn from_f64(v: f64) -> Self {
-        Self::lossy_from(v)
-    }
-    fn from_u32(v: u32) -> Self {
-        Self::lossy_from(v)
-    }
+
+    fn to_bits(self) -> Self::BitRepr;
+    fn from_bits(bits: Self::BitRepr) -> Self;
+    fn copy_sign(self, other: Self) -> Self;
+
     fn from_u32_ratio(n: u32, d: u32) -> Self {
         Self::lossy_from(n) / Self::lossy_from(d)
     }
-    fn to_f64(self) -> f64 {
-        self.lossy_into()
+    fn sincos(self) -> (Self, Self) {
+        self.sin_cos()
     }
-    fn to_u32(self) -> u32 {
-        self.lossy_into()
-    }
-    fn zero() -> Self {
-        Self::ZERO
-    }
-    fn one() -> Self {
-        Self::ONE
-    }
-    fn infinity() -> Self;
-    fn is_finite(self) -> bool;
-    fn is_infinite(self) -> bool;
-    fn is_nan(self) -> bool;
-    fn is_sign_positive(self) -> bool;
-    fn copy_sign(self, sign: Self) -> Self;
-    fn mul_add(self, a: Self, b: Self) -> Self;
-    fn sqr(self) -> Self {
-        self * self
-    }
-    fn sqrt(self) -> Self;
-    fn exp(self) -> Self;
-    fn ln(self) -> Self;
-    fn log2(self) -> Self;
-    fn trunc(self) -> Self;
-    fn fract(self) -> Self;
     fn euclid_div_rem(self, rhs: Self) -> (Self, Self) {
         let q = (self / rhs).trunc();
         let r = self - q * rhs;
@@ -145,25 +123,8 @@ pub trait Float:
             (q, r)
         }
     }
-    fn abs(self) -> Self;
-    fn sincos(self) -> (Self, Self);
-    fn tan(self) -> Self;
-    fn asin(self) -> Self;
-    fn erf(self) -> Self;
-    fn floor(self) -> Self;
-    fn min(self, other: Self) -> Self {
-        if self <= other {
-            self
-        } else {
-            other
-        }
-    }
-    fn max(self, other: Self) -> Self {
-        if self >= other {
-            self
-        } else {
-            other
-        }
+    fn sqr(self) -> Self {
+        self * self
     }
     fn plog2p(self) -> Self {
         if self > Self::zero() {
@@ -174,200 +135,91 @@ pub trait Float:
     }
 }
 
-macro_rules! cuda_specific {
-    ($cuda_expr:expr , $cpu_expr:expr) => {
-        #[cfg(target_arch = "nvptx64")]
-        {
-            #[allow(unused_unsafe)]
-            return unsafe { $cuda_expr };
-        };
-        #[cfg(not(target_arch = "nvptx64"))]
-        {
-            return $cpu_expr;
-        };
-    };
-}
-
-impl Float for f32 {
+impl FloatExt for f32 {
+    type BitRepr = u32;
     const ZERO: Self = 0f32;
     const ONE: Self = 1f32;
 
-    fn zero() -> Self {
-        0_f32
+    fn to_bits(self) -> Self::BitRepr {
+        self.to_bits()
     }
 
-    fn one() -> Self {
-        1_f32
+    fn from_bits(bits: Self::BitRepr) -> Self {
+        f32::from_bits(bits)
     }
 
-    fn infinity() -> Self {
-        core::f32::INFINITY
-    }
-
-    fn is_finite(self) -> bool {
-        self.is_finite()
-    }
-
-    fn is_infinite(self) -> bool {
-        self.is_infinite()
-    }
-
-    fn is_nan(self) -> bool {
-        self.is_nan()
-    }
-
-    fn is_sign_positive(self) -> bool {
-        self.is_sign_positive()
-    }
-
-    fn copy_sign(self, sign: Self) -> Self {
-        cuda_specific!(
-            core::intrinsics::copysignf32(self, sign),
-            libm::copysignf(self, sign)
-        );
-    }
-
-    fn mul_add(self, a: Self, b: Self) -> Self {
-        cuda_specific!(core::intrinsics::fmaf32(self, a, b), self.mul_add(a, b));
-    }
-
-    fn sqrt(self) -> Self {
-        cuda_specific!(core::intrinsics::sqrtf32(self), self.sqrt());
-    }
-
-    fn exp(self) -> Self {
-        cuda_specific!(libm::expf(self), self.exp());
-    }
-
-    fn ln(self) -> Self {
-        cuda_specific!(<f32 as nvptx_sys::Float>::ln(self), libm::logf(self));
-    }
-
-    fn log2(self) -> Self {
-        libm::log2f(self)
-    }
-
-    fn trunc(self) -> Self {
-        cuda_specific!(core::intrinsics::truncf32(self), self.trunc());
-    }
-
-    fn fract(self) -> Self {
-        cuda_specific!(self - core::intrinsics::truncf32(self), self.fract());
-    }
-
-    fn abs(self) -> Self {
-        cuda_specific!(core::intrinsics::fabsf32(self), self.abs());
-    }
-
-    fn sincos(self) -> (Self, Self) {
-        libm::sincosf(self)
-    }
-
-    fn tan(self) -> Self {
-        cuda_specific!(libm::tanf(self), self.tan());
-    }
-
-    fn asin(self) -> Self {
-        cuda_specific!(libm::asinf(self), self.asin());
-    }
-
-    fn erf(self) -> Self {
-        libm::erff(self)
-    }
-
-    fn floor(self) -> Self {
-        cuda_specific!(core::intrinsics::floorf32(self), self.floor());
+    fn copy_sign(self, other: Self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        unsafe {
+            core::intrinsics::copysignf32(self, other)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        libm::copysignf(self, other)
     }
 }
 
-impl Float for f64 {
+impl FloatExt for f64 {
+    type BitRepr = u64;
     const ZERO: Self = 0f64;
     const ONE: Self = 1f64;
 
-    fn zero() -> Self {
-        0_f64
+    fn to_bits(self) -> Self::BitRepr {
+        self.to_bits()
     }
 
-    fn one() -> Self {
-        1_f64
+    fn from_bits(bits: Self::BitRepr) -> Self {
+        f64::from_bits(bits)
     }
 
-    fn infinity() -> Self {
-        core::f64::INFINITY
+    fn copy_sign(self, other: Self) -> Self {
+        #[cfg(target_arch = "nvptx64")]
+        unsafe {
+            core::intrinsics::copysignf64(self, other)
+        }
+        #[cfg(not(target_arch = "nvptx64"))]
+        libm::copysign(self, other)
+    }
+}
+
+#[cfg(target_arch = "nvptx64")]
+impl<T, F: LossyFrom<T>> LossyFrom<T> for nvptx_sys::FastFloat<F> {
+    fn lossy_from(v: T) -> Self {
+        Self(LossyFrom::lossy_from(v))
+    }
+}
+
+#[cfg(target_arch = "nvptx64")]
+impl<F: Copy + LossyInto<u32>> LossyInto<u32> for nvptx_sys::FastFloat<F> {
+    fn lossy_into(self) -> u32 {
+        LossyInto::lossy_into(*self)
+    }
+}
+
+#[cfg(target_arch = "nvptx64")]
+impl<F: Copy + LossyInto<f64>> LossyInto<f64> for nvptx_sys::FastFloat<F> {
+    fn lossy_into(self) -> f64 {
+        LossyInto::lossy_into(*self)
+    }
+}
+
+#[cfg(target_arch = "nvptx64")]
+impl<F: nvptx_sys::FastNum + FloatExt> FloatExt for nvptx_sys::FastFloat<F>
+where
+    <F as float_eq::FloatEqUlpsEpsilon>::UlpsEpsilon: Sized,
+{
+    type BitRepr = F::BitRepr;
+    const ZERO: Self = nvptx_sys::FastFloat(F::ZERO);
+    const ONE: Self = nvptx_sys::FastFloat(F::ONE);
+
+    fn to_bits(self) -> Self::BitRepr {
+        <F as FloatExt>::to_bits(self.0)
     }
 
-    fn is_finite(self) -> bool {
-        self.is_finite()
+    fn from_bits(bits: Self::BitRepr) -> Self {
+        nvptx_sys::FastFloat(<F as FloatExt>::from_bits(bits))
     }
 
-    fn is_infinite(self) -> bool {
-        self.is_infinite()
-    }
-
-    fn is_nan(self) -> bool {
-        self.is_nan()
-    }
-
-    fn is_sign_positive(self) -> bool {
-        self.is_sign_positive()
-    }
-
-    fn copy_sign(self, sign: Self) -> Self {
-        cuda_specific!(
-            core::intrinsics::copysignf64(self, sign),
-            libm::copysign(self, sign)
-        );
-    }
-
-    fn mul_add(self, a: Self, b: Self) -> Self {
-        cuda_specific!(core::intrinsics::fmaf64(self, a, b), self.mul_add(a, b));
-    }
-
-    fn sqrt(self) -> Self {
-        cuda_specific!(core::intrinsics::sqrtf64(self), self.sqrt());
-    }
-
-    fn exp(self) -> Self {
-        cuda_specific!(libm::exp(self), self.exp());
-    }
-
-    fn ln(self) -> Self {
-        libm::log(self)
-    }
-
-    fn log2(self) -> Self {
-        libm::log2(self)
-    }
-
-    fn trunc(self) -> Self {
-        cuda_specific!(core::intrinsics::truncf64(self), self.trunc());
-    }
-
-    fn fract(self) -> Self {
-        cuda_specific!(self - core::intrinsics::truncf64(self), self.fract());
-    }
-
-    fn abs(self) -> Self {
-        cuda_specific!(core::intrinsics::fabsf64(self), self.abs());
-    }
-
-    fn sincos(self) -> (Self, Self) {
-        libm::sincos(self)
-    }
-
-    fn tan(self) -> Self {
-        cuda_specific!(libm::tan(self), self.tan());
-    }
-
-    fn asin(self) -> Self {
-        cuda_specific!(libm::asin(self), self.asin());
-    }
-
-    fn erf(self) -> Self {
-        libm::erf(self)
-    }
-
-    fn floor(self) -> Self {
-        cuda_specific!(core::intrinsics::floorf64(self), self.floor());
+    fn copy_sign(self, other: Self) -> Self {
+        self.copysign(other)
     }
 }

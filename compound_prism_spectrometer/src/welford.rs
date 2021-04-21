@@ -1,4 +1,4 @@
-use crate::utils::Float;
+use crate::utils::*;
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
 #[derive(Copy, Clone)]
@@ -8,7 +8,7 @@ pub struct Welford<F> {
     pub m2: F,
 }
 
-impl<F: Float> Welford<F> {
+impl<F: FloatExt> Welford<F> {
     pub const NEW: Self = Welford {
         count: F::ZERO,
         mean: F::ZERO,
@@ -59,13 +59,13 @@ impl<F: Float> Welford<F> {
     }
 }
 
-impl<F: Float> Default for Welford<F> {
+impl<F: FloatExt> Default for Welford<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F: Float> core::ops::Add for Welford<F> {
+impl<F: FloatExt> core::ops::Add for Welford<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -77,7 +77,7 @@ impl<F: Float> core::ops::Add for Welford<F> {
     }
 }
 
-impl<F: Float> core::ops::AddAssign for Welford<F> {
+impl<F: FloatExt> core::ops::AddAssign for Welford<F> {
     fn add_assign(&mut self, rhs: Self) {
         self.combine(rhs)
     }

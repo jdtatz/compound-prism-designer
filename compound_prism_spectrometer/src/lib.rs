@@ -30,5 +30,5 @@ pub use crate::glasscat::Glass;
 pub use crate::qrng::{Qrng, QuasiRandom};
 pub use crate::ray::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 pub use crate::spectrometer::{GaussianBeam, LinearDetectorArray, Spectrometer};
-pub use crate::utils::{Float, LossyFrom, LossyInto};
+pub use crate::utils::{Float, FloatExt, LossyFrom, LossyInto, NumAssign, One, Zero};
 pub use crate::welford::Welford;

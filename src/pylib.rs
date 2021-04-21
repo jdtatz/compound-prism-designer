@@ -141,22 +141,22 @@ impl PyObjectProtocol for PyDesignFitness {
     }
 }
 
-impl<F: Float> From<crate::DesignFitness<F>> for PyDesignFitness {
+impl<F: LossyInto<f64>> From<crate::DesignFitness<F>> for PyDesignFitness {
     fn from(fit: crate::DesignFitness<F>) -> Self {
         Self {
-            size: fit.size.to_f64(),
-            info: fit.info.to_f64(),
-            deviation: fit.deviation.to_f64(),
+            size: fit.size.lossy_into(),
+            info: fit.info.lossy_into(),
+            deviation: fit.deviation.lossy_into(),
         }
     }
 }
 
-impl<F: Float> From<PyDesignFitness> for crate::DesignFitness<F> {
+impl<F: LossyFrom<f64>> From<PyDesignFitness> for crate::DesignFitness<F> {
     fn from(fit: PyDesignFitness) -> Self {
         Self {
-            size: F::from_f64(fit.size),
-            info: F::from_f64(fit.info),
-            deviation: F::from_f64(fit.deviation),
+            size: F::lossy_from(fit.size),
+            info: F::lossy_from(fit.info),
+            deviation: F::lossy_from(fit.deviation),
         }
     }
 }

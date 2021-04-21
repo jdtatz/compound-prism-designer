@@ -2,7 +2,7 @@ use crate::distribution::Distribution;
 use crate::erf::norminv;
 use crate::geom::{Mat2, Pair, Surface, Vector};
 use crate::qrng::QuasiRandom;
-use crate::utils::Float;
+use crate::utils::*;
 use crate::{Beam, CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 /// Collimated Polychromatic Gaussian Beam
@@ -17,7 +17,7 @@ pub struct GaussianBeam<F, D> {
     pub wavelengths: D,
 }
 
-impl<F: Float, D> GaussianBeam<F, D> {
+impl<F: FloatExt, D> GaussianBeam<F, D> {
     pub fn inverse_cdf_initial_y(&self, p: F) -> F {
         self.y_mean - self.width * norminv(p)
     }
@@ -27,7 +27,7 @@ impl<F: Float, D> GaussianBeam<F, D> {
     }
 }
 
-impl<F: Float, D: Distribution<Item = F>> Beam for GaussianBeam<F, D> {
+impl<F: FloatExt, D: Distribution<Item = F>> Beam for GaussianBeam<F, D> {
     type Vector = Pair<F>;
     // type Vector = impl Vector<Scalar=F>;
     type Quasi = F;
@@ -47,7 +47,7 @@ impl<F: Float, D: Distribution<Item = F>> Beam for GaussianBeam<F, D> {
 /// Polychromatic Uniform Circular Multi-Mode Fiber Beam
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct FiberBeam<F: Float> {
+pub struct FiberBeam<F: FloatExt> {
     /// Radius of fiber core
     pub radius: F,
     /// Numerical apeature
@@ -112,7 +112,7 @@ impl<V: Vector> LinearDetectorArray<V> {
 
     pub fn bin_index(&self, pos: V::Scalar) -> Option<u32> {
         let (bin, bin_pos) = (pos - self.linear_intercept).euclid_div_rem(self.linear_slope);
-        let bin = bin.to_u32();
+        let bin = bin.lossy_into();
         if bin < self.bin_count && bin_pos < self.bin_size {
             Some(bin)
         } else {
@@ -122,7 +122,7 @@ impl<V: Vector> LinearDetectorArray<V> {
 
     pub fn bounds(&self) -> impl ExactSizeIterator<Item = [V::Scalar; 2]> + '_ {
         (0..self.bin_count).map(move |i| {
-            let i = V::Scalar::from_u32(i);
+            let i = V::Scalar::lossy_from(i);
             let lb = self.linear_intercept + self.linear_slope * i;
             let ub = lb + self.bin_size;
             [lb, ub]
@@ -327,7 +327,7 @@ impl<
 }
 
 unsafe impl<
-        F: Float + rustacuda_core::DeviceCopy,
+        F: FloatExt + rustacuda_core::DeviceCopy,
         S0: Surface<V>,
         SI: Surface<V>,
         SN: Surface<V>,
