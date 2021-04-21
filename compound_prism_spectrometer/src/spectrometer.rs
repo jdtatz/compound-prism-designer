@@ -199,15 +199,15 @@ pub(crate) fn detector_array_positioning<
     detarr: LinearDetectorArray<V>,
     beam: &B,
 ) -> Result<DetectorArrayPositioning<V>, RayTraceError> {
-    let ray = beam.inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::from_u32_ratio(1, 2)));
-    // let wmin = beam.inverse_cdf_wavelength(V::Scalar::from_u32_ratio(1, 100));
-    // let wmax = beam.inverse_cdf_wavelength(V::Scalar::from_u32_ratio(99, 100));
+    let ray = beam.inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::lossy_from(0.5f64)));
+    // let wmin = beam.inverse_cdf_wavelength(V::Scalar::lossy_from(0.01_f64));
+    // let wmax = beam.inverse_cdf_wavelength(V::Scalar::lossy_from(0.99_f64));
     let wmin = beam.inverse_cdf_wavelength(V::Scalar::zero());
     let wmax = beam.inverse_cdf_wavelength(V::Scalar::one());
     let lower_ray = ray.propagate_internal(&cmpnd, wmin)?;
     let upper_ray = ray.propagate_internal(&cmpnd, wmax)?;
-    if lower_ray.average_transmittance() <= V::Scalar::from_u32_ratio(1, 1000)
-        || upper_ray.average_transmittance() <= V::Scalar::from_u32_ratio(1, 1000)
+    if lower_ray.average_transmittance() <= V::Scalar::lossy_from(1e-3f64)
+        || upper_ray.average_transmittance() <= V::Scalar::lossy_from(1e-3f64)
     {
         return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
     }
@@ -315,10 +315,10 @@ impl<
 
     pub fn size_and_deviation(&self) -> (V::Scalar, V::Scalar) {
         let deviation_vector = self.detector.1.position
-            + self.detector.1.direction * self.detector.length() * V::Scalar::from_u32_ratio(1, 2)
+            + self.detector.1.direction * self.detector.length() * V::Scalar::lossy_from(0.5f64)
             - self
                 .beam
-                .inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::from_u32_ratio(1, 2)))
+                .inverse_cdf_ray(B::Quasi::from_scalar(V::Scalar::lossy_from(0.5f64)))
                 .origin;
         let size = deviation_vector.norm();
         let deviation = deviation_vector.sin_xy(size).abs();

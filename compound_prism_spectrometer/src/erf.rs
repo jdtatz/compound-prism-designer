@@ -51,7 +51,7 @@ const SHAW_Q: [f64; 8] = [
 /// William T. Shaw, Thomas Luu, Nick Brickman
 pub fn norminv<F: FloatExt>(x: F) -> F {
     // F::from_f64(-core::f64::consts::SQRT_2 * statrs::function::erf::erfc_inv(2.0 * x.to_f64()))
-    let u = if x > F::from_u32_ratio(1, 2) {
+    let u = if x > F::lossy_from(0.5f64) {
         F::one() - x
     } else {
         x
@@ -59,7 +59,7 @@ pub fn norminv<F: FloatExt>(x: F) -> F {
     let v = -(F::lossy_from(2u32) * u).ln();
     let p = polynomial(v, LossyFrom::lossy_from(SHAW_P));
     let q = polynomial(v, LossyFrom::lossy_from(SHAW_Q));
-    (v * p / q).copy_sign(x - F::from_u32_ratio(1, 2))
+    (v * p / q).copy_sign(x - F::lossy_from(0.5f64))
 }
 
 const FAST_SHAW_P: [f64; 6] = [
@@ -94,7 +94,7 @@ const FAST_SHAW_Q: [f64; 7] = [
 /// Quantile Mechanics II: Changes of Variables in Monte Carlo methods and GPU-Optimized Normal Quantiles
 /// William T. Shaw, Thomas Luu, Nick Brickman
 pub fn fast_norminv<F: FloatExt>(u: F) -> F {
-    let half_minus_u = F::from_u32_ratio(1, 2) - u;
+    let half_minus_u = F::lossy_from(0.5f64) - u;
     let mut x = (u * F::lossy_from(2u32)).copy_sign(half_minus_u);
     if half_minus_u < F::zero() {
         x += F::lossy_from(2u32);

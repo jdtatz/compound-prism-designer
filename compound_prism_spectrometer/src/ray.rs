@@ -183,7 +183,7 @@ impl<V: Vector> Ray<V> {
 
     /// The average of the S & P Polarizations transmittance's
     pub fn average_transmittance(self) -> V::Scalar {
-        (self.s_transmittance + self.p_transmittance) * V::Scalar::from_u32_ratio(1, 2)
+        (self.s_transmittance + self.p_transmittance) * V::Scalar::lossy_from(0.5f64)
     }
 
     /// Refract ray through interface of two different media
@@ -214,20 +214,20 @@ impl<V: Vector> Ray<V> {
         }
         let cr = cr_sq.sqrt();
         let v = self.direction * r + normal * (r * ci - cr);
-        let (s_transmittance, p_transmittance) =
-            if ar_coated && ci > V::Scalar::from_u32_ratio(1, 2) {
-                (
-                    self.s_transmittance * V::Scalar::from_u32_ratio(99, 100),
-                    self.p_transmittance * V::Scalar::from_u32_ratio(99, 100),
-                )
-            } else {
-                let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
-                let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
-                (
-                    self.s_transmittance * (V::Scalar::one() - fresnel_rs.sqr()),
-                    self.p_transmittance * (V::Scalar::one() - fresnel_rp.sqr()),
-                )
-            };
+        let (s_transmittance, p_transmittance) = if ar_coated && ci > V::Scalar::lossy_from(0.5f64)
+        {
+            (
+                self.s_transmittance * V::Scalar::lossy_from(0.99f64),
+                self.p_transmittance * V::Scalar::lossy_from(0.99f64),
+            )
+        } else {
+            let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
+            let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
+            (
+                self.s_transmittance * (V::Scalar::one() - fresnel_rs.sqr()),
+                self.p_transmittance * (V::Scalar::one() - fresnel_rp.sqr()),
+            )
+        };
         Ok(Self {
             origin: intersection,
             direction: v,

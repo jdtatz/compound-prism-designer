@@ -101,9 +101,6 @@ pub trait FloatExt:
     fn from_bits(bits: Self::BitRepr) -> Self;
     fn copy_sign(self, other: Self) -> Self;
 
-    fn from_u32_ratio(n: u32, d: u32) -> Self {
-        Self::lossy_from(n) / Self::lossy_from(d)
-    }
     fn sincos(self) -> (Self, Self) {
         self.sin_cos()
     }
