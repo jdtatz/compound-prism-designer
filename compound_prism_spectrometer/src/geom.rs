@@ -65,7 +65,7 @@ pub trait Vector:
         float_eq::float_eq!(
             self.norm(),
             Self::Scalar::one(),
-            rmax <= Self::Scalar::from_u32_ratio(1, 1000),
+            rmax <= Self::Scalar::lossy_from(1e-3f64),
         )
     }
 
@@ -347,7 +347,7 @@ pub struct Plane<V: Vector> {
 #[cfg(not(target_arch = "nvptx64"))]
 impl<V: Vector> Plane<V> {
     pub(crate) fn end_points(&self, height: V::Scalar) -> (V, V) {
-        let dx = self.normal.tan_xy() * height * V::Scalar::from_u32_ratio(1, 2);
+        let dx = self.normal.tan_xy() * height * V::Scalar::lossy_from(0.5f64);
         let ux = self.midpt.x() - dx;
         let lx = self.midpt.x() + dx;
         (V::from_xy(ux, height), V::from_xy(lx, V::Scalar::zero()))
@@ -381,7 +381,7 @@ pub(crate) fn create_joined_trapezoids<V: Vector, const N: usize>(
     sep_lengths: [V::Scalar; N],
 ) -> (Plane<V>, [Plane<V>; N], Plane<V>) {
     let (sep_lengths, last_sep_length) = array_prepend(first_sep_length, sep_lengths);
-    let h2 = height * V::Scalar::from_u32_ratio(1, 2);
+    let h2 = height * V::Scalar::lossy_from(0.5f64);
     let normal = V::angled_xy(first_angle).rot_180_xy();
     debug_assert_eq!(
         normal,
@@ -448,10 +448,9 @@ impl<V: Vector> CurvedPlane<V> {
         );
         debug_assert!(height > V::Scalar::zero());
         let chord_length = chord.normal.sec_xy(height).abs();
-        let radius = chord_length * V::Scalar::from_u32_ratio(1, 2) / signed_curvature.abs();
-        let apothem = (radius * radius
-            - chord_length * chord_length * V::Scalar::from_u32_ratio(1, 4))
-        .sqrt();
+        let radius = chord_length * V::Scalar::lossy_from(0.5f64) / signed_curvature.abs();
+        let apothem =
+            (radius * radius - chord_length * chord_length * V::Scalar::lossy_from(0.25f64)).sqrt();
         let sagitta = radius - apothem;
         let (center, midpt) = if signed_curvature.is_sign_positive() {
             (
@@ -469,7 +468,7 @@ impl<V: Vector> CurvedPlane<V> {
             center,
             radius,
             max_dist_sq: sagitta * sagitta
-                + chord_length * chord_length * V::Scalar::from_u32_ratio(1, 4),
+                + chord_length * chord_length * V::Scalar::lossy_from(0.25f64),
             direction: signed_curvature.is_sign_positive(),
         }
     }
@@ -492,19 +491,19 @@ impl<V: Vector> CurvedPlane<V> {
         let u = self.center + r.rotate_xy(theta_2);
         let l = self.center + r.rotate_xy(-theta_2);
         debug_assert!(
-            (u.y() - height).abs() < V::Scalar::from_u32_ratio(1, 10000),
+            (u.y() - height).abs() < V::Scalar::lossy_from(1e-4f64),
             "{:?} {}",
             u,
             height
         );
-        debug_assert!(l.y().abs() < V::Scalar::from_u32_ratio(1, 10000), "{:?}", l);
+        debug_assert!(l.y().abs() < V::Scalar::lossy_from(1e-4f64), "{:?}", l);
         debug_assert!(
             ((u - r).norm_squared() - self.max_dist_sq).abs() / self.max_dist_sq
-                < V::Scalar::from_u32_ratio(1, 10000)
+                < V::Scalar::lossy_from(1e-4f64)
         );
         debug_assert!(
             ((l - r).norm_squared() - self.max_dist_sq).abs() / self.max_dist_sq
-                < V::Scalar::from_u32_ratio(1, 10000)
+                < V::Scalar::lossy_from(1e-4f64)
         );
         (
             V::from_xy(u.x(), height),

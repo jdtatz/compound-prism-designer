@@ -150,7 +150,7 @@ pub fn cuda_fitness<
 where
     Spectrometer<V, B, S0, SI, SN, N>: Kernel,
 {
-    let max_err = F::from_u32_ratio(5, 1000);
+    let max_err = F::lossy_from(5e-3f64);
     let max_err_sq = max_err * max_err;
 
     let mut lock = CACHED_CUDA_FITNESS_CONTEXT.lock();

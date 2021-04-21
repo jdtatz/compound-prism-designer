@@ -16,7 +16,7 @@ where
     let max_err_squared = max_err * max_err;
     let mut count = V::zero();
     let mut stats = vec![Welford::new(); vec_len];
-    let qrng = Qrng::new_from_scalar(V::from_u32_ratio(1, 2));
+    let qrng = Qrng::new_from_scalar(V::lossy_from(0.5f64));
     for u in qrng.take(max_n) {
         count += V::one();
         if let Some((idx, v)) = vector_fn(u) {
@@ -60,7 +60,7 @@ pub fn p_dets_l_wavelength<
     let nbin = spectrometer.detector.bin_count() as usize;
     vector_quasi_monte_carlo_integration(
         max_n,
-        V::Scalar::from_u32_ratio(5, 1000),
+        V::Scalar::lossy_from(5e-3f64),
         nbin,
         move |q: B::Quasi| {
             // Inverse transform sampling-method
@@ -114,7 +114,7 @@ pub fn mutual_information<
     let mut p_dets = vec![Welford::new(); nbin];
     // -H(D|Λ)
     let mut h_det_l_w = Welford::new();
-    let qrng = Qrng::new(V::Scalar::from_u32_ratio(1, 2));
+    let qrng = Qrng::new(V::Scalar::lossy_from(0.5f64));
     for u in qrng.take(max_n) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = spectrometer.beam.inverse_cdf_wavelength(u);
@@ -129,12 +129,9 @@ pub fn mutual_information<
         }
         h_det_l_w.next_sample(h_det_l_ws);
         if p_dets.iter().all(|stat| {
-            const MAX_ERR_N: u32 = 5;
-            const MAX_ERR_D: u32 = 1000;
-            stat.sem_le_error_threshold(V::Scalar::from_u32_ratio(
-                MAX_ERR_N * MAX_ERR_N,
-                MAX_ERR_D * MAX_ERR_D,
-            ))
+            const MAX_ERR: f64 = 5e-3;
+            const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
+            stat.sem_le_error_threshold(V::Scalar::lossy_from(MAX_ERR_SQR))
         }) {
             break;
         }
