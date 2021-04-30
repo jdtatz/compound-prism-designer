@@ -46,45 +46,42 @@ pub struct DesignFitness<F> {
 /// # Arguments
 ///  * `wavelength` - given wavelength
 pub fn p_dets_l_wavelength<
-    V: Vector,
-    B: Beam<Vector = V>,
-    S0: Surface<V>,
-    SI: Surface<V>,
-    SN: Surface<V>,
+    F: FloatExt,
+    W: Distribution<F, Output = F>,
+    B: Distribution<F, Output = Ray<F, D>>,
+    S0: Copy + Surface<F, D>,
+    SI: Copy + Surface<F, D>,
+    SN: Copy + Surface<F, D>,
     const N: usize,
+    const D: usize,
 >(
-    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
-    wavelength: V::Scalar,
+    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+    wavelength: F,
     max_n: usize,
-) -> impl Iterator<Item = V::Scalar> {
+) -> impl Iterator<Item = F> {
     let nbin = spectrometer.detector.bin_count() as usize;
-    vector_quasi_monte_carlo_integration(
-        max_n,
-        V::Scalar::lossy_from(5e-3f64),
-        nbin,
-        move |q: B::Quasi| {
-            // Inverse transform sampling-method
-            let ray = spectrometer.beam.inverse_cdf_ray(q);
-            if let Ok((bin_idx, t)) = ray.propagate(
-                wavelength,
-                &spectrometer.compound_prism,
-                &spectrometer.detector,
-            ) {
-                debug_assert!(t.is_finite());
-                debug_assert!(V::Scalar::zero() <= t && t <= V::Scalar::one());
-                // What is actually being integrated is
-                // pdf_t = t * pdf(y, z);
-                // But because of importance sampling using the same distribution
-                // pdf_t /= pdf(y, z);
-                // the pdf(y, z) is cancelled, so.
-                // pdf_t = t;
-                let pdf_t = t;
-                Some((bin_idx as usize, pdf_t))
-            } else {
-                None
-            }
-        },
-    )
+    vector_quasi_monte_carlo_integration(max_n, F::lossy_from(5e-3f64), nbin, move |q: F| {
+        // Inverse transform sampling-method
+        let ray = spectrometer.beam.inverse_cdf(q);
+        if let Ok((bin_idx, t)) = ray.propagate(
+            wavelength,
+            &spectrometer.compound_prism,
+            &spectrometer.detector,
+        ) {
+            debug_assert!(t.is_finite());
+            debug_assert!(F::zero() <= t && t <= F::one());
+            // What is actually being integrated is
+            // pdf_t = t * pdf(y, z);
+            // But because of importance sampling using the same distribution
+            // pdf_t /= pdf(y, z);
+            // the pdf(y, z) is cancelled, so.
+            // pdf_t = t;
+            let pdf_t = t;
+            Some((bin_idx as usize, pdf_t))
+        } else {
+            None
+        }
+    })
     .into_iter()
     .map(|w| w.mean)
 }
@@ -98,32 +95,34 @@ pub fn p_dets_l_wavelength<
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
 pub fn mutual_information<
-    V: Vector,
-    B: Beam<Vector = V>,
-    S0: Surface<V>,
-    SI: Surface<V>,
-    SN: Surface<V>,
+    F: FloatExt,
+    W: Distribution<F, Output = F>,
+    B: Distribution<F, Output = Ray<F, D>>,
+    S0: Copy + Surface<F, D>,
+    SI: Copy + Surface<F, D>,
+    SN: Copy + Surface<F, D>,
     const N: usize,
+    const D: usize,
 >(
-    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
+    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
     max_n: usize,
     max_m: usize,
-) -> V::Scalar {
+) -> F {
     let nbin = spectrometer.detector.bin_count() as usize;
     // p(d=D)
     let mut p_dets = vec![Welford::new(); nbin];
     // -H(D|Λ)
     let mut h_det_l_w = Welford::new();
-    let qrng = Qrng::new(V::Scalar::lossy_from(0.5f64));
+    let qrng = Qrng::new(F::lossy_from(0.5f64));
     for u in qrng.take(max_n) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-        let w = spectrometer.beam.inverse_cdf_wavelength(u);
+        let w = spectrometer.wavelengths.inverse_cdf(u);
         // p(d=D|λ=Λ)
         let p_dets_l_w = p_dets_l_wavelength(spectrometer, w, max_m);
         // -H(D|λ=Λ)
-        let mut h_det_l_ws = V::Scalar::zero();
+        let mut h_det_l_ws = F::zero();
         for (dstat, p_det_l_w) in p_dets.iter_mut().zip(p_dets_l_w) {
-            debug_assert!(V::Scalar::zero() <= p_det_l_w && p_det_l_w <= V::Scalar::one());
+            debug_assert!(F::zero() <= p_det_l_w && p_det_l_w <= F::one());
             dstat.next_sample(p_det_l_w);
             h_det_l_ws += p_det_l_w.plog2p();
         }
@@ -131,7 +130,7 @@ pub fn mutual_information<
         if p_dets.iter().all(|stat| {
             const MAX_ERR: f64 = 5e-3;
             const MAX_ERR_SQR: f64 = MAX_ERR * MAX_ERR;
-            stat.sem_le_error_threshold(V::Scalar::lossy_from(MAX_ERR_SQR))
+            stat.sem_le_error_threshold(F::lossy_from(MAX_ERR_SQR))
         }) {
             break;
         }
@@ -140,7 +139,7 @@ pub fn mutual_information<
     let h_det = p_dets
         .iter()
         .map(|s| s.mean.plog2p())
-        .fold(V::Scalar::zero(), core::ops::Add::add);
+        .fold(F::zero(), core::ops::Add::add);
     // I(Λ; D) = H(D) - H(D|Λ)
     h_det_l_w.mean - h_det
 }
@@ -151,17 +150,19 @@ pub fn mutual_information<
 /// * info = I(Λ; D)
 /// * deviation = sin(abs(angle of deviation))
 pub fn fitness<
-    V: Vector,
-    B: Beam<Vector = V>,
-    S0: Surface<V>,
-    SI: Surface<V>,
-    SN: Surface<V>,
+    F: FloatExt,
+    W: Copy + Distribution<F, Output = F>,
+    B: Copy + Distribution<F, Output = Ray<F, D>>,
+    S0: Copy + Surface<F, D>,
+    SI: Copy + Surface<F, D>,
+    SN: Copy + Surface<F, D>,
     const N: usize,
+    const D: usize,
 >(
-    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
+    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
     max_n: usize,
     max_m: usize,
-) -> DesignFitness<V::Scalar> {
+) -> DesignFitness<F> {
     let (size, deviation) = spectrometer.size_and_deviation();
     let info = mutual_information(spectrometer, max_n, max_m);
     DesignFitness {
@@ -245,16 +246,17 @@ mod tests {
             pmt_length,
         );
 
+        let wavelengths = UniformDistribution {
+            bounds: (0.5, 0.82),
+        };
         let beam = GaussianBeam {
             width: 0.2,
             y_mean: 0.95,
-            wavelengths: UniformDistribution {
-                bounds: (0.5, 0.82),
-            },
+            marker: core::marker::PhantomData,
         };
-
-        let spec =
-            Spectrometer::new(beam, prism, detarr).expect("This is a valid spectrometer design.");
+        // dbg!((&wavelengths, &beam, &prism, &detarr));
+        let spec = Spectrometer::new(wavelengths, beam, prism, detarr)
+            .expect("This is a valid spectrometer design.");
 
         let DesignFitness {
             size,

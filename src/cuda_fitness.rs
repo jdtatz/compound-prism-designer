@@ -20,15 +20,15 @@ pub trait Kernel: DeviceCopy {
 }
 
 macro_rules! kernel_impl {
-    (@inner $fty:ident $n:expr) => {
-        impl Kernel for Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n> {
+    (@inner $fty:ident $n:literal $d:literal) => {
+        impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, GaussianBeam<$fty, $d>, Plane<$fty, $d>, Plane<$fty, $d>, CurvedPlane<$fty>, $n, $d> {
             const FNAME: &'static [u8] = concat!("prob_dets_given_wavelengths_", stringify!($fty), "_", stringify!($n), "\0").as_bytes();
         }
     };
 
-    ([$($n:expr),*]) => {
-        $( kernel_impl!(@inner f32 $n); )*
-        $( kernel_impl!(@inner f64 $n); )*
+    ([$($n:literal),*]) => {
+        $( kernel_impl!(@inner f32 $n 2); )*
+        $( kernel_impl!(@inner f64 $n 2); )*
     };
 }
 kernel_impl!([0, 1, 2, 3, 4, 5, 6]);
@@ -55,22 +55,23 @@ impl CudaFitnessContext {
 
     fn launch_p_dets_l_ws<
         F: FloatExt + DeviceCopy,
-        V: Vector<Scalar = F>,
-        B: Beam<Vector = V>,
-        S0: Surface<V>,
-        SI: Surface<V>,
-        SN: Surface<V>,
+        W: Distribution<F, Output = F>,
+        B: Distribution<F, Output = Ray<F, D>>,
+        S0: Surface<F, D>,
+        SI: Surface<F, D>,
+        SN: Surface<F, D>,
         const N: usize,
+        const D: usize,
     >(
         &mut self,
         seed: f64,
-        spec: &Spectrometer<V, B, S0, SI, SN, N>,
+        spec: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
     ) -> rustacuda::error::CudaResult<Vec<F>>
     where
-        Spectrometer<V, B, S0, SI, SN, N>: Kernel,
+        Spectrometer<F, W, B, S0, SI, SN, N, D>: Kernel,
     {
         ContextStack::push(&self.ctxt)?;
 
@@ -80,7 +81,7 @@ impl CudaFitnessContext {
         let mut dev_probs = ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(nprobs) }?);
         let function = self.module.get_function(unsafe {
             CStr::from_bytes_with_nul_unchecked(
-                <Spectrometer<V, B, S0, SI, SN, N> as Kernel>::FNAME,
+                <Spectrometer<F, W, B, S0, SI, SN, N, D> as Kernel>::FNAME,
             )
         })?;
         let dynamic_shared_mem = nbin * nwarp * std::mem::size_of::<Welford<F>>() as u32;
@@ -134,21 +135,22 @@ where
 
 pub fn cuda_fitness<
     F: FloatExt + DeviceCopy,
-    V: Vector<Scalar = F>,
-    B: Beam<Vector = V>,
-    S0: Surface<V>,
-    SI: Surface<V>,
-    SN: Surface<V>,
+    W: Copy + Distribution<F, Output = F>,
+    B: Copy + Distribution<F, Output = Ray<F, D>>,
+    S0: Copy + Surface<F, D>,
+    SI: Copy + Surface<F, D>,
+    SN: Copy + Surface<F, D>,
     const N: usize,
+    const D: usize,
 >(
-    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
+    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
     seeds: &[f64],
     max_n: u32,
     nwarp: u32,
     max_eval: u32,
 ) -> rustacuda::error::CudaResult<Option<DesignFitness<F>>>
 where
-    Spectrometer<V, B, S0, SI, SN, N>: Kernel,
+    Spectrometer<F, W, B, S0, SI, SN, N, D>: Kernel,
 {
     let max_err = F::lossy_from(5e-3f64);
     let max_err_sq = max_err * max_err;
@@ -194,14 +196,24 @@ where
         }
     }
 
+    // -H(D)
+    let h_det = p_dets
+        .iter()
+        .map(|s| s.mean.plog2p())
+        .fold(F::zero(), core::ops::Add::add);
+    // -H(D|Λ)
+    let h_det_l_w = h_det_l_w.mean;
+    // H(D) - H(D|Λ)
+    let info = h_det_l_w - h_det;
+
     let errors: Vec<_> = p_dets
         .iter()
         .map(|s| s.sem())
         .filter(|e| !e.is_finite() || e >= &max_err)
         .collect();
     eprintln!(
-        "cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}",
-        max_err, errors
+        "cuda_fitness error values too large (>={}), consider raising max wavelength count: {:.3?}, {}",
+        max_err, errors, info,
     );
     Ok(None)
 }

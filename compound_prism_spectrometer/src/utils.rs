@@ -52,6 +52,12 @@ macro_rules! primative_lossy_conv {
 
 primative_lossy_conv! { f32, f64, u32, i32 }
 
+impl<T, U> LossyFrom<core::marker::PhantomData<T>> for core::marker::PhantomData<U> {
+    fn lossy_from(_: core::marker::PhantomData<T>) -> Self {
+        core::marker::PhantomData
+    }
+}
+
 impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
     fn lossy_from(t: [T; N]) -> Self {
         t.map(LossyFrom::lossy_from)
@@ -59,6 +65,35 @@ impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
 }
 
 wrapped_from_tuples! { LossyFrom::lossy_from for 0..12 }
+
+pub trait ConstZero {
+    const ZERO: Self;
+}
+
+pub trait ConstOne {
+    const ONE: Self;
+}
+
+pub trait Ring:
+    Sized
+    + ConstZero
+    + ConstOne
+    + core::ops::Neg<Output = Self>
+    + core::ops::Add<Output = Self>
+    + core::ops::Sub<Output = Self>
+    + core::ops::Mul<Output = Self>
+{
+}
+impl<T> Ring for T where
+    T: Sized
+        + ConstZero
+        + ConstOne
+        + core::ops::Neg<Output = Self>
+        + core::ops::Add<Output = Self>
+        + core::ops::Sub<Output = Self>
+        + core::ops::Mul<Output = Self>
+{
+}
 
 pub trait ApproxEq:
     float_eq::FloatEqUlpsEpsilon
@@ -91,11 +126,11 @@ pub trait FloatExt:
     + core::fmt::Debug
     + core::fmt::Display
     + core::fmt::LowerExp
+    + ConstZero
+    + ConstOne
     + ApproxEq
 {
     type BitRepr: 'static + Sized + Copy + core::fmt::Debug + num_traits::Unsigned;
-    const ZERO: Self;
-    const ONE: Self;
 
     fn to_bits(self) -> Self::BitRepr;
     fn from_bits(bits: Self::BitRepr) -> Self;
@@ -132,10 +167,16 @@ pub trait FloatExt:
     }
 }
 
+impl ConstZero for f32 {
+    const ZERO: Self = 0f32;
+}
+
+impl ConstOne for f32 {
+    const ONE: Self = 1f32;
+}
+
 impl FloatExt for f32 {
     type BitRepr = u32;
-    const ZERO: Self = 0f32;
-    const ONE: Self = 1f32;
 
     fn to_bits(self) -> Self::BitRepr {
         self.to_bits()
@@ -146,19 +187,20 @@ impl FloatExt for f32 {
     }
 
     fn copy_sign(self, other: Self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        unsafe {
-            core::intrinsics::copysignf32(self, other)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
         libm::copysignf(self, other)
     }
 }
 
+impl ConstZero for f64 {
+    const ZERO: Self = 0f64;
+}
+
+impl ConstOne for f64 {
+    const ONE: Self = 1f64;
+}
+
 impl FloatExt for f64 {
     type BitRepr = u64;
-    const ZERO: Self = 0f64;
-    const ONE: Self = 1f64;
 
     fn to_bits(self) -> Self::BitRepr {
         self.to_bits()
@@ -169,11 +211,6 @@ impl FloatExt for f64 {
     }
 
     fn copy_sign(self, other: Self) -> Self {
-        #[cfg(target_arch = "nvptx64")]
-        unsafe {
-            core::intrinsics::copysignf64(self, other)
-        }
-        #[cfg(not(target_arch = "nvptx64"))]
         libm::copysign(self, other)
     }
 }
@@ -200,13 +237,21 @@ impl<F: Copy + LossyInto<f64>> LossyInto<f64> for nvptx_sys::FastFloat<F> {
 }
 
 #[cfg(target_arch = "nvptx64")]
+impl<F: ConstZero> ConstZero for nvptx_sys::FastFloat<F> {
+    const ZERO: Self = nvptx_sys::FastFloat(F::ZERO);
+}
+
+#[cfg(target_arch = "nvptx64")]
+impl<F: ConstOne> ConstOne for nvptx_sys::FastFloat<F> {
+    const ONE: Self = nvptx_sys::FastFloat(F::ONE);
+}
+
+#[cfg(target_arch = "nvptx64")]
 impl<F: nvptx_sys::FastNum + FloatExt> FloatExt for nvptx_sys::FastFloat<F>
 where
     <F as float_eq::FloatEqUlpsEpsilon>::UlpsEpsilon: Sized,
 {
     type BitRepr = F::BitRepr;
-    const ZERO: Self = nvptx_sys::FastFloat(F::ZERO);
-    const ONE: Self = nvptx_sys::FastFloat(F::ONE);
 
     fn to_bits(self) -> Self::BitRepr {
         <F as FloatExt>::to_bits(self.0)

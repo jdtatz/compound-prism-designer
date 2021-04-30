@@ -1,7 +1,7 @@
-use crate::geom::*;
+use crate::geometry::*;
 use crate::glasscat::Glass;
-use crate::qrng::QuasiRandom;
 use crate::utils::*;
+use crate::vector::{UnitVector, Vector};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -24,56 +24,43 @@ impl From<RayTraceError> for &'static str {
     }
 }
 
-pub trait Beam {
-    type Vector: Vector;
-    type Quasi: QuasiRandom<Scalar = <Self::Vector as Vector>::Scalar>;
-
-    fn inverse_cdf_wavelength(
-        &self,
-        p: <Self::Vector as Vector>::Scalar,
-    ) -> <Self::Vector as Vector>::Scalar;
-    fn inverse_cdf_ray(&self, q: Self::Quasi) -> Ray<Self::Vector>;
-}
-
-pub trait DetectorArray<Point: Vector, UnitVector: Vector = Point>:
-    Surface<Point, UnitVector>
-{
+pub trait DetectorArray<T, const D: usize>: Surface<T, D> {
     fn bin_count(&self) -> u32;
-    fn length(&self) -> <Point as Vector>::Scalar;
-    fn bin_index(&self, intersection: Point) -> Option<u32>;
+    fn length(&self) -> T;
+    fn bin_index(&self, intersection: Vector<T, D>) -> Option<u32>;
 }
 
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct CompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>
-{
+pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
     /// First glass
-    glass0: Glass<V::Scalar, 6>,
+    glass0: Glass<T, 6>,
     /// First boundary surface
     surface0: S0,
     /// List of glasses the compound prism is composed of, in order
-    glasses: [Glass<V::Scalar, 6>; N],
+    glasses: [Glass<T, 6>; N],
     /// Inter-media boundary surfaces
     isurfaces: [SI; N],
     /// Final boundary surface
     surfaceN: SN,
     /// Height of compound prism
-    pub(crate) height: V::Scalar,
+    pub(crate) height: T,
     /// Width of compound prism
-    pub(crate) width: V::Scalar,
+    pub(crate) width: T,
     /// Are the inter-media surfaces coated(anti-reflective)?
     #[wrapped_from(skip)]
     ar_coated: bool,
 }
 
-pub type PlanerCompoundPrism<V, const N: usize> = CompoundPrism<V, Plane<V>, Plane<V>, Plane<V>, N>;
-pub type CompoundPrismLensLast<V, const N: usize> =
-    CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane<V>, N>;
-pub type CompoundPrismBothLens<V, const N: usize> =
-    CompoundPrism<V, CurvedPlane<V>, Plane<V>, CurvedPlane<V>, N>;
+// pub type PlanerCompoundPrism<V, const N: usize> = CompoundPrism<V, Plane<V>, Plane<V>, Plane<V>, N>;
+// pub type CompoundPrismLensLast<V, const N: usize> =
+//     CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane<V>, N>;
+// pub type CompoundPrismBothLens<V, const N: usize> =
+//     CompoundPrism<V, CurvedPlane<V>, Plane<V>, CurvedPlane<V>, N>;
 
-impl<V: Vector, const N: usize> CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane<V>, N> {
+#[cfg(not(target_arch = "nvptx64"))]
+impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, CurvedPlane<T>, N, 2> {
     /// Create a new Compound Prism Specification
     ///
     /// # Arguments
@@ -85,18 +72,22 @@ impl<V: Vector, const N: usize> CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane
     ///  * `width` - Width of compound prism
     ///  * `coat` - Coat the compound prism surfaces with anti-reflective coating
     pub fn new(
-        glass0: Glass<V::Scalar, 6>,
-        glasses: [Glass<V::Scalar, 6>; N],
-        first_angle: V::Scalar,
-        angles: [V::Scalar; N],
-        last_angle: V::Scalar,
-        first_length: V::Scalar,
-        lengths: [V::Scalar; N],
-        curvature: V::Scalar,
-        height: V::Scalar,
-        width: V::Scalar,
+        glass0: Glass<T, 6>,
+        glasses: [Glass<T, 6>; N],
+        first_angle: T,
+        angles: [T; N],
+        last_angle: T,
+        first_length: T,
+        lengths: [T; N],
+        curvature: T,
+        height: T,
+        width: T,
         coat: bool,
     ) -> Self {
+        let prism_bounds = PrismBounds {
+            height,
+            half_width: width * T::lossy_from(0.5f64),
+        };
         let (surface0, isurfaces, last_surface) = create_joined_trapezoids(
             height,
             first_angle,
@@ -105,7 +96,10 @@ impl<V: Vector, const N: usize> CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane
             first_length,
             lengths,
         );
-        let surfaceN = CurvedPlane::new(curvature, height, last_surface);
+        let surface0 = Plane::new(surface0, prism_bounds);
+        let isurfaces = isurfaces.map(|s| Plane::new(s, prism_bounds));
+        let chord_length = last_surface.normal.sec_xy(height).abs();
+        let surfaceN = CurvedPlane::from_hyperplane(last_surface, (chord_length, curvature));
         Self {
             glass0,
             glasses,
@@ -119,117 +113,154 @@ impl<V: Vector, const N: usize> CompoundPrism<V, Plane<V>, Plane<V>, CurvedPlane
     }
 
     #[cfg(feature = "std")]
-    pub fn polygons(&self) -> (Vec<[V; 4]>, [V; 4], V, V::Scalar) {
+    pub fn polygons(&self) -> (Vec<[Vector<T, 2>; 4]>, [Vector<T, 2>; 4], Vector<T, 2>, T) {
+        // TODO make this a const-size array
         let mut poly = Vec::with_capacity(N);
-        let (mut u0, mut l0) = self.surface0.end_points(self.height);
+        let [mut u0, mut l0] = self.surface0.end_points(self.height);
         for s in self.isurfaces.iter() {
-            let (u1, l1) = s.end_points(self.height);
+            let [u1, l1] = s.end_points(self.height);
             poly.push([l0, u0, u1, l1]);
             u0 = u1;
             l0 = l1;
         }
-        let (u1, l1) = self.surfaceN.end_points(self.height);
+        let [u1, l1] = self.surfaceN.end_points(self.height);
         (
             poly,
             [l0, u0, u1, l1],
-            self.surfaceN.center,
-            self.surfaceN.radius,
+            self.surfaceN.surface.center,
+            self.surfaceN.surface.radius,
         )
     }
 }
 
 /// Light Ray
 #[derive(Constructor, Debug, PartialEq, Clone, Copy)]
-pub struct Ray<V: Vector> {
+pub struct Ray<T, const D: usize> {
     /// Origin position vector
-    pub origin: V,
+    pub origin: Vector<T, D>,
     /// Unit normal direction vector
-    pub direction: V,
+    pub direction: UnitVector<T, D>,
     /// S-Polarization Transmittance probability
-    s_transmittance: V::Scalar,
+    s_transmittance: T,
     /// P-Polarization Transmittance probability
-    p_transmittance: V::Scalar,
+    p_transmittance: T,
 }
 
-impl<V: Vector> Ray<V> {
+impl<T: FloatExt, const D: usize> Ray<T, D> {
+    /// Create a new unpolarized ray with full transmittance
+    ///
+    /// # Arguments
+    ///  * `origin` - the initial y value of the ray's position
+    ///  * `direction` - the initial y value of the ray's position
+    pub fn new_unpolarized(origin: Vector<T, D>, direction: UnitVector<T, D>) -> Self {
+        Ray {
+            origin,
+            direction,
+            s_transmittance: T::one(),
+            p_transmittance: T::one(),
+        }
+    }
+
     /// Create a new unpolarized ray with full transmittance with a origin at (0, `y`) and a
     /// direction of (1, 0)
     ///
     /// # Arguments
     ///  * `y` - the initial y value of the ray's position
-    pub fn new_from_start(y: V::Scalar) -> Self {
+    pub fn new_from_start(y: T) -> Self {
+        let mut origin = Vector::ZERO;
+        origin[1] = y;
+        let mut direction = Vector::ZERO;
+        direction[0] = T::one();
         Ray {
-            origin: V::from_xy(V::Scalar::zero(), y),
-            direction: V::from_xy(V::Scalar::one(), V::Scalar::zero()),
-            s_transmittance: V::Scalar::one(),
-            p_transmittance: V::Scalar::one(),
+            origin,
+            direction: UnitVector::new(direction),
+            s_transmittance: T::one(),
+            p_transmittance: T::one(),
         }
     }
 
-    /// Create a new unpolarized ray with full transmittance with a origin at (0, `y`) and a
-    /// direction of (angle_cosine, angle_sine)
-    ///
-    /// # Arguments
-    ///  * `y` - the initial y value of the ray's position
-    ///  * `angle_sine` - the sine of the angle that the ray is rotated from the axis
-    pub fn new_from_start_at_angle(y: V::Scalar, angle_sine: V::Scalar) -> Self {
+    pub fn translate(self, distance: T) -> Self {
+        let Ray {
+            origin,
+            direction,
+            s_transmittance,
+            p_transmittance,
+        } = self;
         Ray {
-            origin: V::from_xy(V::Scalar::zero(), y),
-            direction: V::from_xy((V::Scalar::one() - angle_sine.sqr()).sqrt(), angle_sine),
-            s_transmittance: V::Scalar::one(),
-            p_transmittance: V::Scalar::one(),
+            origin: direction.mul_add(distance, origin),
+            direction,
+            s_transmittance,
+            p_transmittance,
         }
     }
 
     /// The average of the S & P Polarizations transmittance's
-    pub fn average_transmittance(self) -> V::Scalar {
-        (self.s_transmittance + self.p_transmittance) * V::Scalar::lossy_from(0.5f64)
+    pub fn average_transmittance(self) -> T {
+        (self.s_transmittance + self.p_transmittance) * T::lossy_from(0.5f64)
     }
 
     /// Refract ray through interface of two different media
     /// using vector form of snell's law
     ///
     /// # Arguments
-    ///  * `intersection` - point of intersection between the media
     ///  * `normal` - the unit normal vector of the interface
     ///  * `ci` - cosine of incident angle
     ///  * `n1` - index of refraction of the current media
     ///  * `n2` - index of refraction of the new media
     pub fn refract(
         self,
-        intersection: V,
-        normal: V,
-        n1: V::Scalar,
-        n2: V::Scalar,
+        normal: UnitVector<T, D>,
+        n1: T,
+        n2: T,
         ar_coated: bool,
     ) -> Result<Self, RayTraceError> {
-        debug_assert!(n1 >= V::Scalar::one());
-        debug_assert!(n2 >= V::Scalar::one());
-        debug_assert!(normal.check_unit());
-        let ci = -self.direction.dot(normal);
+        debug_assert!(n1 >= T::one());
+        debug_assert!(n2 >= T::one());
+        debug_assert!(normal.is_unit());
+        debug_assert!(self.direction.is_unit());
+        let ci = -self.direction.dot(*normal);
+        debug_assert!(
+            T::zero() <= ci && ci <= T::one(),
+            "-dot({:?}, {:?}) = {} is outside of valid range [0, 1]",
+            self.direction,
+            normal,
+            ci
+        );
         let r = n1 / n2;
-        let cr_sq = V::Scalar::one() - r.sqr() * (V::Scalar::one() - ci.sqr());
-        if cr_sq < V::Scalar::zero() {
+        let cr_sq = T::one() - r.sqr() * (T::one() - ci.sqr());
+        if cr_sq < T::zero() {
             return Err(RayTraceError::TotalInternalReflection);
         }
         let cr = cr_sq.sqrt();
-        let v = self.direction * r + normal * (r * ci - cr);
-        let (s_transmittance, p_transmittance) = if ar_coated && ci > V::Scalar::lossy_from(0.5f64)
-        {
+        debug_assert!(T::zero() <= cr && cr <= T::one());
+        let v = UnitVector::new((self.direction.0) * r + (normal.0) * (r * ci - cr));
+        let (s_transmittance, p_transmittance) = if ar_coated && ci > T::lossy_from(0.5f64) {
             (
-                self.s_transmittance * V::Scalar::lossy_from(0.99f64),
-                self.p_transmittance * V::Scalar::lossy_from(0.99f64),
+                self.s_transmittance * T::lossy_from(0.99f64),
+                self.p_transmittance * T::lossy_from(0.99f64),
             )
         } else {
-            let fresnel_rs = (n1 * ci - n2 * cr) / (n1 * ci + n2 * cr);
-            let fresnel_rp = (n1 * cr - n2 * ci) / (n1 * cr + n2 * ci);
+            let fresnel_rs = ((n1 * ci - n2 * cr) / (n1 * ci + n2 * cr)).sqr();
+            let fresnel_rp = ((n1 * cr - n2 * ci) / (n1 * cr + n2 * ci)).sqr();
+            debug_assert!(
+                T::zero() <= fresnel_rs && fresnel_rs <= T::one(),
+                "fresnel_rs = {} is outside of valid range [0, 1]",
+                fresnel_rs
+            );
+            debug_assert!(
+                T::zero() <= fresnel_rp && fresnel_rp <= T::one(),
+                "fresnel_rp = {} is outside of valid range [0, 1]",
+                fresnel_rp
+            );
             (
-                self.s_transmittance * (V::Scalar::one() - fresnel_rs.sqr()),
-                self.p_transmittance * (V::Scalar::one() - fresnel_rp.sqr()),
+                self.s_transmittance * (T::one() - fresnel_rs),
+                self.p_transmittance * (T::one() - fresnel_rp),
             )
         };
+        debug_assert!(T::zero() <= s_transmittance && s_transmittance <= T::one());
+        debug_assert!(T::zero() <= p_transmittance && p_transmittance <= T::one());
         Ok(Self {
-            origin: intersection,
+            origin: self.origin,
             direction: v,
             s_transmittance,
             p_transmittance,
@@ -244,11 +275,15 @@ impl<V: Vector> Ray<V> {
     ///  * `detector` - detector array specification
     fn intersect_detector_array(
         self,
-        detector: &impl DetectorArray<V>,
-    ) -> Result<(V, u32, V::Scalar), RayTraceError> {
-        let (p, _n) = detector
-            .intersection((self.origin, self.direction))
+        detector: &(impl Copy + DetectorArray<T, D>),
+    ) -> Result<(Vector<T, D>, u32, T), RayTraceError> {
+        let GeometricRayIntersection { distance, .. } = detector
+            .intersection(GeometricRay {
+                origin: self.origin,
+                direction: self.direction,
+            })
             .ok_or(RayTraceError::SpectrometerAngularResponseTooWeak)?;
+        let p = self.direction.mul_add(distance, self.origin);
         let bin_idx = detector
             .bin_index(p)
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
@@ -260,22 +295,29 @@ impl<V: Vector> Ray<V> {
     /// # Arguments
     ///  * `cmpnd` - the compound prism specification
     ///  * `wavelength` - the wavelength of the light ray
-    pub fn propagate_internal<S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>(
+    pub fn propagate_internal<
+        S0: Copy + Surface<T, D>,
+        SI: Copy + Surface<T, D>,
+        SN: Copy + Surface<T, D>,
+        const N: usize,
+    >(
         self,
-        cmpnd: &CompoundPrism<V, S0, SI, SN, N>,
-        wavelength: V::Scalar,
+        cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
+        wavelength: T,
     ) -> Result<Self, RayTraceError> {
         let mut ray = self;
-        let mut n1 = V::Scalar::one();
+        let mut n1 = T::one();
 
         let glass = cmpnd.glass0;
         let surf = cmpnd.surface0;
         let n2 = glass.calc_n(wavelength);
-        debug_assert!(n2 >= V::Scalar::one());
-        let (p, normal) = surf
-            .intersection((ray.origin, ray.direction))
+        debug_assert!(n2 >= T::one());
+        let GeometricRayIntersection { distance, normal } = surf
+            .intersection(ray.into())
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
-        ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+        ray = ray
+            .translate(distance)
+            .refract(normal, n1, n2, cmpnd.ar_coated)?;
         n1 = n2;
 
         // for (glass, plane) in core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces)) {
@@ -283,19 +325,22 @@ impl<V: Vector> Ray<V> {
             let glass = cmpnd.glasses[i];
             let plane = cmpnd.isurfaces[i];
             let n2 = glass.calc_n(wavelength);
-            debug_assert!(n2 >= V::Scalar::one());
-            let (p, normal) = plane
-                .intersection((ray.origin, ray.direction))
+            debug_assert!(n2 >= T::one());
+            let GeometricRayIntersection { distance, normal } = plane
+                .intersection(ray.into())
                 .ok_or(RayTraceError::NoSurfaceIntersection)?;
-            ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+            ray = ray
+                .translate(distance)
+                .refract(normal, n1, n2, cmpnd.ar_coated)?;
             n1 = n2;
         }
-        let n2 = V::Scalar::one();
-        let (p, normal) = cmpnd
+        let n2 = T::one();
+        let GeometricRayIntersection { distance, normal } = cmpnd
             .surfaceN
-            .intersection((ray.origin, ray.direction))
+            .intersection(ray.into())
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
-        ray.refract(p, normal, n1, n2, cmpnd.ar_coated)
+        ray.translate(distance)
+            .refract(normal, n1, n2, cmpnd.ar_coated)
     }
 
     /// Propagate a ray of `wavelength` through the compound prism and
@@ -306,12 +351,17 @@ impl<V: Vector> Ray<V> {
     ///  * `wavelength` - the wavelength of the light ray
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
-    pub fn propagate<S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>(
+    pub fn propagate<
+        S0: Copy + Surface<T, D>,
+        SI: Copy + Surface<T, D>,
+        SN: Copy + Surface<T, D>,
+        const N: usize,
+    >(
         self,
-        wavelength: V::Scalar,
-        cmpnd: &CompoundPrism<V, S0, SI, SN, N>,
-        detector: &impl DetectorArray<V>,
-    ) -> Result<(u32, V::Scalar), RayTraceError> {
+        wavelength: T,
+        cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
+        detector: &(impl Copy + DetectorArray<T, D>),
+    ) -> Result<(u32, T), RayTraceError> {
         let (_, idx, t) = self
             .propagate_internal(cmpnd, wavelength)?
             .intersect_detector_array(detector)?;
@@ -327,46 +377,57 @@ impl<V: Vector> Ray<V> {
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
     #[cfg(not(target_arch = "nvptx64"))]
-    pub fn trace<S0: Surface<V>, SI: Surface<V>, SN: Surface<V>, const N: usize>(
+    pub fn trace<
+        S0: Copy + Surface<T, D>,
+        SI: Copy + Surface<T, D>,
+        SN: Copy + Surface<T, D>,
+        const N: usize,
+    >(
         self,
-        wavelength: V::Scalar,
-        cmpnd: CompoundPrism<V, S0, SI, SN, N>,
-        detector: impl DetectorArray<V> + Copy,
-    ) -> impl Iterator<Item = Result<V, RayTraceError>> {
+        wavelength: T,
+        cmpnd: CompoundPrism<T, S0, SI, SN, N, D>,
+        detector: impl DetectorArray<T, D> + Copy,
+    ) -> impl Iterator<Item = Result<Vector<T, D>, RayTraceError>> {
         let mut ray = self;
-        let mut n1 = V::Scalar::one();
+        let mut n1 = T::one();
         let mut prism0 = Some((cmpnd.glass0, cmpnd.surface0));
         let mut prisms = core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces));
         let mut internal = true;
         let mut done = false;
-        let mut propagation_fn = move || -> Result<Option<V>, RayTraceError> {
-            if let Some((glass, plane)) = prism0.take() {
+        let mut propagation_fn = move || -> Result<Option<_>, RayTraceError> {
+            if let Some((glass, surf)) = prism0.take() {
                 let n2 = glass.calc_n(wavelength);
-                let (p, normal) = plane
-                    .intersection((ray.origin, ray.direction))
-                    .ok_or(RayTraceError::NoSurfaceIntersection)?;
-                ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                let GeometricRayIntersection { distance, normal } =
+                    surf.intersection(ray.into())
+                        .ok_or(RayTraceError::NoSurfaceIntersection)?;
+                ray = ray
+                    .translate(distance)
+                    .refract(normal, n1, n2, cmpnd.ar_coated)?;
                 n1 = n2;
                 return Ok(Some(ray.origin));
             }
             match prisms.next() {
-                Some((glass, plane)) => {
+                Some((glass, surf)) => {
                     let n2 = glass.calc_n(wavelength);
-                    let (p, normal) = plane
-                        .intersection((ray.origin, ray.direction))
+                    let GeometricRayIntersection { distance, normal } = surf
+                        .intersection(ray.into())
                         .ok_or(RayTraceError::NoSurfaceIntersection)?;
-                    ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                    ray = ray
+                        .translate(distance)
+                        .refract(normal, n1, n2, cmpnd.ar_coated)?;
                     n1 = n2;
                     Ok(Some(ray.origin))
                 }
                 None if !done && internal => {
                     internal = false;
-                    let n2 = V::Scalar::one();
-                    let (p, normal) = cmpnd
+                    let n2 = T::one();
+                    let GeometricRayIntersection { distance, normal } = cmpnd
                         .surfaceN
-                        .intersection((ray.origin, ray.direction))
+                        .intersection(ray.into())
                         .ok_or(RayTraceError::NoSurfaceIntersection)?;
-                    ray = ray.refract(p, normal, n1, n2, cmpnd.ar_coated)?;
+                    ray = ray
+                        .translate(distance)
+                        .refract(normal, n1, n2, cmpnd.ar_coated)?;
                     Ok(Some(ray.origin))
                 }
                 None if !done && !internal => {
@@ -380,5 +441,14 @@ impl<V: Vector> Ray<V> {
         };
         core::iter::once(Ok(self.origin))
             .chain(core::iter::from_fn(move || propagation_fn().transpose()).fuse())
+    }
+}
+
+impl<T, const D: usize> From<Ray<T, D>> for GeometricRay<T, D> {
+    fn from(ray: Ray<T, D>) -> Self {
+        let Ray {
+            origin, direction, ..
+        } = ray;
+        Self { origin, direction }
     }
 }
