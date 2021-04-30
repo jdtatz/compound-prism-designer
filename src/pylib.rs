@@ -1,7 +1,6 @@
 use compound_prism_spectrometer::*;
 use core::convert::TryInto;
-use ndarray::array;
-use ndarray::prelude::Array2;
+use ndarray::{array, Array2};
 use numpy::{PyArray1, PyArray2, ToPyArray};
 use pyo3::{
     create_exception,
@@ -173,8 +172,8 @@ macro_rules! define_sized_compound_prism {
     ([$($n:literal),+]) => {
         paste::paste! {
             #[derive(Debug, Clone, Copy, From)]
-            enum SizedCompoundPrism<V: Vector, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>> {
-                $( [<CompoundPrism $n>](CompoundPrism<V,S0, SI, SN, $n>) ),*
+            enum SizedCompoundPrism<F: FloatExt, S0: Surface<F, 2>, SI: Surface<F, 2>, SN: Surface<F, 2>> {
+                $( [<CompoundPrism $n>](CompoundPrism<F, S0, SI, SN, $n, 2>) ),*
             }
         }
     };
@@ -213,9 +212,16 @@ macro_rules! define_sized_spectrometer {
     ([$($n:literal),*]) => {
         paste::paste! {
             #[derive(Debug, Clone, Copy, From, WrappedFrom)]
-            #[wrapped_from(trait = "LossyFrom", function = "lossy_from", bound="V::Scalar: LossyFrom<$V::Scalar>")]
-            enum SizedSpectrometer<V: Vector, B: Beam<Vector=V>, S0: Surface<V>, SI: Surface<V>, SN: Surface<V>> {
-                $( [<Spectrometer $n>](Spectrometer<V, B, S0, SI, SN, $n>) ),*
+            #[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
+            enum SizedSpectrometer<
+                F: FloatExt,
+                W: Distribution<F, Output = F>,
+                B: Distribution<F, Output = Ray<F, 2>>,
+                S0: Surface<F, 2>,
+                SI: Surface<F, 2>,
+                SN: Surface<F, 2>,
+                > {
+                $( [<Spectrometer $n>](Spectrometer<F, W, B, S0, SI, SN, $n, 2>) ),*
             }
         }
     };
@@ -237,15 +243,15 @@ macro_rules! map_sized_spectrometer {
 }
 
 macro_rules! create_sized_spectrometer {
-    ([$($n:literal),*]; $sized_compound_prism:expr; $beam:ident; $detarr:ident) => {
+    ([$($n:literal),*]; $sized_compound_prism:expr; $wavelengths:ident; $beam:ident; $detarr:ident) => {
         paste::paste! {
             match $sized_compound_prism {
-                $(SizedCompoundPrism::[<CompoundPrism $n>](c) => SizedSpectrometer::[<Spectrometer $n>](Spectrometer::new($beam, c, $detarr).map_err(map_ray_trace_err)?),)*
+                $(SizedCompoundPrism::[<CompoundPrism $n>](c) => SizedSpectrometer::[<Spectrometer $n>](Spectrometer::new($wavelengths, $beam, c, $detarr).map_err(map_ray_trace_err)?),)*
             }
         }
     };
-    ($sized_compound_prism:expr; $beam:ident; $detarr:ident) => {
-        call_sized_macro! { create_sized_spectrometer ; $sized_compound_prism; $beam; $detarr }
+    ($sized_compound_prism:expr; $wavelengths:ident; $beam:ident; $detarr:ident) => {
+        call_sized_macro! { create_sized_spectrometer ; $sized_compound_prism; $wavelengths; $beam; $detarr }
     }
 }
 
@@ -253,8 +259,7 @@ macro_rules! create_sized_spectrometer {
 #[text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)"]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
-    compound_prism:
-        SizedCompoundPrism<Pair<f64>, Plane<Pair<f64>>, Plane<Pair<f64>>, CurvedPlane<Pair<f64>>>,
+    compound_prism: SizedCompoundPrism<f64, Plane<f64, 2>, Plane<f64, 2>, CurvedPlane<f64>>,
     #[pyo3(get)]
     glasses: Vec<Py<PyGlass>>,
     #[pyo3(get)]
@@ -353,18 +358,17 @@ impl PyCompoundPrism {
         &'p PyArray1<f64>,
         f64,
     )> {
-        let (polys, lens_poly, lens_center, lens_radius) =
+        let (polys, lens_poly, Vector(lens_center), lens_radius) =
             map_sized_compound_prism!(self.compound_prism => |c| c.polygons());
         let polys = polys
             .into_iter()
-            .map(|[p0, p1, p2, p3]| {
-                (array![[p0.x, p0.y], [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]]).to_pyarray(py)
+            .map(|[Vector(p0), Vector(p1), Vector(p2), Vector(p3)]| {
+                array![p0, p1, p2, p3].to_pyarray(py)
             })
             .collect();
-        let [p0, p1, p2, p3] = lens_poly;
-        let lens_poly =
-            (array![[p0.x, p0.y], [p1.x, p1.y], [p2.x, p2.y], [p3.x, p3.y]]).to_pyarray(py);
-        let lens_center = PyArray1::from_slice(py, &[lens_center.x, lens_center.y]);
+        let [Vector(p0), Vector(p1), Vector(p2), Vector(p3)] = lens_poly;
+        let lens_poly = array![p0, p1, p2, p3].to_pyarray(py);
+        let lens_center = PyArray1::from_slice(py, &lens_center);
         Ok((polys, lens_poly, lens_center, lens_radius))
     }
 }
@@ -392,7 +396,7 @@ impl PyObjectProtocol for PyCompoundPrism {
 #[text_signature = "(bin_count, bin_size, linear_slope, linear_intercept, length, max_incident_angle, angle)"]
 #[derive(Debug, Clone)]
 struct PyDetectorArray {
-    detector_array: LinearDetectorArray<Pair<f64>>,
+    detector_array: LinearDetectorArray<f64, 2>,
     #[pyo3(get)]
     bin_count: u32,
     #[pyo3(get)]
@@ -466,7 +470,8 @@ impl PyObjectProtocol for PyDetectorArray {
 #[text_signature = "(wavelength_range, width, y_mean)"]
 #[derive(Debug, Clone)]
 struct PyGaussianBeam {
-    gaussian_beam: GaussianBeam<f64, UniformDistribution<f64>>,
+    wavelengths: UniformDistribution<f64>,
+    gaussian_beam: GaussianBeam<f64, 2>,
     #[pyo3(get)]
     wavelength_range: (f64, f64),
     #[pyo3(get)]
@@ -482,11 +487,12 @@ impl PyGaussianBeam {
         let gaussian_beam = GaussianBeam {
             width,
             y_mean,
+            marker: core::marker::PhantomData,
+        };
+        PyGaussianBeam {
             wavelengths: UniformDistribution {
                 bounds: wavelength_range,
             },
-        };
-        PyGaussianBeam {
             gaussian_beam,
             wavelength_range,
             width,
@@ -517,11 +523,12 @@ impl PyObjectProtocol for PyGaussianBeam {
 #[derive(Debug, Clone)]
 struct PySpectrometer {
     spectrometer: SizedSpectrometer<
-        Pair<f64>,
-        GaussianBeam<f64, UniformDistribution<f64>>,
-        Plane<Pair<f64>>,
-        Plane<Pair<f64>>,
-        CurvedPlane<Pair<f64>>,
+        f64,
+        UniformDistribution<f64>,
+        GaussianBeam<f64, 2>,
+        Plane<f64, 2>,
+        Plane<f64, 2>,
+        CurvedPlane<f64>,
     >,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
@@ -550,15 +557,16 @@ impl PySpectrometer {
         py: Python,
     ) -> PyResult<Self> {
         let gb = gaussian_beam.as_ref(py).try_borrow()?.gaussian_beam;
+        let w = gaussian_beam.as_ref(py).try_borrow()?.wavelengths;
         let da = detector_array.as_ref(py).try_borrow()?.detector_array;
         let scp = compound_prism.as_ref(py).try_borrow()?.compound_prism;
-        let spectrometer = create_sized_spectrometer!(scp; gb; da);
+        let spectrometer = create_sized_spectrometer!(scp; w; gb; da);
         Ok(PySpectrometer {
             compound_prism,
             detector_array,
             gaussian_beam,
-            position: map_sized_spectrometer!(spectrometer => |s| (s.detector.1.position.x, s.detector.1.position.y)),
-            direction: map_sized_spectrometer!(spectrometer => |s| (s.detector.1.direction.x, s.detector.1.direction.y)),
+            position: map_sized_spectrometer!(spectrometer => |s| (s.detector.1.position[0], s.detector.1.position[1])),
+            direction: map_sized_spectrometer!(spectrometer => |s| (s.detector.1.direction[0], s.detector.1.direction[1])),
             spectrometer,
         })
     }
@@ -612,7 +620,7 @@ impl PySpectrometer {
     ) -> PyResult<&'p PyArray2<f64>> {
         let spec = &self.spectrometer;
         Ok(Array2::from(
-            map_sized_spectrometer!(spec => |s| s.trace_ray_path(wavelength, inital_y).map(|r| r.map(|p| [p.x, p.y]))
+            map_sized_spectrometer!(spec => |s| s.trace_ray_path(wavelength, inital_y).map(|r| r.map(|Vector(p)| p))
             .collect::<Result<Vec<_>, _>>())
             .map_err(map_ray_trace_err)?,
         )
@@ -633,8 +641,7 @@ impl PySpectrometer {
     ) -> PyResult<Option<PyDesignFitness>> {
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
-        let spec: SizedSpectrometer<Pair<f32>, _, _, _, _> =
-            LossyFrom::lossy_from(self.spectrometer);
+        let spec: SizedSpectrometer<f32, _, _, _, _, _> = LossyFrom::lossy_from(self.spectrometer);
         let fit = py.allow_threads(||
             map_sized_spectrometer!(spec => |spec| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))).map_err(map_cuda_err)?;
         Ok(fit.map(Into::into))

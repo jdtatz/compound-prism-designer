@@ -2,9 +2,9 @@ use core::{marker::PhantomData, ops::*};
 
 use crate::utils::*;
 
-pub trait Distribution {
-    type Item;
-    fn inverse_cdf(&self, p: Self::Item) -> Self::Item;
+pub trait Distribution<T> {
+    type Output;
+    fn inverse_cdf(&self, p: T) -> Self::Output;
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
@@ -13,10 +13,9 @@ pub struct DiracDeltaDistribution<T> {
     pub value: T,
 }
 
-impl<T: Copy> Distribution for DiracDeltaDistribution<T> {
-    type Item = T;
-
-    fn inverse_cdf(&self, _p: Self::Item) -> Self::Item {
+impl<T: Copy> Distribution<T> for DiracDeltaDistribution<T> {
+    type Output = T;
+    fn inverse_cdf(&self, _p: T) -> Self::Output {
         self.value
     }
 }
@@ -27,13 +26,13 @@ pub struct UniformDistribution<T> {
     pub bounds: (T, T),
 }
 
-impl<T> Distribution for UniformDistribution<T>
+impl<T> Distribution<T> for UniformDistribution<T>
 where
     T: Sized + Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
 {
-    type Item = T;
+    type Output = T;
 
-    fn inverse_cdf(&self, p: Self::Item) -> Self::Item {
+    fn inverse_cdf(&self, p: T) -> Self::Output {
         self.bounds.0 + (self.bounds.1 - self.bounds.0) * p
     }
 }
@@ -45,10 +44,10 @@ pub struct NormalDistribution<T> {
     pub stddev: T,
 }
 
-impl<F: FloatExt> Distribution for NormalDistribution<F> {
-    type Item = F;
+impl<F: FloatExt> Distribution<F> for NormalDistribution<F> {
+    type Output = F;
 
-    fn inverse_cdf(&self, p: Self::Item) -> Self::Item {
+    fn inverse_cdf(&self, p: F) -> Self::Output {
         self.mean + self.stddev * crate::erf::fast_norminv(p)
     }
 }
@@ -59,10 +58,10 @@ pub struct UserDistribution<T, F: Fn(T) -> T> {
     pub marker: PhantomData<T>,
 }
 
-impl<T, F: Fn(T) -> T> Distribution for UserDistribution<T, F> {
-    type Item = T;
+impl<T, F: Fn(T) -> T> Distribution<T> for UserDistribution<T, F> {
+    type Output = T;
 
-    fn inverse_cdf(&self, p: Self::Item) -> Self::Item {
+    fn inverse_cdf(&self, p: T) -> Self::Output {
         (self.quantile)(p)
     }
 }

@@ -123,14 +123,15 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         pmt_length,
     );
 
+    let wavelengths = UniformDistribution {
+        bounds: (0.5, 0.82),
+    };
     let beam = GaussianBeam {
         width: 0.2,
         y_mean: 0.95,
-        wavelengths: UniformDistribution {
-            bounds: (0.5, 0.82),
-        },
+        marker: core::marker::PhantomData,
     };
-    let spec = Spectrometer::new(beam, prism, detarr).unwrap();
+    let spec = Spectrometer::new(wavelengths, beam, prism, detarr).unwrap();
     let cpu_fitness = fitness(&spec, 16_384, 16_384);
     let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
         .unwrap()

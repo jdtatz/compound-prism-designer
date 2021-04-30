@@ -4,8 +4,8 @@
 #![feature(abi_ptx, asm)]
 
 use compound_prism_spectrometer::{
-    Beam, CurvedPlane, DetectorArray, Float, FloatExt, GaussianBeam, Pair, Plane, Qrng,
-    Spectrometer, Surface, UniformDistribution, Vector, Welford,
+    CurvedPlane, DetectorArray, Distribution, Float, FloatExt, GaussianBeam, Plane, Qrng, Ray,
+    Spectrometer, Surface, UniformDistribution, Welford,
 };
 use core::slice::from_raw_parts_mut;
 use nvptx_sys::{
@@ -100,16 +100,17 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
 
 unsafe fn kernel<
     F: CudaFloat,
-    V: Vector<Scalar = F>,
-    B: Beam<Vector = V>,
-    S0: Surface<V>,
-    SI: Surface<V>,
-    SN: Surface<V>,
+    W: Copy + Distribution<F, Output = F>,
+    B: Copy + Distribution<F, Output = Ray<F, D>>,
+    S0: Copy + Surface<F, D>,
+    SI: Copy + Surface<F, D>,
+    SN: Copy + Surface<F, D>,
     const N: usize,
+    const D: usize,
 >(
     seed: F,
     max_evals: u32,
-    spectrometer: &Spectrometer<V, B, S0, SI, SN, N>,
+    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
     probability_ptr: *mut F,
 ) {
     if max_evals == 0 {
@@ -142,7 +143,7 @@ unsafe fn kernel<
     let u = (F::lossy_from(id))
         .mul_add(F::lossy_from(ALPHA), seed)
         .fract();
-    let wavelength = spectrometer.beam.inverse_cdf_wavelength(u);
+    let wavelength = spectrometer.wavelengths.inverse_cdf(u);
 
     let mut count = F::zero();
     let mut index = laneid;
@@ -152,7 +153,7 @@ unsafe fn kernel<
     while index < max_evals {
         count += F::lossy_from(32);
         let q = qrng.next_by(32);
-        let ray = spectrometer.beam.inverse_cdf_ray(q);
+        let ray = spectrometer.beam.inverse_cdf(q);
         let (mut bin_index, t) = ray
             .propagate(
                 wavelength,
@@ -204,20 +205,20 @@ unsafe fn kernel<
 }
 
 macro_rules! gen_kernel {
-    (@inner $fty:ty ; $fname:ident $n:expr) => {
+    (@inner $fty:ty ; $fname:ident $n:literal $d:literal) => {
         paste::paste! {
             #[no_mangle]
-            pub unsafe extern "ptx-kernel" fn  [<prob_dets_given_wavelengths_ $fname _ $n>] (
+            pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $n>] (
                 seed: $fty,
                 max_evals: u32,
-                spectrometer: &Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n>,
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, GaussianBeam<$fty, $d>, Plane<$fty, $d>, Plane<$fty, $d>, CurvedPlane<$fty>, $n, $d>,
                 prob: *mut $fty,
             ) {
                 let shared_spectrometer_ptr;
                 asm!(
                     ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
                     ptr = out(reg64) shared_spectrometer_ptr,
-                    size = const core::mem::size_of::<Spectrometer<Pair<$fty>, GaussianBeam<$fty, UniformDistribution<$fty>>, Plane<Pair<$fty>>, Plane<Pair<$fty>>, CurvedPlane<Pair<$fty>>, $n>>(),
+                    size = const core::mem::size_of::<Spectrometer<$fty, UniformDistribution<$fty>, GaussianBeam<$fty, $d>, Plane<$fty, $d>, Plane<$fty, $d>, CurvedPlane<$fty>, $n, $d>>(),
                     options(readonly, nostack, preserves_flags)
                 );
                 let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
@@ -226,9 +227,9 @@ macro_rules! gen_kernel {
             }
         }
     };
-    ([$($n:expr),*]) => {
-        $( gen_kernel!(@inner FastFloat<f32> ;  f32 $n); )*
-        $( gen_kernel!(@inner FastFloat<f64>; f64 $n); )*
+    ([$($n:literal),*]) => {
+        $( gen_kernel!(@inner FastFloat<f32> ;  f32 $n 2); )*
+        $( gen_kernel!(@inner FastFloat<f64>; f64 $n 2); )*
     };
 }
 
