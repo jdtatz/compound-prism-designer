@@ -306,17 +306,25 @@ impl PyCompoundPrism {
                 "len(glasses) != len(lengths)",
             ));
         }
-        let slengths = lengths.as_slice();
-        let (last_angle, angles_rest) = angles_rest.split_last().unwrap();
+        let sep_lengths = lengths.as_slice();
+        let (last_angle, angles_rest) = angles_rest.split_last().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("`angles` must have at least 2 elements")
+        })?;
+        let initial_plane_parametrization = PlaneParametrization { height, width };
+        let lens_parametrization = CurvedPlaneParametrization {
+            signed_normalized_curvature: curvature,
+            height,
+        };
         let compound_prism = create_sized_compound_prism! { glasses.len() => CompoundPrism::new(
             glasses[0].as_ref(py).borrow().glass,
             pyglasses_to_glasses(py, &glasses[1..]),
             *first_angle,
             angles_rest.try_into().unwrap(),
             *last_angle,
-            slengths[0],
-            slengths[1..].try_into().unwrap(),
-            curvature,
+            sep_lengths[0],
+            sep_lengths[1..].try_into().unwrap(),
+            initial_plane_parametrization,
+            lens_parametrization,
             height,
             width,
             ar_coated,
@@ -358,18 +366,18 @@ impl PyCompoundPrism {
         &'p PyArray1<f64>,
         f64,
     )> {
-        let (polys, lens_poly, Vector(lens_center), lens_radius) =
-            map_sized_compound_prism!(self.compound_prism => |c| c.polygons());
-        let polys = polys
-            .into_iter()
-            .map(|[Vector(p0), Vector(p1), Vector(p2), Vector(p3)]| {
-                array![p0, p1, p2, p3].to_pyarray(py)
-            })
-            .collect();
-        let [Vector(p0), Vector(p1), Vector(p2), Vector(p3)] = lens_poly;
-        let lens_poly = array![p0, p1, p2, p3].to_pyarray(py);
-        let lens_center = PyArray1::from_slice(py, &lens_center);
-        Ok((polys, lens_poly, lens_center, lens_radius))
+        map_sized_compound_prism!(self.compound_prism => |c| {
+            let (polys, lens_poly, Vector(lens_center), lens_radius) = c.polygons();
+            let polys = core::array::IntoIter::new(polys)
+                .map(|[Vector(p0), Vector(p1), Vector(p2), Vector(p3)]| {
+                    array![p0, p1, p2, p3].to_pyarray(py)
+                })
+                .collect();
+            let [Vector(p0), Vector(p1), Vector(p2), Vector(p3)] = lens_poly;
+            let lens_poly = array![p0, p1, p2, p3].to_pyarray(py);
+            let lens_center = PyArray1::from_slice(py, &lens_center);
+            Ok((polys, lens_poly, lens_center, lens_radius))
+        })
     }
 }
 

@@ -59,15 +59,20 @@ pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
 // pub type CompoundPrismBothLens<V, const N: usize> =
 //     CompoundPrism<V, CurvedPlane<V>, Plane<V>, CurvedPlane<V>, N>;
 
-#[cfg(not(target_arch = "nvptx64"))]
-impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, CurvedPlane<T>, N, 2> {
+impl<T: FloatExt, S0, SN, const N: usize, const D: usize>
+    CompoundPrism<T, S0, Plane<T, D>, SN, N, D>
+where
+    S0: Surface<T, D> + FromParametrizedHyperPlane<T, D>,
+    SN: Surface<T, D> + FromParametrizedHyperPlane<T, D>,
+{
     /// Create a new Compound Prism Specification
     ///
     /// # Arguments
     ///  * `glasses` - List of glasses the compound prism is composed of, in order
     ///  * `angles` - Angles that parameterize the shape of the compound prism
     ///  * `lengths` - Lengths that parameterize the trapezoidal shape of the compound prism
-    ///  * `curvature` - Lens Curvature of last surface of compound prism
+    ///  * `s0_parametrization` - First Surface Parametrization
+    ///  * `sn_parametrization` - Final Surface Parametrization
     ///  * `height` - Height of compound prism
     ///  * `width` - Width of compound prism
     ///  * `coat` - Coat the compound prism surfaces with anti-reflective coating
@@ -79,7 +84,8 @@ impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, Cur
         last_angle: T,
         first_length: T,
         lengths: [T; N],
-        curvature: T,
+        s0_parametrization: S0::Parametrization,
+        sn_parametrization: SN::Parametrization,
         height: T,
         width: T,
         coat: bool,
@@ -96,10 +102,9 @@ impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, Cur
             first_length,
             lengths,
         );
-        let surface0 = Plane::new(surface0, prism_bounds);
+        let surface0 = S0::from_hyperplane(surface0, s0_parametrization);
         let isurfaces = isurfaces.map(|s| Plane::new(s, prism_bounds));
-        let chord_length = last_surface.normal.sec_xy(height).abs();
-        let surfaceN = CurvedPlane::from_hyperplane(last_surface, (chord_length, curvature));
+        let surfaceN = SN::from_hyperplane(last_surface, sn_parametrization);
         Self {
             glass0,
             glasses,
@@ -111,21 +116,22 @@ impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, Cur
             ar_coated: coat,
         }
     }
+}
 
-    #[cfg(feature = "std")]
-    pub fn polygons(&self) -> (Vec<[Vector<T, 2>; 4]>, [Vector<T, 2>; 4], Vector<T, 2>, T) {
-        // TODO make this a const-size array
-        let mut poly = Vec::with_capacity(N);
+#[cfg(not(target_arch = "nvptx64"))]
+impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, CurvedPlane<T>, N, 2> {
+    pub fn polygons(&self) -> ([[Vector<T, 2>; 4]; N], [Vector<T, 2>; 4], Vector<T, 2>, T) {
         let [mut u0, mut l0] = self.surface0.end_points(self.height);
-        for s in self.isurfaces.iter() {
+        let polys = self.isurfaces.map(|s| {
             let [u1, l1] = s.end_points(self.height);
-            poly.push([l0, u0, u1, l1]);
+            let poly = [l0, u0, u1, l1];
             u0 = u1;
             l0 = l1;
-        }
+            poly
+        });
         let [u1, l1] = self.surfaceN.end_points(self.height);
         (
-            poly,
+            polys,
             [l0, u0, u1, l1],
             self.surfaceN.surface.center,
             self.surfaceN.surface.radius,

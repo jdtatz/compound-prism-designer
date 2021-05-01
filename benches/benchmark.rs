@@ -96,6 +96,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let [first_angle, angles @ .., last_angle] = angles;
     let lengths = [0_f32; 3];
     let [first_length, lengths @ ..] = lengths;
+    let height = 2.5;
+    let width = 2.0;
     let prism = CompoundPrism::new(
         glass0,
         glasses,
@@ -104,9 +106,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         last_angle,
         first_length,
         lengths,
-        0.21,
-        2.5,
-        2.,
+        PlaneParametrization { height, width },
+        CurvedPlaneParametrization {
+            signed_normalized_curvature: 0.21,
+            height,
+        },
+        height,
+        width,
         false,
     );
 

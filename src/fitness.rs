@@ -219,7 +219,9 @@ mod tests {
         let [first_angle, angles @ .., last_angle] = angles;
         let lengths = [0_f64; 3];
         let [first_length, lengths @ ..] = lengths;
-        let prism = CompoundPrism::new(
+        let height = 2.5;
+        let width = 2.0;
+        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_>, 2, 2>::new(
             glass0,
             glasses,
             first_angle,
@@ -227,9 +229,13 @@ mod tests {
             last_angle,
             first_length,
             lengths,
-            0.21,
-            2.5,
-            2.,
+            PlaneParametrization { height, width },
+            CurvedPlaneParametrization {
+                signed_normalized_curvature: 0.21,
+                height,
+            },
+            height,
+            width,
             false,
         );
 
