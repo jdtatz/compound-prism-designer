@@ -201,16 +201,54 @@ impl<T: FloatExt, P, B: Copy + Bounds<T, 2>> HyperSurface<T, B, 2>
     }
 }
 
-impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N>
-    for SphericalLikeSurface<T, (), N>
-{
-    type Parametrization = (T, T);
+#[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+pub struct PlaneParametrization<T> {
+    pub height: T,
+    pub width: T,
+}
+
+impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N> for Plane<T, N> {
+    type Parametrization = PlaneParametrization<T>;
 
     fn from_hyperplane(
         hyperplane: HyperPlane<T, N>,
         parametrization: Self::Parametrization,
     ) -> Self {
-        let (chord_length, signed_normalized_curvature) = parametrization;
+        let PlaneParametrization { height, width } = parametrization;
+        let bounds = PrismBounds {
+            height,
+            half_width: width * T::lossy_from(0.5_f64),
+        };
+        Self {
+            surface: hyperplane,
+            bounds,
+            marker: core::marker::PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+pub struct CurvedPlaneParametrization<T> {
+    pub signed_normalized_curvature: T,
+    pub height: T,
+}
+
+impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N>
+    for SphericalLikeSurface<T, (), N>
+{
+    type Parametrization = CurvedPlaneParametrization<T>;
+
+    fn from_hyperplane(
+        hyperplane: HyperPlane<T, N>,
+        parametrization: Self::Parametrization,
+    ) -> Self {
+        let CurvedPlaneParametrization {
+            height,
+            signed_normalized_curvature,
+        } = parametrization;
+        let chord_length = hyperplane.normal.sec_xy(height).abs();
         // let signed_curvature = signed_normalized_curvature / (chord_length * T::lossy_from(0.5f64));
         let radius = chord_length * T::lossy_from(0.5f64) / signed_normalized_curvature.abs();
         let apothem = (radius.sqr() - chord_length.sqr() * T::lossy_from(0.25f64)).sqrt();
@@ -229,13 +267,17 @@ impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N>
 }
 
 impl<T: FloatExt> FromParametrizedHyperPlane<T, 2> for CurvedPlane<T> {
-    type Parametrization = (T, T);
+    type Parametrization = CurvedPlaneParametrization<T>;
 
     fn from_hyperplane(
         hyperplane: HyperPlane<T, 2>,
         parametrization: Self::Parametrization,
     ) -> Self {
-        let (chord_length, signed_normalized_curvature) = parametrization;
+        let CurvedPlaneParametrization {
+            height,
+            signed_normalized_curvature,
+        } = parametrization;
+        let chord_length = hyperplane.normal.sec_xy(height).abs();
         // let signed_curvature = signed_normalized_curvature / (chord_length * T::lossy_from(0.5f64));
         let radius = chord_length * T::lossy_from(0.5f64) / signed_normalized_curvature.abs();
         let apothem = (radius.sqr() - chord_length.sqr() * T::lossy_from(0.25f64)).sqrt();
@@ -306,7 +348,7 @@ where
 // TODO needs updating to new Vector impl
 impl<T: FloatExt, const N: usize> Plane<T, N> {
     pub(crate) fn end_points(self, height: T) -> [Vector<T, N>; 2] {
-        let dx = self.surface.point.tan_xy() * height * T::lossy_from(0.5f64);
+        let dx = self.surface.normal.tan_xy() * height * T::lossy_from(0.5f64);
         let ux = self.surface.point.x() - dx;
         let lx = self.surface.point.x() + dx;
         [Vector::from_xy(ux, height), Vector::from_xy(lx, T::ZERO)]

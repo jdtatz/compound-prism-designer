@@ -116,6 +116,15 @@ impl<T: Neg<Output = T>, const N: usize> Neg for Vector<T, N> {
     }
 }
 
+impl<T: Neg<Output = T>, const N: usize> Neg for UnitVector<T, N> {
+    type Output = UnitVector<T, N>;
+
+    fn neg(self) -> Self::Output {
+        // Self(self.0.map(Neg::neg))
+        Self(self.0.map(Neg::neg))
+    }
+}
+
 impl<T: Add<Output = T>, const N: usize> Add<Vector<T, N>> for Vector<T, N> {
     type Output = Vector<T, N>;
 
@@ -159,12 +168,12 @@ impl<T: Copy + Div<Output = T>, const N: usize> Div<T> for Vector<T, N> {
 //     b * (a.dot(b))
 // }
 
-// pub fn oproj<T: Copy + Ring, const N: usize>(
-//     a: Vector<T, N>,
-//     UnitVector(b): UnitVector<T, N>,
-// ) -> Vector<T, N> {
-//     a - b * (a.dot(b))
-// }
+pub fn oproj<T: Copy + Ring, const N: usize>(
+    a: Vector<T, N>,
+    UnitVector(b): UnitVector<T, N>,
+) -> Vector<T, N> {
+    a - b * (a.dot(b))
+}
 
 // pub fn cross_prod_magnitude_sq<T: Copy + Ring, const N: usize>(
 //     a: Vector<T, N>,

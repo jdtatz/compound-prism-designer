@@ -16,9 +16,10 @@ mod geometry;
 mod glasscat;
 mod qrng;
 mod ray;
-#[macro_use]
-mod utils;
+mod roots;
 mod spectrometer;
+mod toric;
+mod utils;
 mod vector;
 mod welford;
 pub use crate::distribution::{

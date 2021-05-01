@@ -83,6 +83,12 @@ pub trait Ring:
     + core::ops::Sub<Output = Self>
     + core::ops::Mul<Output = Self>
 {
+    fn sqr(self) -> Self
+    where
+        Self: Copy,
+    {
+        self * self
+    }
 }
 impl<T> Ring for T where
     T: Sized
