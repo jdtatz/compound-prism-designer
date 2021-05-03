@@ -16,7 +16,7 @@ num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 rustacuda_core = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update" }
 paste = "1.0"
 derive-wrapped-from = { path = "../derive-wrapped-from" }
-float_eq = { version = "0.5", default-features = false }
+float_eq = { version = "0.6", default-features = false }
 
 [target.'cfg(target_arch="nvptx64")'.dependencies]
 nvptx-sys = { git = "https://github.com/jdtatz/nvptx-sys.git" }
