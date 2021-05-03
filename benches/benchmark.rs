@@ -24,7 +24,6 @@ impl criterion::profiler::Profiler for GProf {
         if profile_path.exists() {
             std::fs::remove_file(&profile_path).unwrap();
         }
-        let profile_file = std::fs::File::create(profile_path).unwrap();
 
         let cwd = std::env::current_dir().unwrap();
         let fdir = cwd.join("flamegraphs");
@@ -39,8 +38,7 @@ impl criterion::profiler::Profiler for GProf {
         let profile = report.pprof().unwrap();
         let mut content = Vec::new();
         profile.encode(&mut content).unwrap();
-        profile_file.write_all(&content).unwrap();
-
+        std::fs::write(profile_path, &content).unwrap();
         report.flamegraph(flamegraph_file).unwrap();
     }
 }

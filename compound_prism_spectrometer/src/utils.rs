@@ -102,20 +102,20 @@ impl<T> Ring for T where
 }
 
 pub trait ApproxEq:
-    float_eq::FloatEqUlpsEpsilon
-    + float_eq::FloatEq<Epsilon = Self>
+    float_eq::FloatEqUlpsTol
+    + float_eq::FloatEq<Tol = Self>
     + float_eq::FloatEqDebugUlpsDiff<DebugUlpsDiff = Self::DebugUlpsDiffTy>
-    + float_eq::AssertFloatEq<DebugAbsDiff = Self, DebugEpsilon = Self>
+    + float_eq::AssertFloatEq<DebugAbsDiff = Self, DebugTol = Self>
 {
     type DebugUlpsDiffTy: core::fmt::Debug;
 }
 
 impl<T> ApproxEq for T
 where
-    T: float_eq::FloatEqUlpsEpsilon
-        + float_eq::FloatEq<Epsilon = Self>
+    T: float_eq::FloatEqUlpsTol
+        + float_eq::FloatEq<Tol = Self>
         + float_eq::FloatEqDebugUlpsDiff
-        + float_eq::AssertFloatEq<DebugAbsDiff = Self, DebugEpsilon = Self>,
+        + float_eq::AssertFloatEq<DebugAbsDiff = Self, DebugTol = Self>,
     <T as float_eq::FloatEqDebugUlpsDiff>::DebugUlpsDiff: core::fmt::Debug,
 {
     type DebugUlpsDiffTy = <T as float_eq::FloatEqDebugUlpsDiff>::DebugUlpsDiff;
@@ -255,7 +255,7 @@ impl<F: ConstOne> ConstOne for nvptx_sys::FastFloat<F> {
 #[cfg(target_arch = "nvptx64")]
 impl<F: nvptx_sys::FastNum + FloatExt> FloatExt for nvptx_sys::FastFloat<F>
 where
-    <F as float_eq::FloatEqUlpsEpsilon>::UlpsEpsilon: Sized,
+    <F as float_eq::FloatEqUlpsTol>::UlpsTol: Sized,
 {
     type BitRepr = F::BitRepr;
 
