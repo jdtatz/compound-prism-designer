@@ -160,6 +160,171 @@ impl<F: LossyFrom<f64>> From<PyDesignFitness> for crate::DesignFitness<F> {
     }
 }
 
+#[pyclass(
+    name = "UniformWavelengthDistribution",
+    module = "compound_prism_designer"
+)]
+#[text_signature = "(bounds)"]
+#[derive(Debug, Clone, Copy)]
+struct PyUniformWavelengthDistribution {
+    distribution: UniformDistribution<f64>,
+}
+
+#[pymethods]
+impl PyUniformWavelengthDistribution {
+    #[new]
+    fn create(bounds: (f64, f64)) -> PyResult<Self> {
+        if bounds.1 < bounds.0 {
+            Err(pyo3::exceptions::PyValueError::new_err(
+                "lower bound > upper bound",
+            ))
+        } else {
+            Ok(Self {
+                distribution: UniformDistribution { bounds },
+            })
+        }
+    }
+
+    fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
+        (self.distribution.bounds,)
+    }
+
+    #[getter]
+    fn get_bounds(&self) -> impl IntoPy<PyObject> {
+        self.distribution.bounds
+    }
+}
+
+#[derive(Debug, Clone, Copy, FromPyObject)]
+enum WavelengthDistributions {
+    Uniform(PyUniformWavelengthDistribution),
+}
+
+macro_rules! map_wavelength_distributions {
+    ($wavelength_distribution:expr => |$distribution:ident| $body:expr ) => {
+        match $wavelength_distribution {
+            WavelengthDistributions::Uniform(PyUniformWavelengthDistribution {
+                distribution: $distribution,
+            }) => $body,
+        }
+    };
+}
+
+impl IntoPy<PyObject> for WavelengthDistributions {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        match self {
+            WavelengthDistributions::Uniform(v) => v.into_py(py),
+        }
+    }
+}
+
+#[pyclass(name = "GaussianBeam", module = "compound_prism_designer")]
+#[text_signature = "(width, y_mean)"]
+#[derive(Debug, Clone, Copy)]
+struct PyGaussianBeam {
+    gaussian_beam: GaussianBeam<f64, 2>,
+    #[pyo3(get)]
+    width: f64,
+    #[pyo3(get)]
+    y_mean: f64,
+}
+
+#[pymethods]
+impl PyGaussianBeam {
+    #[new]
+    fn create(width: f64, y_mean: f64) -> Self {
+        let gaussian_beam = GaussianBeam {
+            width,
+            y_mean,
+            marker: core::marker::PhantomData,
+        };
+        PyGaussianBeam {
+            gaussian_beam,
+            width,
+            y_mean,
+        }
+    }
+
+    fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
+        (self.width, self.y_mean)
+    }
+}
+
+#[pyproto]
+impl PyObjectProtocol for PyGaussianBeam {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
+    }
+}
+
+#[pyclass(name = "FiberBeam", module = "compound_prism_designer")]
+#[text_signature = "(core_radius, numerical_aperture, center_y)"]
+#[derive(Debug, Clone, Copy)]
+struct PyFiberBeam {
+    fiber_beam: FiberBeam<f64, 3>,
+    #[pyo3(get)]
+    core_radius: f64,
+    #[pyo3(get)]
+    numerical_aperture: f64,
+    #[pyo3(get)]
+    center_y: f64,
+}
+
+#[pymethods]
+impl PyFiberBeam {
+    #[new]
+    fn create(core_radius: f64, numerical_aperture: f64, center_y: f64) -> Self {
+        let fiber_beam = FiberBeam::new(core_radius, numerical_aperture, center_y);
+        PyFiberBeam {
+            fiber_beam,
+            core_radius,
+            numerical_aperture,
+            center_y,
+        }
+    }
+
+    fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
+        (self.core_radius, self.numerical_aperture, self.center_y)
+    }
+}
+
+#[pyproto]
+impl PyObjectProtocol for PyFiberBeam {
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
+    }
+}
+
+#[derive(Debug, Clone, Copy, FromPyObject)]
+enum BeamDistributions {
+    Gaussian(PyGaussianBeam),
+    Fiber(PyFiberBeam),
+}
+
+macro_rules! map_beam_distributions {
+    ($beam_distribution:expr => |$distribution:ident| $body:expr ) => {
+        match $beam_distribution {
+            BeamDistributions::Gaussian(PyGaussianBeam {
+                gaussian_beam: $distribution,
+                ..
+            }) => $body,
+            BeamDistributions::Fiber(PyFiberBeam {
+                fiber_beam: $distribution,
+                ..
+            }) => $body,
+        }
+    };
+}
+
+impl IntoPy<PyObject> for BeamDistributions {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        match self {
+            BeamDistributions::Gaussian(v) => v.into_py(py),
+            BeamDistributions::Fiber(v) => v.into_py(py),
+        }
+    }
+}
+
 const MAX_GLASS: usize = 6;
 
 macro_rules! call_sized_macro {
@@ -246,7 +411,7 @@ macro_rules! create_sized_spectrometer {
     ([$($n:literal),*]; $sized_compound_prism:expr; $wavelengths:ident; $beam:ident; $detarr:ident) => {
         paste::paste! {
             match $sized_compound_prism {
-                $(SizedCompoundPrism::[<CompoundPrism $n>](c) => SizedSpectrometer::[<Spectrometer $n>](Spectrometer::new($wavelengths, $beam, c, $detarr).map_err(map_ray_trace_err)?),)*
+                $(SizedCompoundPrism::[<CompoundPrism $n>](c) => SizedSpectrometer::[<Spectrometer $n>](Spectrometer::new($wavelengths, $beam, c, $detarr)),)*
             }
         }
     };
@@ -259,7 +424,7 @@ macro_rules! create_sized_spectrometer {
 #[text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)"]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
-    compound_prism: SizedCompoundPrism<f64, Plane<f64, 2>, Plane<f64, 2>, CurvedPlane<f64>>,
+    compound_prism: SizedCompoundPrism<f64, Plane<f64, 2>, Plane<f64, 2>, CurvedPlane<f64, 2>>,
     #[pyo3(get)]
     glasses: Vec<Py<PyGlass>>,
     #[pyo3(get)]
@@ -402,7 +567,7 @@ impl PyObjectProtocol for PyCompoundPrism {
 
 #[pyclass(name = "DetectorArray", module = "compound_prism_designer")]
 #[text_signature = "(bin_count, bin_size, linear_slope, linear_intercept, length, max_incident_angle, angle)"]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct PyDetectorArray {
     detector_array: LinearDetectorArray<f64, 2>,
     #[pyo3(get)]
@@ -432,7 +597,24 @@ impl PyDetectorArray {
         length: f64,
         max_incident_angle: f64,
         angle: f64,
-    ) -> Self {
+        compound_prism: Py<PyCompoundPrism>,
+        wavelengths: WavelengthDistributions,
+        beam: BeamDistributions,
+        py: Python,
+    ) -> PyResult<Self> {
+        let (pos, flipped) = map_sized_compound_prism!(compound_prism.as_ref(py).try_borrow()?.compound_prism => |prism|
+            map_beam_distributions!(beam => |beam|
+                map_wavelength_distributions!(wavelengths => |ws|
+                    detector_array_positioning(
+                        prism,
+                        length,
+                        angle,
+                        ws,
+                        beam.median_y(),
+                    ).map_err(map_ray_trace_err)?
+                )
+            )
+        );
         let detector_array = LinearDetectorArray::new(
             bin_count,
             bin_size,
@@ -441,8 +623,10 @@ impl PyDetectorArray {
             max_incident_angle.cos(),
             angle,
             length,
+            pos,
+            flipped,
         );
-        PyDetectorArray {
+        Ok(PyDetectorArray {
             detector_array,
             bin_count,
             bin_size,
@@ -451,7 +635,7 @@ impl PyDetectorArray {
             length,
             max_incident_angle,
             angle,
-        }
+        })
     }
 
     fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
@@ -474,60 +658,15 @@ impl PyObjectProtocol for PyDetectorArray {
     }
 }
 
-#[pyclass(name = "GaussianBeam", module = "compound_prism_designer")]
-#[text_signature = "(wavelength_range, width, y_mean)"]
-#[derive(Debug, Clone)]
-struct PyGaussianBeam {
-    wavelengths: UniformDistribution<f64>,
-    gaussian_beam: GaussianBeam<f64, 2>,
-    #[pyo3(get)]
-    wavelength_range: (f64, f64),
-    #[pyo3(get)]
-    width: f64,
-    #[pyo3(get)]
-    y_mean: f64,
-}
-
-#[pymethods]
-impl PyGaussianBeam {
-    #[new]
-    fn create(wavelength_range: (f64, f64), width: f64, y_mean: f64) -> Self {
-        let gaussian_beam = GaussianBeam {
-            width,
-            y_mean,
-            marker: core::marker::PhantomData,
-        };
-        PyGaussianBeam {
-            wavelengths: UniformDistribution {
-                bounds: wavelength_range,
-            },
-            gaussian_beam,
-            wavelength_range,
-            width,
-            y_mean,
-        }
-    }
-
-    fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
-        (self.wavelength_range, self.width, self.y_mean)
-    }
-}
-
-#[pyproto]
-impl PyObjectProtocol for PyGaussianBeam {
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("{:?}", self))
-    }
-}
-
 /// Compound Prism Spectrometer specification
 ///
 /// Args:
 ///     compound_prism (CompoundPrism): compound prism specification
 ///     detector_array (DetectorArray): linear detector array specification
+///     wavelengths (UniformWavelengthDistribution): input wavelength distribution specification
 ///     gaussian_beam (GaussianBeam): input gaussian beam specification
 #[pyclass(name = "Spectrometer", gc, module = "compound_prism_designer")]
-#[text_signature = "(compound_prism, detector_array, gaussian_beam)"]
+#[text_signature = "(compound_prism, detector_array, wavelengths, gaussian_beam)"]
 #[derive(Debug, Clone)]
 struct PySpectrometer {
     spectrometer: SizedSpectrometer<
@@ -536,7 +675,7 @@ struct PySpectrometer {
         GaussianBeam<f64, 2>,
         Plane<f64, 2>,
         Plane<f64, 2>,
-        CurvedPlane<f64>,
+        CurvedPlane<f64, 2>,
     >,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
@@ -544,6 +683,9 @@ struct PySpectrometer {
     /// linear detector array specification : DetectorArray
     #[pyo3(get)]
     detector_array: Py<PyDetectorArray>,
+    /// input wavelength distribution specification : UniformWavelengthDistribution
+    #[pyo3(get)]
+    wavelengths: WavelengthDistributions,
     /// input gaussian beam specification : GaussianBeam
     #[pyo3(get)]
     gaussian_beam: Py<PyGaussianBeam>,
@@ -561,20 +703,23 @@ impl PySpectrometer {
     fn create(
         compound_prism: Py<PyCompoundPrism>,
         detector_array: Py<PyDetectorArray>,
+        wavelengths: WavelengthDistributions,
         gaussian_beam: Py<PyGaussianBeam>,
         py: Python,
     ) -> PyResult<Self> {
+        let WavelengthDistributions::Uniform(PyUniformWavelengthDistribution { distribution: w }) =
+            wavelengths;
         let gb = gaussian_beam.as_ref(py).try_borrow()?.gaussian_beam;
-        let w = gaussian_beam.as_ref(py).try_borrow()?.wavelengths;
         let da = detector_array.as_ref(py).try_borrow()?.detector_array;
         let scp = compound_prism.as_ref(py).try_borrow()?.compound_prism;
         let spectrometer = create_sized_spectrometer!(scp; w; gb; da);
         Ok(PySpectrometer {
             compound_prism,
             detector_array,
+            wavelengths,
             gaussian_beam,
-            position: map_sized_spectrometer!(spectrometer => |s| (s.detector.1.position[0], s.detector.1.position[1])),
-            direction: map_sized_spectrometer!(spectrometer => |s| (s.detector.1.direction[0], s.detector.1.direction[1])),
+            position: map_sized_spectrometer!(spectrometer => |s| (s.detector.position[0], s.detector.position[1])),
+            direction: map_sized_spectrometer!(spectrometer => |s| (s.detector.direction[0], s.detector.direction[1])),
             spectrometer,
         })
     }

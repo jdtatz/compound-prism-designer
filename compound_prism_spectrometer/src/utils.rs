@@ -127,6 +127,8 @@ pub trait FloatExt:
     + NumAssign
     + LossyFrom<u32>
     + LossyInto<u32>
+    + LossyFrom<f32>
+    + LossyInto<f32>
     + LossyFrom<f64>
     + LossyInto<f64>
     + core::fmt::Debug
@@ -141,10 +143,6 @@ pub trait FloatExt:
     fn to_bits(self) -> Self::BitRepr;
     fn from_bits(bits: Self::BitRepr) -> Self;
     fn copy_sign(self, other: Self) -> Self;
-
-    fn sincos(self) -> (Self, Self) {
-        self.sin_cos()
-    }
     fn euclid_div_rem(self, rhs: Self) -> (Self, Self) {
         let q = (self / rhs).trunc();
         let r = self - q * rhs;
@@ -222,52 +220,58 @@ impl FloatExt for f64 {
 }
 
 #[cfg(target_arch = "nvptx64")]
-impl<T, F: LossyFrom<T>> LossyFrom<T> for nvptx_sys::FastFloat<F> {
-    fn lossy_from(v: T) -> Self {
-        Self(LossyFrom::lossy_from(v))
-    }
-}
+mod fast_float {
+    use super::*;
+    use nvptx_sys::{FastFloat, FastNum};
 
-#[cfg(target_arch = "nvptx64")]
-impl<F: Copy + LossyInto<u32>> LossyInto<u32> for nvptx_sys::FastFloat<F> {
-    fn lossy_into(self) -> u32 {
-        LossyInto::lossy_into(*self)
-    }
-}
-
-#[cfg(target_arch = "nvptx64")]
-impl<F: Copy + LossyInto<f64>> LossyInto<f64> for nvptx_sys::FastFloat<F> {
-    fn lossy_into(self) -> f64 {
-        LossyInto::lossy_into(*self)
-    }
-}
-
-#[cfg(target_arch = "nvptx64")]
-impl<F: ConstZero> ConstZero for nvptx_sys::FastFloat<F> {
-    const ZERO: Self = nvptx_sys::FastFloat(F::ZERO);
-}
-
-#[cfg(target_arch = "nvptx64")]
-impl<F: ConstOne> ConstOne for nvptx_sys::FastFloat<F> {
-    const ONE: Self = nvptx_sys::FastFloat(F::ONE);
-}
-
-#[cfg(target_arch = "nvptx64")]
-impl<F: nvptx_sys::FastNum + FloatExt> FloatExt for nvptx_sys::FastFloat<F>
-where
-    <F as float_eq::FloatEqUlpsTol>::UlpsTol: Sized,
-{
-    type BitRepr = F::BitRepr;
-
-    fn to_bits(self) -> Self::BitRepr {
-        <F as FloatExt>::to_bits(self.0)
+    impl<T, F: LossyFrom<T>> LossyFrom<T> for FastFloat<F> {
+        fn lossy_from(v: T) -> Self {
+            Self(LossyFrom::lossy_from(v))
+        }
     }
 
-    fn from_bits(bits: Self::BitRepr) -> Self {
-        nvptx_sys::FastFloat(<F as FloatExt>::from_bits(bits))
+    impl<F: Copy + LossyInto<u32>> LossyInto<u32> for FastFloat<F> {
+        fn lossy_into(self) -> u32 {
+            LossyInto::lossy_into(*self)
+        }
     }
 
-    fn copy_sign(self, other: Self) -> Self {
-        self.copysign(other)
+    impl<F: Copy + LossyInto<f32>> LossyInto<f32> for FastFloat<F> {
+        fn lossy_into(self) -> f32 {
+            LossyInto::lossy_into(*self)
+        }
+    }
+
+    impl<F: Copy + LossyInto<f64>> LossyInto<f64> for FastFloat<F> {
+        fn lossy_into(self) -> f64 {
+            LossyInto::lossy_into(*self)
+        }
+    }
+
+    impl<F: ConstZero> ConstZero for FastFloat<F> {
+        const ZERO: Self = FastFloat(F::ZERO);
+    }
+
+    impl<F: ConstOne> ConstOne for FastFloat<F> {
+        const ONE: Self = FastFloat(F::ONE);
+    }
+
+    impl<F: FastNum + FloatExt> FloatExt for FastFloat<F>
+    where
+        <F as float_eq::FloatEqUlpsTol>::UlpsTol: Sized,
+    {
+        type BitRepr = F::BitRepr;
+
+        fn to_bits(self) -> Self::BitRepr {
+            <F as FloatExt>::to_bits(self.0)
+        }
+
+        fn from_bits(bits: Self::BitRepr) -> Self {
+            FastFloat(<F as FloatExt>::from_bits(bits))
+        }
+
+        fn copy_sign(self, other: Self) -> Self {
+            self.copysign(other)
+        }
     }
 }

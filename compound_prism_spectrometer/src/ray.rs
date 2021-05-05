@@ -119,7 +119,9 @@ where
 }
 
 #[cfg(not(target_arch = "nvptx64"))]
-impl<T: FloatExt, const N: usize> CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, CurvedPlane<T>, N, 2> {
+impl<T: FloatExt, const N: usize>
+    CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, CurvedPlane<T, 2>, N, 2>
+{
     pub fn polygons(&self) -> ([[Vector<T, 2>; 4]; N], [Vector<T, 2>; 4], Vector<T, 2>, T) {
         let [mut u0, mut l0] = self.surface0.end_points(self.height);
         let polys = self.isurfaces.map(|s| {
@@ -272,6 +274,58 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
             p_transmittance,
         })
     }
+
+    #[inline]
+    pub fn surface_propagate<S: Surface<T, D>>(
+        self,
+        surface: S,
+        n1: T,
+        n2: T,
+        ar_coated: bool,
+    ) -> Result<Self, RayTraceError> {
+        debug_assert!(n2 >= T::one());
+        let GeometricRayIntersection { distance, normal } = surface
+            .intersection(self.into())
+            .ok_or(RayTraceError::NoSurfaceIntersection)?;
+        self.translate(distance).refract(normal, n1, n2, ar_coated)
+    }
+
+    // /// Propagate a ray of `wavelength` through the compound prism
+    // ///
+    // /// # Arguments
+    // ///  * `cmpnd` - the compound prism specification
+    // ///  * `wavelength` - the wavelength of the light ray
+    // pub fn propagate_internal<
+    //     S0: Copy + Surface<T, D>,
+    //     SI: Copy + Surface<T, D>,
+    //     SN: Copy + Surface<T, D>,
+    //     const N: usize,
+    // >(
+    //     self,
+    //     cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
+    //     wavelength: T,
+    // ) -> Result<Self, RayTraceError> {
+    //     let mut ray = self;
+    //     let mut n1 = T::one();
+
+    //     let glass = cmpnd.glass0;
+    //     let surface = cmpnd.surface0;
+    //     let n2 = glass.calc_n(wavelength);
+    //     ray = ray.surface_propagate(surface, n1, n2, cmpnd.ar_coated)?;
+    //     n1 = n2;
+
+    //     // for (glass, plane) in core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces)) {
+    //     for i in 0..N {
+    //         let glass = cmpnd.glasses[i];
+    //         let surface = cmpnd.isurfaces[i];
+    //         let n2 = glass.calc_n(wavelength);
+    //         ray = ray.surface_propagate(surface, n1, n2, cmpnd.ar_coated)?;
+    //         n1 = n2;
+    //     }
+    //     let n2 = T::one();
+    //     let surface = cmpnd.surfaceN;
+    //     ray.surface_propagate(surface, n1, n2, cmpnd.ar_coated)
+    // }
 
     /// Find the intersection position of the ray with the detector array
     /// and the ray's transmission probability. The intersection position is a

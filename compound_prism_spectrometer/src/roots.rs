@@ -24,7 +24,7 @@
 // CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use crate::utils::FloatExt;
+use crate::{cbrt::approx_cbrt, utils::FloatExt};
 
 /// Sorted and unique list of roots of an equation.
 #[derive(Debug, PartialEq)]
@@ -93,7 +93,10 @@ impl<F: FloatExt> Roots<F> {
                         (3, 1) => Roots::Four([old_roots[0], new_root, old_roots[1], old_roots[2]]),
                         (3, 2) => Roots::Four([old_roots[0], old_roots[1], new_root, old_roots[2]]),
                         (3, 3) => Roots::Four([old_roots[0], old_roots[1], old_roots[2], new_root]),
+                        #[cfg(debug_assertions)]
                         _ => panic!("Cannot add root"),
+                        #[cfg(not(debug_assertions))]
+                        _ => unsafe { core::hint::unreachable_unchecked() },
                     }
                 }
             }
@@ -106,8 +109,8 @@ impl<F: FloatExt> Roots<F> {
 /// # Examples
 ///
 /// ```
-/// use roots::Roots;
-/// use roots::find_roots_linear;
+/// use compound_prism_spectrometer::roots::Roots;
+/// use compound_prism_spectrometer::roots::find_roots_linear;
 ///
 /// // Returns Roots::No([]) as '0*x + 1 = 0' has no roots;
 /// let no_root = find_roots_linear(0f32, 1f32);
@@ -140,8 +143,8 @@ pub fn find_roots_linear<F: FloatExt>(a1: F, a0: F) -> Roots<F> {
 /// # Examples
 ///
 /// ```
-/// use roots::Roots;
-/// use roots::find_roots_quadratic;
+/// use compound_prism_spectrometer::roots::Roots;
+/// use compound_prism_spectrometer::roots::find_roots_quadratic;
 ///
 /// let no_roots = find_roots_quadratic(1f32, 0f32, 1f32);
 /// // Returns Roots::No([]) as 'x^2 + 1 = 0' has no roots
@@ -212,7 +215,7 @@ pub fn find_roots_quadratic<F: FloatExt>(a2: F, a1: F, a0: F) -> Roots<F> {
 /// # Examples
 ///
 /// ```
-/// use roots::find_roots_biquadratic;
+/// use compound_prism_spectrometer::roots::find_roots_biquadratic;
 ///
 /// let no_roots = find_roots_biquadratic(1f32, 0f32, 1f32);
 /// // Returns Roots::No([]) as 'x^4 + 1 = 0' has no roots
@@ -255,7 +258,7 @@ const FRAC_2_PI_3: f64 = 2f64 * core::f64::consts::FRAC_PI_3;
 /// # Examples
 ///
 /// ```
-/// use roots::find_roots_cubic_depressed;
+/// use compound_prism_spectrometer::roots::find_roots_cubic_depressed;
 ///
 /// let one_root = find_roots_cubic_depressed(0f64, 0f64);
 /// // Returns Roots::One([0f64]) as 'x^3 = 0' has one root 0
@@ -273,7 +276,7 @@ pub fn find_roots_cubic_depressed<F: FloatExt>(a1: F, a0: F) -> Roots<F> {
     let _54 = F::lossy_from(54u32);
 
     if a1 == F::zero() {
-        Roots::One([-a0.cbrt()])
+        Roots::One([-approx_cbrt(a0)])
     } else if a0 == F::zero() {
         find_roots_quadratic(F::one(), F::zero(), a1).add_new_root(F::zero())
     } else {
@@ -289,7 +292,7 @@ pub fn find_roots_cubic_depressed<F: FloatExt>(a1: F, a0: F) -> Roots<F> {
         } else {
             let sqrt_d = d.sqrt();
             let a0_div_2 = a0 / _2;
-            let x1 = (sqrt_d - a0_div_2).cbrt() - (sqrt_d + a0_div_2).cbrt();
+            let x1 = approx_cbrt(sqrt_d - a0_div_2) - approx_cbrt(sqrt_d + a0_div_2);
             if d == F::zero() {
                 // one real root and one double root
                 Roots::One([x1]).add_new_root(a0_div_2)
@@ -310,7 +313,7 @@ pub fn find_roots_cubic_depressed<F: FloatExt>(a1: F, a0: F) -> Roots<F> {
 /// # Examples
 ///
 /// ```
-/// use roots::find_roots_cubic_normalized;
+/// use compound_prism_spectrometer::roots::find_roots_cubic_normalized;
 ///
 /// let one_root = find_roots_cubic_normalized(0f64, 0f64, 0f64);
 /// // Returns Roots::One([0f64]) as 'x^3 = 0' has one root 0
@@ -342,8 +345,8 @@ pub fn find_roots_cubic_normalized<F: FloatExt>(a2: F, a1: F, a0: F) -> Roots<F>
             .add_new_root(sqrt_q_2 * (phi_3 + F::lossy_from(FRAC_2_PI_3)).cos() - a2_div_3)
     } else {
         let sqrt_d = d.sqrt();
-        let s = (r + sqrt_d).cbrt();
-        let t = (r - sqrt_d).cbrt();
+        let s = approx_cbrt(r + sqrt_d);
+        let t = approx_cbrt(r - sqrt_d);
 
         if s == t {
             if s + t == F::zero() {
@@ -368,8 +371,8 @@ pub fn find_roots_cubic_normalized<F: FloatExt>(a2: F, a1: F, a0: F) -> Roots<F>
 /// # Examples
 ///
 /// ```
-/// use roots::Roots;
-/// use roots::find_roots_cubic;
+/// use compound_prism_spectrometer::roots::Roots;
+/// use compound_prism_spectrometer::roots::find_roots_cubic;
 ///
 /// let no_roots = find_roots_cubic(0f32, 1f32, 0f32, 1f32);
 /// // Returns Roots::No([]) as 'x^2 + 1 = 0' has no roots
@@ -416,7 +419,7 @@ pub fn find_roots_cubic<F: FloatExt>(a3: F, a2: F, a1: F, a0: F) -> Roots<F> {
         if d < F::zero() {
             // one real root
             let sqrt = (-_27 * a3 * a3 * d).sqrt();
-            let c = F::cbrt(if d1 < F::zero() { d1 - sqrt } else { d1 + sqrt } / _2);
+            let c = approx_cbrt(if d1 < F::zero() { d1 - sqrt } else { d1 + sqrt } / _2);
             let x = -(a2 + c + d0 / c) / (_3 * a3);
             Roots::One([x])
         } else if d == F::zero() {
@@ -436,7 +439,7 @@ pub fn find_roots_cubic<F: FloatExt>(a3: F, a2: F, a1: F, a0: F) -> Roots<F> {
             let c3_real = d1 / _2;
             let c3_module = F::sqrt(c3_img * c3_img + c3_real * c3_real);
             let c3_phase = _2 * F::atan(c3_img / (c3_real + c3_module));
-            let c_module = F::cbrt(c3_module);
+            let c_module = approx_cbrt(c3_module);
             let c_phase = c3_phase / _3;
             let c_real = c_module * F::cos(c_phase);
             let c_img = c_module * F::sin(c_phase);
@@ -468,7 +471,7 @@ pub fn find_roots_cubic<F: FloatExt>(a3: F, a2: F, a1: F, a0: F) -> Roots<F> {
 /// # Examples
 ///
 /// ```
-/// use roots::find_roots_quartic_depressed;
+/// use compound_prism_spectrometer::roots::find_roots_quartic_depressed;
 ///
 /// let one_root = find_roots_quartic_depressed(1f64, 0f64, 0f64);
 /// // Returns Roots::One([0f64]) as 'x^4 = 0' has one root 0
@@ -496,7 +499,7 @@ pub fn find_roots_quartic_depressed<F: FloatExt>(a2: F, a1: F, a0: F) -> Roots<F
         let b0 = (a2_pow_2 * a2 - a2 * a0 - a1_div_2 * a1_div_2) / _2;
 
         // At least one root always exists. The last root is the maximal one.
-        let resolvent_roots = (find_roots_cubic_normalized((b2), (b1), (b0)));
+        let resolvent_roots = find_roots_cubic_normalized(b2, b1, b0);
         let y = resolvent_roots.as_ref().iter().last().unwrap();
 
         let _a2_plus_2y = a2 + _2 * *y;
@@ -553,7 +556,7 @@ fn find_roots_via_depressed_quartic<F: FloatExt>(
     let r = (dd + _16 * a4_pow_2 * (_12 * a0 * a4 - _3 * a1 * a3 + a2 * a2)) / (_256 * (a4_pow_4));
 
     let mut roots = Roots::No([]);
-    for y in find_roots_quartic_depressed((p), (q), (r)).as_ref().iter() {
+    for y in find_roots_quartic_depressed(p, q, r).as_ref().iter() {
         roots = roots.add_new_root((*y) - a3 / (_4 * a4));
     }
     roots
@@ -568,7 +571,7 @@ fn find_roots_via_depressed_quartic<F: FloatExt>(
 /// # Examples
 ///
 /// ```
-/// use roots::find_roots_quartic;
+/// use compound_prism_spectrometer::roots::find_roots_quartic;
 ///
 /// let one_root = find_roots_quartic(1f64, 0f64, 0f64, 0f64, 0f64);
 /// // Returns Roots::One([0f64]) as 'x^4 = 0' has one root 0
@@ -632,14 +635,14 @@ pub fn find_roots_quartic<F: FloatExt>(a4: F, a3: F, a2: F, a1: F, a0: F) -> Roo
 
         // Handle special cases
         let double_root = (discriminant) == F::zero();
-        if (double_root) {
+        if double_root {
             let triple_root = double_root && (delta0) == F::zero();
             let quadruple_root = triple_root && (dd) == F::zero();
             let no_roots = dd == F::zero() && (pp) > F::zero() && (rr) == F::zero();
-            if (quadruple_root) {
+            if quadruple_root {
                 // Wiki: all four roots are equal
                 Roots::One([-a3 / (_4 * a4)])
-            } else if (triple_root) {
+            } else if triple_root {
                 // Wiki: At least three roots are equal to each other
                 // x0 is the unique root of the remainder of the Euclidean division of the quartic by its second derivative
                 //
@@ -656,21 +659,21 @@ pub fn find_roots_quartic<F: FloatExt>(a4: F, a3: F, a2: F, a1: F, a0: F) -> Roo
                 // (−72*a^2*e+10*a*c^2−3*b^2*c)/(9*(8*a^2*d−4*a*b*c+b^3))
                 let x0 = (-_72 * a4 * a4 * a0 + _10 * a4 * a2 * a2 - _3 * a3 * a3 * a2)
                     / (_9 * (_8 * a4 * a4 * a1 - _4 * a4 * a3 * a2 + a3 * a3 * a3));
-                let roots = (Roots::One([x0]));
-                roots.add_new_root((-(a3 / a4 + _3 * x0)))
-            } else if (no_roots) {
+                let roots = Roots::One([x0]);
+                roots.add_new_root(-(a3 / a4 + _3 * x0))
+            } else if no_roots {
                 // Wiki: two complex conjugate double roots
                 Roots::No([])
             } else {
-                find_roots_via_depressed_quartic(a4, a3, a2, a1, a0, pp, (rr), dd)
+                find_roots_via_depressed_quartic(a4, a3, a2, a1, a0, pp, rr, dd)
             }
         } else {
             let no_roots = (pp) > F::zero() || (dd) > F::zero();
-            if (no_roots) {
+            if no_roots {
                 // Wiki: two pairs of non-real complex conjugate roots
                 Roots::No([])
             } else {
-                find_roots_via_depressed_quartic(a4, a3, a2, a1, a0, pp, (rr), dd)
+                find_roots_via_depressed_quartic(a4, a3, a2, a1, a0, pp, rr, dd)
             }
         }
     }

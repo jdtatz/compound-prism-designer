@@ -52,6 +52,23 @@ impl<F: FloatExt> Distribution<F> for NormalDistribution<F> {
     }
 }
 
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+pub struct UniformDiscDistribution<T> {
+    pub radius: T,
+}
+
+impl<F: FloatExt> Distribution<[F; 2]> for UniformDiscDistribution<F> {
+    type Output = [F; 2];
+
+    fn inverse_cdf(&self, p: [F; 2]) -> Self::Output {
+        let [p_r, p_theta] = p;
+        let (s, c) = (p_theta * F::lossy_from(core::f64::consts::TAU)).sin_cos();
+        let r = self.radius * p_r.sqrt();
+        [r * c, r * s]
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct UserDistribution<T, F: Fn(T) -> T> {
     pub quantile: F,

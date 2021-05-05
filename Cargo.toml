@@ -52,7 +52,7 @@ debug = true
 opt-level=0
 
 [package.metadata.maturin]
-requires-dist = ["numpy~=1.20", "matplotlib~=3.4", "pyserde[toml]~=git+https://github.com/yukinarit/pyserde.git", "pymoo~=0.4", "pywin32 >= 1.0;platform_system=='Windows'"]
+requires-dist = ["numpy~=1.20", "matplotlib~=3.4", "pyserde[toml]~=0.3.1", "pymoo~=0.4", "pywin32 >= 1.0;platform_system=='Windows'"]
 requires-python = ">=3.7"
 
 [workspace]

@@ -183,7 +183,6 @@ pub fn oproj<T: Copy + Ring, const N: usize>(
 // }
 
 // Temp for back compat
-#[cfg(not(arch = "nvptx64"))]
 impl<T: FloatExt, const N: usize> Vector<T, N> {
     pub(crate) fn x(self) -> T {
         self.0[0]
@@ -206,12 +205,12 @@ impl<T: FloatExt, const N: usize> Vector<T, N> {
 
     /// unit vector at angle `theta` relative to the x axis in the xy plane.
     pub(crate) fn angled_xy(theta: T) -> Self {
-        let (sin, cos) = theta.sincos();
+        let (sin, cos) = theta.sin_cos();
         Self::from_xy(cos, sin)
     }
 
     pub(crate) fn rotate_xy(mut self, theta: T) -> Self {
-        let (s, c) = theta.sincos();
+        let (s, c) = theta.sin_cos();
         let x = self[0];
         let y = self[1];
         self[0] = c * x - s * y;
@@ -232,6 +231,14 @@ impl<T: FloatExt, const N: usize> Vector<T, N> {
         let y = self[1];
         self[0] = -x;
         self[1] = -y;
+        self
+    }
+
+    pub(crate) fn rot_90_ccw_xy(mut self) -> Self {
+        let x = self[0];
+        let y = self[1];
+        self[0] = y;
+        self[1] = -x;
         self
     }
 

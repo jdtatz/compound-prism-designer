@@ -1,10 +1,15 @@
-use crate::erf::norminv;
-use crate::{distribution::Distribution, UnitVector, Vector};
-// use crate::geom::{Mat2, Pair, Surface, Vector};
 use crate::geometry::*;
 use crate::qrng::QuasiRandom;
 use crate::utils::*;
+use crate::{distribution::Distribution, UnitVector, Vector};
+use crate::{distribution::UniformDiscDistribution, erf::norminv};
 use crate::{CompoundPrism, DetectorArray, Ray, RayTraceError};
+
+pub trait Beam<T, Q: QuasiRandom<Scalar = T>, const D: usize>:
+    Distribution<Q, Output = Ray<T, D>>
+{
+    fn median_y(&self) -> T;
+}
 
 /// Collimated Polychromatic Gaussian Beam
 #[derive(Debug, Clone, Copy, WrappedFrom)]
@@ -25,16 +30,66 @@ impl<T: FloatExt, const D: usize> Distribution<T> for GaussianBeam<T, D> {
     }
 }
 
-/// Polychromatic Uniform Circular Multi-Mode Fiber Beam
+impl<T: FloatExt, const D: usize> Beam<T, T, D> for GaussianBeam<T, D> {
+    fn median_y(&self) -> T {
+        self.y_mean
+    }
+}
+
+/// Polychromatic Multi-Mode Fiber Beam
+/// The exit position distribution is simplified from a 'Top Hat' profile to a Uniform Disc.
+/// The exit direction distribution is uniform over the acceptance cone.
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct FiberBeam<F: FloatExt> {
+pub struct FiberBeam<F, const D: usize> {
     /// Radius of fiber core
     pub radius: F,
-    /// Numerical apeature
-    pub na: F,
-    /// Mean y coordinate
-    pub y_mean: F,
+    /// $ \cos_{min} = \cos(\theta_{max}) = \cos(\arcsin(NA)) = \sqrt{1 - NA^2}$
+    pub min_cos: F,
+    /// Center y coordinate
+    pub center_y: F,
+    pub marker: core::marker::PhantomData<Vector<F, D>>,
+}
+
+impl<T: FloatExt, const D: usize> FiberBeam<T, D> {
+    /// Radius of fiber core
+    /// Numerical aperture
+    /// Center y coordinate
+    pub fn new(radius: T, na: T, center_y: T) -> Self {
+        Self {
+            radius,
+            min_cos: T::sqrt(T::ONE - na.sqr()),
+            center_y,
+            marker: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: FloatExt> Distribution<[T; 4]> for FiberBeam<T, 3> {
+    type Output = Ray<T, 3>;
+
+    fn inverse_cdf(&self, p: [T; 4]) -> Ray<T, 3> {
+        let [p_rho, p_theta, p_defl, p_rot] = p;
+        let [y, z] = UniformDiscDistribution {
+            radius: self.radius,
+        }
+        .inverse_cdf([p_rho, p_theta]);
+        let origin = Vector([T::ZERO, y + self.center_y, z]);
+        // let ux = UniformDistribution { bounds: (self.min_cos, T::ONE) }.inverse_cdf(p_defl);
+        let ux = self.min_cos + p_defl * (T::ONE - self.min_cos);
+        let s_ux = (T::ONE - ux.sqr()).sqrt();
+        let (s, c) = (p_rot * T::lossy_from(core::f64::consts::TAU)).sin_cos();
+        let uy = s_ux * c;
+        let uz = s_ux * s;
+        let direction = UnitVector::new(Vector([ux, uy, uz]));
+        Ray::new_unpolarized(origin, direction)
+    }
+}
+
+impl<T: FloatExt> Beam<T, [T; 4], 3> for FiberBeam<T, 3> {
+    fn median_y(&self) -> T {
+        self.center_y
+    }
 }
 
 /// Linear Array of detectors
@@ -62,6 +117,10 @@ pub struct LinearDetectorArray<T, const D: usize> {
     normal: UnitVector<T, D>,
     /// Length of the array
     pub(crate) length: T,
+    /// Position vector of array
+    pub position: Vector<T, D>,
+    /// Unit direction vector of array
+    pub direction: UnitVector<T, D>,
 }
 
 impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
@@ -73,11 +132,19 @@ impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
         min_ci: T,
         angle: T,
         length: T,
+        position: Vector<T, D>,
+        flipped: bool,
     ) -> Self {
         debug_assert!(bin_count > 0);
         debug_assert!(bin_size > T::zero());
         debug_assert!(linear_slope > T::zero());
         debug_assert!(linear_intercept >= T::zero());
+        let normal = UnitVector::new(Vector::angled_xy(angle).rot_180_xy());
+        let direction = if flipped {
+            UnitVector::new(normal.rot_90_xy())
+        } else {
+            UnitVector::new(normal.rot_90_ccw_xy())
+        };
         Self {
             bin_count,
             bin_size,
@@ -85,20 +152,22 @@ impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
             linear_intercept,
             min_ci,
             angle,
-            normal: UnitVector::new(Vector::angled_xy(angle).rot_180_xy()),
+            normal,
             length,
+            position,
+            direction,
         }
     }
 
-    pub fn bin_index(&self, pos: T) -> Option<u32> {
-        let (bin, bin_pos) = (pos - self.linear_intercept).euclid_div_rem(self.linear_slope);
-        let bin = bin.lossy_into();
-        if bin < self.bin_count && bin_pos < self.bin_size {
-            Some(bin)
-        } else {
-            None
-        }
-    }
+    // pub fn bin_index(&self, pos: T) -> Option<u32> {
+    //     let (bin, bin_pos) = (pos - self.linear_intercept).euclid_div_rem(self.linear_slope);
+    //     let bin = bin.lossy_into();
+    //     if bin < self.bin_count && bin_pos < self.bin_size {
+    //         Some(bin)
+    //     } else {
+    //         None
+    //     }
+    // }
 
     pub fn bounds(&self) -> impl ExactSizeIterator<Item = [T; 2]> + '_ {
         (0..self.bin_count).map(move |i| {
@@ -110,61 +179,61 @@ impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
     }
 
     #[cfg(not(target_arch = "nvptx64"))]
-    pub fn end_points(&self, pos: &DetectorArrayPositioning<T, D>) -> (Vector<T, D>, Vector<T, D>) {
+    pub fn end_points(&self) -> (Vector<T, D>, Vector<T, D>) {
         (
-            pos.position,
-            pos.direction.mul_add(self.length, pos.position),
+            self.position,
+            self.direction.mul_add(self.length, self.position),
         )
     }
 }
 
-/// Positioning of detector array
-#[derive(Debug, PartialEq, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct DetectorArrayPositioning<T, const D: usize> {
-    /// Position vector of array
-    pub position: Vector<T, D>,
-    /// Unit direction vector of array
-    pub direction: UnitVector<T, D>,
-}
+// /// Positioning of detector array
+// #[derive(Debug, PartialEq, Clone, Copy, WrappedFrom)]
+// #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+// pub struct DetectorArrayPositioning<T, const D: usize> {
+//     /// Position vector of array
+//     pub position: Vector<T, D>,
+//     /// Unit direction vector of array
+//     pub direction: UnitVector<T, D>,
+// }
 
-impl<T: FloatExt, const D: usize> Surface<T, D>
-    for (LinearDetectorArray<T, D>, DetectorArrayPositioning<T, D>)
-{
+impl<T: FloatExt, const D: usize> Surface<T, D> for LinearDetectorArray<T, D> {
     fn intersection(self, ray: GeometricRay<T, D>) -> Option<GeometricRayIntersection<T, D>> {
-        let (detarr, detpos) = self;
-        let ci = -ray.direction.dot(*detarr.normal);
-        if ci <= detarr.min_ci {
+        let ci = -ray.direction.dot(*self.normal);
+        if ci <= self.min_ci {
             // RayTraceError::SpectrometerAngularResponseTooWeak
             return None;
         }
-        let d = (ray.origin - detpos.position).dot(*detarr.normal) / ci;
+        let d = (ray.origin - self.position).dot(*self.normal) / ci;
         debug_assert!(d > T::zero());
         Some(GeometricRayIntersection {
             distance: d,
-            normal: detarr.normal,
+            normal: self.normal,
         })
     }
 }
 
-impl<T: FloatExt, const D: usize> DetectorArray<T, D>
-    for (LinearDetectorArray<T, D>, DetectorArrayPositioning<T, D>)
-{
+impl<T: FloatExt, const D: usize> DetectorArray<T, D> for LinearDetectorArray<T, D> {
     fn bin_count(&self) -> u32 {
-        self.0.bin_count
+        self.bin_count
     }
 
     fn length(&self) -> T {
-        self.0.length
+        self.length
     }
 
     fn bin_index(&self, intersection: Vector<T, D>) -> Option<u32> {
-        let (detarr, detpos) = self;
-        let pos = (intersection - detpos.position).dot(*detpos.direction);
-        if pos < T::zero() || detarr.length < pos {
+        let pos = (intersection - self.position).dot(*self.direction);
+        if pos < T::zero() || self.length < pos {
             return None;
         }
-        detarr.bin_index(pos)
+        let (bin, bin_pos) = (pos - self.linear_intercept).euclid_div_rem(self.linear_slope);
+        let bin = bin.lossy_into();
+        if bin < self.bin_count && bin_pos < self.bin_size {
+            Some(bin)
+        } else {
+            None
+        }
     }
 }
 
@@ -175,14 +244,13 @@ impl<T: FloatExt, const D: usize> DetectorArray<T, D>
 ///
 /// # Arguments
 ///  * `cmpnd` - the compound prism specification
-///  * `detarr` - detector array specification
+///  * `detector_array_length` - detector array length
+///  * `detector_array_normal` - detector array normal unit vector
+///  * `wavelengths` - input wavelength distribution
 ///  * `beam` - input gaussian beam specification
-#[cfg(not(target_arch = "nvptx64"))]
-pub(crate) fn detector_array_positioning<
+pub fn detector_array_positioning<
     T: FloatExt,
     W: Distribution<T, Output = T>,
-    Q: QuasiRandom<Scalar = T>,
-    B: Distribution<Q, Output = Ray<T, D>>,
     S0: Copy + Surface<T, D>,
     SI: Copy + Surface<T, D>,
     SN: Copy + Surface<T, D>,
@@ -190,11 +258,12 @@ pub(crate) fn detector_array_positioning<
     const D: usize,
 >(
     cmpnd: CompoundPrism<T, S0, SI, SN, N, D>,
-    detarr: LinearDetectorArray<T, D>,
+    detector_array_length: T,
+    detector_array_angle: T,
     wavelengths: W,
-    beam: B,
-) -> Result<DetectorArrayPositioning<T, D>, RayTraceError> {
-    let ray = beam.inverse_cdf(Q::from_scalar(T::lossy_from(0.5f64)));
+    median_y: T,
+) -> Result<(Vector<T, D>, bool), RayTraceError> {
+    let ray = Ray::new_from_start(median_y);
     // let wmin = wavelengths.inverse_cdf(T::lossy_from(0.01_f64));
     // let wmax = wavelengths.inverse_cdf(T::lossy_from(0.99_f64));
     let wmin = wavelengths.inverse_cdf(T::zero());
@@ -208,59 +277,21 @@ pub(crate) fn detector_array_positioning<
     if lower_ray.average_transmittance() <= T::lossy_from(1e-3f64)
         || upper_ray.average_transmittance() <= T::lossy_from(1e-3f64)
     {
-        dbg!(ray, lower_ray, upper_ray);
+        // dbg!(ray, lower_ray, upper_ray);
         return Err(RayTraceError::SpectrometerAngularResponseTooWeak);
     }
     debug_assert!(lower_ray.direction.is_unit());
     debug_assert!(upper_ray.direction.is_unit());
-    let spec_dir = Vector::angled_xy(detarr.angle).rot_90_xy();
-    let spec = spec_dir * detarr.length;
-
-    /// Matrix inverse if it exists
-    fn mat_inverse<T: FloatExt>(mat: [[T; 2]; 2]) -> Option<[[T; 2]; 2]> {
-        let [[a, b], [c, d]] = mat;
-        let det = a * d - b * c;
-        if det == T::zero() {
-            None
-        } else {
-            Some([[d / det, -b / det], [-c / det, a / det]])
-        }
-    }
-
-    fn mat_mul<T: FloatExt>(mat: [[T; 2]; 2], vec: [T; 2]) -> [T; 2] {
-        #![allow(clippy::many_single_char_names)]
-
-        let [[a, b], [c, d]] = mat;
-        let [x, y] = vec;
-        [a * x + b * y, c * x + d * y]
-    }
-
-    let mat = [
-        [upper_ray.direction.x(), -lower_ray.direction.x()],
-        [upper_ray.direction.y(), -lower_ray.direction.y()],
-    ];
-    let imat = mat_inverse(mat).ok_or(RayTraceError::NoSurfaceIntersection)?;
-    let temp = spec - upper_ray.origin + lower_ray.origin;
-    let [_d1, d2] = mat_mul(imat, [temp.x(), temp.y()]);
-    let l_vertex = lower_ray.direction.mul_add(d2, lower_ray.origin);
-    let (pos, dir) = if d2 > T::zero() {
-        (l_vertex, spec_dir)
-    } else {
-        let temp = -spec - upper_ray.origin + lower_ray.origin;
-        let [_d1, d2] = mat_mul(imat, [temp.x(), temp.y()]);
-        if d2 < T::zero() {
-            return Err(RayTraceError::NoSurfaceIntersection);
-        }
-        let u_vertex = lower_ray.direction.mul_add(d2, lower_ray.origin);
-        (u_vertex, -spec_dir)
-    };
-    Ok(DetectorArrayPositioning {
-        position: pos,
-        direction: UnitVector::new(dir),
-    })
+    crate::geometry::fit_ray_difference_surface(
+        lower_ray.into(),
+        upper_ray.into(),
+        detector_array_length,
+        detector_array_angle,
+    )
+    .ok_or(RayTraceError::NoSurfaceIntersection)
 }
 
-#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[derive(Constructor, Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct Spectrometer<
     T,
@@ -275,7 +306,7 @@ pub struct Spectrometer<
     pub wavelengths: W,
     pub beam: B,
     pub compound_prism: CompoundPrism<T, S0, SI, SN, N, D>,
-    pub detector: (LinearDetectorArray<T, D>, DetectorArrayPositioning<T, D>),
+    pub detector: LinearDetectorArray<T, D>,
 }
 
 impl<
@@ -289,25 +320,25 @@ impl<
         const D: usize,
     > Spectrometer<T, W, B, S0, SI, SN, N, D>
 {
-    #[cfg(not(target_arch = "nvptx64"))]
-    pub fn new<Q: QuasiRandom<Scalar = T>>(
-        wavelengths: W,
-        beam: B,
-        compound_prism: CompoundPrism<T, S0, SI, SN, N, D>,
-        detector_array: LinearDetectorArray<T, D>,
-    ) -> Result<Self, RayTraceError>
-    where
-        B: Distribution<Q, Output = Ray<T, D>>,
-    {
-        let detector_array_position =
-            detector_array_positioning(compound_prism, detector_array, wavelengths, beam)?;
-        Ok(Self {
-            wavelengths,
-            beam,
-            compound_prism,
-            detector: (detector_array, detector_array_position),
-        })
-    }
+    // #[cfg(not(target_arch = "nvptx64"))]
+    // pub fn new<Q: QuasiRandom<Scalar = T>>(
+    //     wavelengths: W,
+    //     beam: B,
+    //     compound_prism: CompoundPrism<T, S0, SI, SN, N, D>,
+    //     detector_array: LinearDetectorArray<T, D>,
+    // ) -> Result<Self, RayTraceError>
+    // where
+    //     B: Distribution<Q, Output = Ray<T, D>>,
+    // {
+    //     let detector_array_position =
+    //         detector_array_positioning(compound_prism, detector_array.length, detector_array.normal, wavelengths, beam)?;
+    //     Ok(Self {
+    //         wavelengths,
+    //         beam,
+    //         compound_prism,
+    //         detector: detector_array,
+    //     })
+    // }
 
     /// Propagate a ray of `wavelength` start `initial_y` through the spectrometer.
     /// Returning the intersection position on the detector array
@@ -345,9 +376,9 @@ impl<
     where
         B: Distribution<Q, Output = Ray<T, D>>,
     {
-        let deviation_vector = self.detector.1.direction.mul_add(
+        let deviation_vector = self.detector.direction.mul_add(
             self.detector.length() * T::lossy_from(0.5f64),
-            self.detector.1.position,
+            self.detector.position,
         ) - self
             .beam
             .inverse_cdf(Q::from_scalar(T::lossy_from(0.5f64)))

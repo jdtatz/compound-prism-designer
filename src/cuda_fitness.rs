@@ -20,15 +20,17 @@ pub trait Kernel: DeviceCopy {
 }
 
 macro_rules! kernel_impl {
-    (@inner $fty:ident $n:literal $d:literal) => {
-        impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, GaussianBeam<$fty, $d>, Plane<$fty, $d>, Plane<$fty, $d>, CurvedPlane<$fty>, $n, $d> {
-            const FNAME: &'static [u8] = concat!("prob_dets_given_wavelengths_", stringify!($fty), "_", stringify!($n), "\0").as_bytes();
+    (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
+        paste::paste! {
+            impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty, $d>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d> {
+                const FNAME: &'static [u8] = concat!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]), "\0").as_bytes();
+            }
         }
     };
-
     ([$($n:literal),*]) => {
-        $( kernel_impl!(@inner f32 $n 2); )*
-        $( kernel_impl!(@inner f64 $n 2); )*
+        $( kernel_impl!(@inner f32; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
+        $( kernel_impl!(@inner f64; f64 GaussianBeam Plane     CurvedPlane $n 2); )*
+        $( kernel_impl!(@inner f32; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }
 kernel_impl!([0, 1, 2, 3, 4, 5, 6]);
