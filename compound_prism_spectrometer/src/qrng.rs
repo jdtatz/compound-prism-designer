@@ -166,6 +166,14 @@ const ALPHA_3: [f64; 3] = [
     1_f64 / (PHI_3 * PHI_3),
     1_f64 / (PHI_3 * PHI_3 * PHI_3),
 ];
+#[allow(clippy::unreadable_literal, clippy::excessive_precision)]
+const PHI_4: f64 = 1.167303978261418684256045899854842180720560371525489039140082449275651903429527;
+const ALPHA_4: [f64; 4] = [
+    1_f64 / PHI_4,
+    1_f64 / (PHI_4 * PHI_4),
+    1_f64 / (PHI_4 * PHI_4 * PHI_4),
+    1_f64 / (PHI_4 * PHI_4 * PHI_4 * PHI_4),
+];
 
 pub trait QuasiRandom: Copy {
     type Scalar;
@@ -203,7 +211,7 @@ impl<F: FloatExt> QuasiRandom for [F; 2] {
     }
 
     fn from_scalar(scalar: Self::Scalar) -> Self {
-        [scalar, scalar]
+        [scalar; 2]
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
@@ -225,7 +233,7 @@ impl<F: FloatExt> QuasiRandom for [F; 3] {
     }
 
     fn from_scalar(scalar: Self::Scalar) -> Self {
-        [scalar, scalar, scalar]
+        [scalar; 3]
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
@@ -237,6 +245,30 @@ impl<F: FloatExt> QuasiRandom for [F; 3] {
     fn mul_by_int(self, rhs: u32) -> Self {
         let rhs = F::lossy_from(rhs);
         [self[0] * rhs, self[1] * rhs, self[2] * rhs]
+    }
+}
+
+impl<F: FloatExt> QuasiRandom for [F; 4] {
+    type Scalar = F;
+
+    fn alpha() -> Self {
+        LossyFrom::lossy_from(ALPHA_4)
+    }
+
+    fn from_scalar(scalar: Self::Scalar) -> Self {
+        [scalar; 4]
+    }
+
+    fn iadd_mod_1(&mut self, rhs: Self) {
+        self[0] = (self[0] + rhs[0]).fract();
+        self[1] = (self[1] + rhs[1]).fract();
+        self[2] = (self[2] + rhs[2]).fract();
+        self[3] = (self[3] + rhs[3]).fract();
+    }
+
+    fn mul_by_int(self, rhs: u32) -> Self {
+        let rhs = F::lossy_from(rhs);
+        [self[0] * rhs, self[1] * rhs, self[2] * rhs, self[3] * rhs]
     }
 }
 

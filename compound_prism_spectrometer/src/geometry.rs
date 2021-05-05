@@ -266,7 +266,7 @@ impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N>
     }
 }
 
-impl<T: FloatExt> FromParametrizedHyperPlane<T, 2> for CurvedPlane<T> {
+impl<T: FloatExt> FromParametrizedHyperPlane<T, 2> for CurvedPlane<T, 2> {
     type Parametrization = CurvedPlaneParametrization<T>;
 
     fn from_hyperplane(
@@ -325,8 +325,8 @@ impl<T, S, B, const N: usize> BoundedHyperSurface<T, S, B, N> {
 }
 
 pub type Plane<T, const N: usize> = BoundedHyperSurface<T, HyperPlane<T, N>, PrismBounds<T>, N>;
-pub type CurvedPlane<T, P = ()> =
-    BoundedHyperSurface<T, SphericalLikeSurface<T, P, 2>, RadialBounds<T, 2>, 2>;
+pub type CurvedPlane<T, const D: usize> =
+    BoundedHyperSurface<T, SphericalLikeSurface<T, (), D>, RadialBounds<T, D>, D>;
 
 pub trait Surface<T, const N: usize>: Sized {
     fn intersection(self, ray: GeometricRay<T, N>) -> Option<GeometricRayIntersection<T, N>>;
@@ -356,7 +356,7 @@ impl<T: FloatExt, const N: usize> Plane<T, N> {
 }
 
 // TODO needs updating to new Vector impl
-impl<T: FloatExt> CurvedPlane<T> {
+impl<T: FloatExt, const N: usize> CurvedPlane<T, N> {
     pub(crate) fn end_points(self, height: T) -> [Vector<T, 2>; 2] {
         let max_dist_sq = self.bounds.radius_squared;
         let theta_2 = T::lossy_from(2u32)
@@ -439,4 +439,57 @@ pub(crate) fn create_joined_trapezoids<T: FloatExt, const N: usize, const D: usi
     let inter: [HyperPlane<T, D>; N] = angles.zip(sep_lengths).map(&mut next_plane);
     let last = (&mut next_plane)((last_angle, last_sep_length));
     (first, inter, last)
+}
+
+// TODO needs updating to new Vector impl
+/// Find the position and orientation of the detector array,
+/// parameterized by the minimum and maximum wavelengths of the input beam,
+/// and its angle from the normal.
+pub fn fit_ray_difference_surface<T: FloatExt, const D: usize>(
+    lower_ray: GeometricRay<T, D>,
+    upper_ray: GeometricRay<T, D>,
+    d_length: T,
+    d_angle: T,
+) -> Option<(Vector<T, D>, bool)> {
+    let spec_dir = Vector::angled_xy(d_angle).rot_90_xy();
+    let spec = spec_dir * d_length;
+
+    /// Matrix inverse if it exists
+    fn mat_inverse<T: FloatExt>(mat: [[T; 2]; 2]) -> Option<[[T; 2]; 2]> {
+        let [[a, b], [c, d]] = mat;
+        let det = a * d - b * c;
+        if det == T::zero() {
+            None
+        } else {
+            Some([[d / det, -b / det], [-c / det, a / det]])
+        }
+    }
+
+    fn mat_mul<T: FloatExt>(mat: [[T; 2]; 2], vec: [T; 2]) -> [T; 2] {
+        #![allow(clippy::many_single_char_names)]
+
+        let [[a, b], [c, d]] = mat;
+        let [x, y] = vec;
+        [a * x + b * y, c * x + d * y]
+    }
+
+    let mat = [
+        [upper_ray.direction.x(), -lower_ray.direction.x()],
+        [upper_ray.direction.y(), -lower_ray.direction.y()],
+    ];
+    let imat = mat_inverse(mat)?;
+    let temp = spec - upper_ray.origin + lower_ray.origin;
+    let [_d1, d2] = mat_mul(imat, [temp.x(), temp.y()]);
+    let l_vertex = lower_ray.direction.mul_add(d2, lower_ray.origin);
+    Some(if d2 > T::zero() {
+        (l_vertex, false)
+    } else {
+        let temp = -spec - upper_ray.origin + lower_ray.origin;
+        let [_d1, d2] = mat_mul(imat, [temp.x(), temp.y()]);
+        if d2 < T::zero() {
+            return None;
+        }
+        let u_vertex = lower_ray.direction.mul_add(d2, lower_ray.origin);
+        (u_vertex, true)
+    })
 }

@@ -5,15 +5,14 @@ authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
 edition = "2018"
 include = ["/src/**/*", "/Cargo.toml"]
 
-# [lib]
+[lib]
+crate-type = ["cdylib"]
+
+# [[bin]]
+# name = "kernel"
 # path = "src/kernel.rs"
-# crate-type = ["lib", "cdylib"]
 
-[[bin]]
-name = "kernel"
-path = "src/kernel.rs"
-
-[dependencies]
+[target.'cfg(target_arch="nvptx64")'.dependencies]
 derive_more = "0.99"
 libm = "0.2"
 compound_prism_spectrometer = { path = "../compound_prism_spectrometer" }

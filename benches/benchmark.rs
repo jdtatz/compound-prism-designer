@@ -114,19 +114,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         false,
     );
 
-    const NBIN: usize = 32;
-    let pmt_length = 3.2;
-    let spec_max_accepted_angle = (60_f32).to_radians();
-    let detarr = LinearDetectorArray::new(
-        NBIN as u32,
-        0.1f32,
-        0.1,
-        0.0,
-        spec_max_accepted_angle.cos(),
-        0.,
-        pmt_length,
-    );
-
     let wavelengths = UniformDistribution {
         bounds: (0.5, 0.82),
     };
@@ -135,7 +122,32 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         y_mean: 0.95,
         marker: core::marker::PhantomData,
     };
-    let spec = Spectrometer::new(wavelengths, beam, prism, detarr).unwrap();
+
+    const NBIN: usize = 32;
+    let pmt_length = 3.2;
+    let spec_max_accepted_angle = (60_f32).to_radians();
+    let det_angle = 0.0;
+    let (det_pos, det_flipped) =
+        detector_array_positioning(prism, pmt_length, det_angle, wavelengths, beam.median_y())
+            .expect("This is a valid spectrometer design.");
+    let detarr = LinearDetectorArray::new(
+        NBIN as u32,
+        0.1,
+        0.1,
+        0.0,
+        spec_max_accepted_angle.cos(),
+        0.,
+        pmt_length,
+        det_pos,
+        det_flipped,
+    );
+    // dbg!((&wavelengths, &beam, &prism, &detarr));
+    let spec = Spectrometer {
+        wavelengths,
+        beam,
+        compound_prism: prism,
+        detector: detarr,
+    };
     let cpu_fitness = fitness(&spec, 16_384, 16_384);
     let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
         .unwrap()

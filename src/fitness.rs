@@ -221,7 +221,7 @@ mod tests {
         let [first_length, lengths @ ..] = lengths;
         let height = 2.5;
         let width = 2.0;
-        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_>, 2, 2>::new(
+        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_, 2>, 2, 2>::new(
             glass0,
             glasses,
             first_angle,
@@ -239,19 +239,6 @@ mod tests {
             false,
         );
 
-        const NBIN: usize = 32;
-        let pmt_length = 3.2;
-        let spec_max_accepted_angle = (60_f64).to_radians();
-        let detarr = LinearDetectorArray::new(
-            NBIN as u32,
-            0.1,
-            0.1,
-            0.0,
-            spec_max_accepted_angle.cos(),
-            0.,
-            pmt_length,
-        );
-
         let wavelengths = UniformDistribution {
             bounds: (0.5, 0.82),
         };
@@ -260,9 +247,32 @@ mod tests {
             y_mean: 0.95,
             marker: core::marker::PhantomData,
         };
+
+        const NBIN: usize = 32;
+        let pmt_length = 3.2;
+        let spec_max_accepted_angle = (60_f64).to_radians();
+        let det_angle = 0.0;
+        let (det_pos, det_flipped) =
+            detector_array_positioning(prism, pmt_length, det_angle, wavelengths, beam.median_y())
+                .expect("This is a valid spectrometer design.");
+        let detarr = LinearDetectorArray::new(
+            NBIN as u32,
+            0.1,
+            0.1,
+            0.0,
+            spec_max_accepted_angle.cos(),
+            0.,
+            pmt_length,
+            det_pos,
+            det_flipped,
+        );
         // dbg!((&wavelengths, &beam, &prism, &detarr));
-        let spec = Spectrometer::new(wavelengths, beam, prism, detarr)
-            .expect("This is a valid spectrometer design.");
+        let spec = Spectrometer {
+            wavelengths,
+            beam,
+            compound_prism: prism,
+            detector: detarr,
+        };
 
         let DesignFitness {
             size,

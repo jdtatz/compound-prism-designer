@@ -16,7 +16,7 @@ toolchain = "nightly"
 command = "cargo"
 args = [
     "rustc",
-    "--bin=kernel",
+    "--lib",
     "--manifest-path=compound_prism_designer_kernel/Cargo.toml",
     "--release",
     "--target=nvptx64-nvidia-cuda.json",
@@ -29,6 +29,7 @@ args = [
     "-Cllvm-args=--mul-constant-optimization",
     "-Cllvm-args=--enable-local-reassign",
     "-Cllvm-args=--enable-dse-memoryssa",
+    "-Cllvm-args=--inline-threshold=1024",
     "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll",
     "-Cpasses=mem2reg sroa",
     "-Copt-level=3",
