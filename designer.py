@@ -9,7 +9,7 @@ from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
 from pymoo.optimize import minimize
 from multiprocessing.pool import ThreadPool
 from compound_prism_designer import RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
-    DetectorArray, GaussianBeam, Spectrometer, AbstractGlass, new_catalog
+    DetectorArray, UniformWavelengthDistribution, GaussianBeam, FiberBeam, Spectrometer, AbstractGlass, new_catalog, position_detector_array
 from compound_prism_designer.interactive import interactive_show, Design
 from dataclasses import dataclass, is_dataclass, fields
 from serde import deserialize, serialize
@@ -31,7 +31,8 @@ class CompoundPrismSpectrometerConfig:
     max_incident_angle: float
     angle_is_rad: bool
     wavelength_range: Tuple[float, float]
-    beam_width: float
+    fiber_core_radius: float
+    numerical_aperture: float
     ar_coated: bool
 
     glass_catalog_path: Optional[Path] = None
@@ -57,7 +58,8 @@ class CompoundPrismSpectrometerConfig:
 class OptimizerConfig:
     cpu_only: bool = False
     parallelize: bool = False
-    single_objective: bool = False
+    optimize_size: bool = True
+    optimize_deviation: bool = True
 
 
 @serialize(rename_all="spinalcase")
@@ -93,7 +95,6 @@ class CompoundPrismSpectrometerProblem(Problem):
         self.cpu_only = config.optimizer.cpu_only
         self.glass_list = list(config.spectrometer.glass_catalog)
         self.glass_dict = { g.name: g for g in self.glass_list }
-        single_objective =config.optimizer.single_objective
         catalog_bounds = 0, len(self.glass_list)
         height_bounds = (0.0001 * config.spectrometer.max_height, config.spectrometer.max_height)
         normalized_y_mean_bounds = (0, 1)
@@ -110,19 +111,23 @@ class CompoundPrismSpectrometerProblem(Problem):
                 ("glass_find", (np.float64, (nglass,))),
                 ("angles", (np.float64, (nglass + 1,))),
                 ("lengths", (np.float64, (nglass,))),
-                ("curvature", np.float64),
+                ("initial_curvature", (np.float64, (2,))),
+                ("final_curvature", (np.float64, (2,))),
                 ("height", np.float64),
                 ("normalized_y_mean", np.float64),
                 ("detector_array_angle", np.float64),
+                ("position", (np.float64, (2,))),
             ])
             bounds = {
                 "glass_find": [catalog_bounds] * nglass,
                 "angles": [angle_bounds] * (nglass + 1),
                 "lengths": [len_bounds] * nglass,
-                "curvature": curvature_bounds,
+                "initial_curvature": [curvature_bounds] * 2,
+                "final_curvature": [curvature_bounds] * 2,
                 "height": height_bounds,
                 "normalized_y_mean": normalized_y_mean_bounds,
                 "detector_array_angle": det_arr_angle_bounds,
+                "position": [(self.config.spectrometer.max_height + config.spectrometer.detector_array_length, self.config.spectrometer.max_height * 40), (-10 * self.config.spectrometer.max_height, 10 * self.config.spectrometer.max_height)]
             }
         else:
             glasses = [self.glass_dict[n] for n in nglass_or_const_glasses]
@@ -133,7 +138,8 @@ class CompoundPrismSpectrometerProblem(Problem):
             self._numpy_dtype = np.dtype([
                 ("angles", (np.float64, (nglass + 1,))),
                 ("lengths", (np.float64, (nglass,))),
-                ("curvature", np.float64),
+                ("initial_curvature", (np.float64, (2,))),
+                ("final_curvature", (np.float64, (2,))),
                 ("height", np.float64),
                 ("normalized_y_mean", np.float64),
                 ("detector_array_angle", np.float64),
@@ -141,7 +147,8 @@ class CompoundPrismSpectrometerProblem(Problem):
             bounds = {
                 "angles": [angle_bounds] * (nglass + 1),
                 "lengths": [len_bounds] * nglass,
-                "curvature": curvature_bounds,
+                "initial_curvature": [curvature_bounds] * 2,
+                "final_curvature": [curvature_bounds] * 2,
                 "height": height_bounds,
                 "normalized_y_mean": normalized_y_mean_bounds,
                 "detector_array_angle": det_arr_angle_bounds,
@@ -154,7 +161,7 @@ class CompoundPrismSpectrometerProblem(Problem):
 
         super().__init__(
             n_var=len(xl),
-            n_obj=1 if single_objective else 3,
+            n_obj=1 + int(config.optimizer.optimize_size) + int(config.optimizer.optimize_deviation),
             n_constr=1,
             xl=xl,
             xu=xu,
@@ -164,33 +171,52 @@ class CompoundPrismSpectrometerProblem(Problem):
 
     def create_spectrometer(self, params: np.ndarray) -> Spectrometer:
         params = params.view(self._numpy_dtype)[0]
-        return Spectrometer(
-            CompoundPrism(
-                glasses=self._glasses if self._glasses is not None else [self.glass_list[int(np.clip(i, 0, len(self.glass_list) - 1))] for i in params["glass_find"]],
-                angles=params["angles"],
-                lengths=params["lengths"],
-                curvature=params["curvature"],
-                height=params["height"],
-                width=self.config.spectrometer.prism_width,
-                ar_coated=self.config.spectrometer.ar_coated
-            ), DetectorArray(
-                bin_count=self.config.spectrometer.bin_count,
-                bin_size=self.config.spectrometer.bin_size,
-                linear_slope=self.config.spectrometer.linear_slope,
-                linear_intercept=self.config.spectrometer.linear_intercept,
-                length=self.config.spectrometer.detector_array_length,
-                max_incident_angle=self.config.spectrometer.max_incident_angle,
-                angle=params["detector_array_angle"]
-            ),
-            GaussianBeam(
-                wavelength_range=self.config.spectrometer.wavelength_range,
-                width=self.config.spectrometer.beam_width,
-                y_mean=params["height"] * params["normalized_y_mean"]
-            )
+        ic0, ic1 = params["initial_curvature"]
+        fc0, fc1 = params["final_curvature"]
+        compound_prism = CompoundPrism(
+            glasses=self._glasses if self._glasses is not None else [self.glass_list[int(np.clip(i, 0, len(self.glass_list) - 1))] for i in params["glass_find"]],
+            angles=params["angles"],
+            lengths=params["lengths"],
+            initial_curvature=(-ic0, ic1),
+            final_curvature=(fc0, fc1),
+            height=params["height"],
+            width=self.config.spectrometer.prism_width,
+            ar_coated=self.config.spectrometer.ar_coated
         )
+        # print(compound_prism)
+        wavelengths = UniformWavelengthDistribution(self.config.spectrometer.wavelength_range)
+        beam = FiberBeam(
+            core_radius=self.config.spectrometer.fiber_core_radius,
+            numerical_aperture=self.config.spectrometer.numerical_aperture,
+            center_y=params["height"] * params["normalized_y_mean"]
+        )
+        x, y = params["position"]
+        position = x, y
+        flipped = False
+        # position, flipped = position_detector_array(
+        #     length=self.config.spectrometer.detector_array_length,
+        #     angle=params["detector_array_angle"],
+        #     compound_prism=compound_prism,
+        #     wavelengths=wavelengths,
+        #     beam=beam,
+        # )
+        detector_array=DetectorArray(
+            bin_count=self.config.spectrometer.bin_count,
+            bin_size=self.config.spectrometer.bin_size,
+            linear_slope=self.config.spectrometer.linear_slope,
+            linear_intercept=self.config.spectrometer.linear_intercept,
+            length=self.config.spectrometer.detector_array_length,
+            max_incident_angle=self.config.spectrometer.max_incident_angle,
+            angle=params["detector_array_angle"],
+            position = position,
+            flipped = flipped,
+        )
+        # print(detector_array)
+        return Spectrometer(compound_prism, detector_array, wavelengths, beam)
 
     def _evaluate(self, x, out, *args, **kwargs):
         max_size = self.config.spectrometer.max_height * 40
+        max_info = np.log2(self.config.spectrometer.bin_count)
         try:
             spectrometer = self.create_spectrometer(x)
             fit = None
@@ -202,11 +228,23 @@ class CompoundPrismSpectrometerProblem(Problem):
                     raise RayTraceError()
             fit_info = np.log2(self.config.spectrometer.bin_count) - fit.info
             assert fit_info > 0
-            out["F"] = (fit.size, fit_info, fit.deviation) if self.n_obj == 3 else fit_info
+            result = []
+            if self.config.optimizer.optimize_size:
+                result.append(fit.size)
+            result.append(fit_info)
+            if self.config.optimizer.optimize_deviation:
+                result.append(fit.deviation)
+            out["F"] = result
             out["feasible"] = fit.size < max_size
             out["G"] = 0 if fit.size < max_size else 1
         except RayTraceError:
-            out["F"] = (max_size * 10, np.log2(self.config.spectrometer.bin_count), 1) if self.n_obj == 3 else np.log2(self.config.spectrometer.bin_count)
+            result = []
+            if self.config.optimizer.optimize_size:
+                result.append(max_size * 10)
+            result.append(max_info)
+            if self.config.optimizer.optimize_deviation:
+                result.append(1)
+            out["F"] = result
             out["feasible"] = False
             out["G"] = 1
 

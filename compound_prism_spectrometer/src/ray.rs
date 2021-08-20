@@ -1,7 +1,7 @@
-use crate::geometry::*;
 use crate::glasscat::Glass;
 use crate::utils::*;
 use crate::vector::{UnitVector, Vector};
+use crate::{drawable::Polygon, geometry::*, Drawable};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -28,6 +28,7 @@ pub trait DetectorArray<T, const D: usize>: Surface<T, D> {
     fn bin_count(&self) -> u32;
     fn length(&self) -> T;
     fn bin_index(&self, intersection: Vector<T, D>) -> Option<u32>;
+    fn mid_pt(&self) -> Vector<T, D>;
 }
 
 /// Compound Prism Specification
@@ -118,26 +119,23 @@ where
     }
 }
 
-#[cfg(not(target_arch = "nvptx64"))]
-impl<T: FloatExt, const N: usize>
-    CompoundPrism<T, Plane<T, 2>, Plane<T, 2>, CurvedPlane<T, 2>, N, 2>
+impl<T: FloatExt, S0, SI, SN, const N: usize, const D: usize> CompoundPrism<T, S0, SI, SN, N, D>
+where
+    S0: Surface<T, D> + Drawable<T>,
+    SI: Copy + Surface<T, D> + Drawable<T>,
+    SN: Surface<T, D> + Drawable<T>,
 {
-    pub fn polygons(&self) -> ([[Vector<T, 2>; 4]; N], [Vector<T, 2>; 4], Vector<T, 2>, T) {
-        let [mut u0, mut l0] = self.surface0.end_points(self.height);
+    pub fn polygons(&self) -> ([Polygon<T>; N], Polygon<T>) {
+        let mut path0 = self.surface0.draw();
         let polys = self.isurfaces.map(|s| {
-            let [u1, l1] = s.end_points(self.height);
-            let poly = [l0, u0, u1, l1];
-            u0 = u1;
-            l0 = l1;
+            let path1 = s.draw();
+            let poly = Polygon([path0.reverse(), path1]);
+            path0 = path1;
             poly
         });
-        let [u1, l1] = self.surfaceN.end_points(self.height);
-        (
-            polys,
-            [l0, u0, u1, l1],
-            self.surfaceN.surface.center,
-            self.surfaceN.surface.radius,
-        )
+        let path1 = self.surfaceN.draw();
+        let final_poly = Polygon([path0.reverse(), path1]);
+        (polys, final_poly)
     }
 }
 
@@ -436,7 +434,6 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `wavelength` - the wavelength of the light ray
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
-    #[cfg(not(target_arch = "nvptx64"))]
     pub fn trace<
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
@@ -447,7 +444,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         wavelength: T,
         cmpnd: CompoundPrism<T, S0, SI, SN, N, D>,
         detector: impl DetectorArray<T, D> + Copy,
-    ) -> impl Iterator<Item = Result<Vector<T, D>, RayTraceError>> {
+    ) -> impl Iterator<Item = GeometricRay<T, D>> {
         let mut ray = self;
         let mut n1 = T::one();
         let mut prism0 = Some((cmpnd.glass0, cmpnd.surface0));
@@ -464,7 +461,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
                     .translate(distance)
                     .refract(normal, n1, n2, cmpnd.ar_coated)?;
                 n1 = n2;
-                return Ok(Some(ray.origin));
+                return Ok(Some(GeometricRay::from(ray)));
             }
             match prisms.next() {
                 Some((glass, surf)) => {
@@ -476,7 +473,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
                         .translate(distance)
                         .refract(normal, n1, n2, cmpnd.ar_coated)?;
                     n1 = n2;
-                    Ok(Some(ray.origin))
+                    Ok(Some(GeometricRay::from(ray)))
                 }
                 None if !done && internal => {
                     internal = false;
@@ -488,19 +485,22 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
                     ray = ray
                         .translate(distance)
                         .refract(normal, n1, n2, cmpnd.ar_coated)?;
-                    Ok(Some(ray.origin))
+                    Ok(Some(GeometricRay::from(ray)))
                 }
                 None if !done && !internal => {
                     done = true;
                     let (pos, _, _) = ray.intersect_detector_array(&detector)?;
-                    Ok(Some(pos))
+                    Ok(Some(GeometricRay {
+                        origin: pos,
+                        direction: ray.direction,
+                    }))
                 }
                 _ if done => Ok(None),
                 _ => unreachable!(),
             }
         };
-        core::iter::once(Ok(self.origin))
-            .chain(core::iter::from_fn(move || propagation_fn().transpose()).fuse())
+        core::iter::once(GeometricRay::from(self))
+            .chain(core::iter::from_fn(move || propagation_fn().ok().flatten()).fuse())
     }
 }
 

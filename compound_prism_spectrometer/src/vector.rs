@@ -175,12 +175,13 @@ pub fn oproj<T: Copy + Ring, const N: usize>(
     a - b * (a.dot(b))
 }
 
-// pub fn cross_prod_magnitude_sq<T: Copy + Ring, const N: usize>(
-//     a: Vector<T, N>,
-//     UnitVector(b): UnitVector<T, N>,
-// ) -> T {
-//     a.norm_squared() - sqr(a.dot(b))
-// }
+/// $\| a x b \|^2$
+pub fn cross_prod_magnitude_sq<T: Copy + Ring, const N: usize>(
+    a: Vector<T, N>,
+    UnitVector(b): UnitVector<T, N>,
+) -> T {
+    a.norm_squared() - T::sqr(a.dot(b))
+}
 
 // Temp for back compat
 impl<T: FloatExt, const N: usize> Vector<T, N> {
@@ -196,7 +197,7 @@ impl<T: FloatExt, const N: usize> Vector<T, N> {
     //     self.0[2]
     // }
 
-    pub(crate) fn from_xy(x: T, y: T) -> Self {
+    pub fn from_xy(x: T, y: T) -> Self {
         let mut v = Self::ZERO;
         v[0] = x;
         v[1] = y;

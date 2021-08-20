@@ -1,3 +1,4 @@
+use crate::drawable::{Drawable, Path, Point};
 use crate::utils::*;
 use crate::vector::{UnitVector, Vector};
 use core::ops::*;
@@ -111,6 +112,7 @@ impl<T: Copy + ConstZero + Neg<Output = T> + Float, B: Bounds<T, N>, const N: us
         ray: GeometricRay<T, N>,
         bounds: B,
     ) -> Option<GeometricRayIntersection<T, N>> {
+        // https://en.wikipedia.org/wiki/Line–plane_intersection
         let GeometricRay { origin, direction } = ray;
         let ci = direction.dot(*self.normal);
         // maybe use float_eq::float_eq!(ci, T::ZERO, ulps <= 10)
@@ -150,6 +152,7 @@ fn spherical_ray_intersection<T: FloatExt, const N: usize>(
     radius_squared: T,
     ray: GeometricRay<T, N>,
 ) -> QuadricIntersection<T> {
+    // https://en.wikipedia.org/wiki/Line–sphere_intersection
     let GeometricRay { origin, direction } = ray;
     debug_assert!(direction.is_unit());
     let delta = origin - center;
@@ -345,25 +348,31 @@ where
     }
 }
 
-// TODO needs updating to new Vector impl
-impl<T: FloatExt, const N: usize> Plane<T, N> {
-    pub(crate) fn end_points(self, height: T) -> [Vector<T, N>; 2] {
+impl<T: FloatExt, const D: usize> Drawable<T> for Plane<T, D> {
+    fn draw(&self) -> Path<T> {
+        let height = self.bounds.height;
         let dx = self.surface.normal.tan_xy() * height * T::lossy_from(0.5f64);
         let ux = self.surface.point.x() - dx;
         let lx = self.surface.point.x() + dx;
-        [Vector::from_xy(ux, height), Vector::from_xy(lx, T::ZERO)]
+        Path::Line {
+            a: Point { x: ux, y: height },
+            b: Point { x: lx, y: T::ZERO },
+        }
     }
 }
 
-// TODO needs updating to new Vector impl
-impl<T: FloatExt, const N: usize> CurvedPlane<T, N> {
-    pub(crate) fn end_points(self, height: T) -> [Vector<T, 2>; 2] {
+impl<T: FloatExt, const D: usize> Drawable<T> for CurvedPlane<T, D> {
+    fn draw(&self) -> Path<T> {
         let max_dist_sq = self.bounds.radius_squared;
         let theta_2 = T::lossy_from(2u32)
             * (max_dist_sq.sqrt() / (T::lossy_from(2u32) * self.surface.radius)).asin();
         let r = self.bounds.center - self.surface.center;
-        let u = self.surface.center + r.rotate_xy(theta_2);
-        let l = self.surface.center + r.rotate_xy(-theta_2);
+        let mut u = self.surface.center + r.rotate_xy(theta_2);
+        let mut l = self.surface.center + r.rotate_xy(-theta_2);
+        if u.y() < l.y() {
+            core::mem::swap(&mut l, &mut u);
+        }
+        let height = u.y();
         debug_assert!(
             (u.y() - height).abs() < T::lossy_from(1e-4f64),
             "{:?} {}",
@@ -377,10 +386,25 @@ impl<T: FloatExt, const N: usize> CurvedPlane<T, N> {
         debug_assert!(
             ((l - r).norm_squared() - max_dist_sq).abs() / max_dist_sq < T::lossy_from(1e-4f64)
         );
-        [
-            Vector::from_xy(u.x(), height),
-            Vector::from_xy(l.x(), T::ZERO),
-        ]
+        Path::Arc {
+            a: Point {
+                x: u.x(),
+                y: height,
+            },
+            b: Point {
+                x: l.x(),
+                y: T::ZERO,
+            },
+            midpt: Point {
+                x: self.bounds.center.x(),
+                y: self.bounds.center.y(),
+            },
+            // center: Point {
+            //     x: self.surface.center.x(),
+            //     y: self.surface.center.y(),
+            // },
+            radius: self.surface.radius,
+        }
     }
 }
 

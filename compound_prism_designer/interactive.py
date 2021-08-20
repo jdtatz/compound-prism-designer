@@ -87,20 +87,20 @@ class Interactive:
             (self.designs[i] for i in event.ind), key=lambda s: -s.fitness.info
         )[0]
         spectrometer = design.spectrometer
-        waves = np.linspace(*spectrometer.gaussian_beam.wavelength_range, 200)
+        waves = np.linspace(*spectrometer.wavelengths.bounds, 200)
 
         transmission = spectrometer.transmission_probability(waves)
         p_det = transmission.sum(axis=0) * (1 / len(waves))
         p_w_l_D = transmission.sum(axis=1)
 
         # Draw Spectrometer
-        beam = spectrometer.gaussian_beam
-        wmin, wmax = beam.wavelength_range
+        beam = spectrometer.fiber_beam
+        wmin, wmax = spectrometer.wavelengths.bounds
         draw_spectrometer(
             self.prism_ax,
             spectrometer,
             zip((wmin, (wmin + wmax) / 2, wmax), ("r", "g", "b")),
-            (beam.y_mean - beam.width, beam.y_mean, beam.y_mean + beam.width),
+            (beam.center_y - beam.core_radius, beam.center_y, beam.center_y + beam.core_radius),
         )
 
         # Plot Design Results
@@ -123,7 +123,7 @@ class Interactive:
         for pc in parts["bodies"]:
             pc.set_facecolor("black")
         self.violin_ax.plot(
-            [1, len(p_det)], spectrometer.gaussian_beam.wavelength_range, "k--"
+            [1, len(p_det)], spectrometer.wavelengths.bounds, "k--"
         )
         self.det_ax.scatter(1 + np.arange(len(p_det)), p_det * 100, color="k")
         self.trans_ax.plot(waves, p_w_l_D * 100, "k")
@@ -259,6 +259,7 @@ def interactive_show(designs: Sequence[Design]):
     assert (
         mpl.rcParams["toolbar"] == "toolmanager"
     ), "Compound Prism Spectrometer Designer requires toolmanager"
+    assert mpl.get_backend() in mpl.rcsetup.interactive_bk, "Compound Prism Spectrometer Designer requires interactive backend"
     fig = plt.figure(constrained_layout=True)
     fig.canvas.manager.set_window_title("Compound Prism Spectrometer Designer")
     interactive = Interactive(fig, designs)
