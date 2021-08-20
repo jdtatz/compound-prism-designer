@@ -22,7 +22,7 @@ float_eq = { version = "0.6", default-features = false }
 nvptx-sys = { git = "https://github.com/jdtatz/nvptx-sys.git" }
 
 [dev-dependencies]
-statrs = "0.13"
+statrs = "0.15"
 
 [features]
 std = ["num-traits/std", "float_eq/std"]

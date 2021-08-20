@@ -1,6 +1,6 @@
 use compound_prism_spectrometer::{
-    CurvedPlane, DetectorArray, Distribution, FiberBeam, Float, FloatExt, GaussianBeam, Plane,
-    Qrng, QuasiRandom, Ray, Spectrometer, Surface, ToricLens, UniformDistribution, Welford,
+    Beam, CurvedPlane, DetectorArray, Distribution, FiberBeam, Float, FloatExt, GaussianBeam,
+    Plane, Qrng, Ray, Spectrometer, Surface, ToricLens, UniformDistribution, Welford,
 };
 use core::slice::from_raw_parts_mut;
 use nvptx_sys::{
@@ -96,8 +96,7 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
 unsafe fn kernel<
     F: CudaFloat,
     W: Copy + Distribution<F, Output = F>,
-    Q: QuasiRandom<Scalar = F>,
-    B: Copy + Distribution<Q, Output = Ray<F, D>>,
+    B: Copy + Beam<F, D>,
     S0: Copy + Surface<F, D>,
     SI: Copy + Surface<F, D>,
     SN: Copy + Surface<F, D>,
@@ -207,14 +206,14 @@ macro_rules! gen_kernel {
             pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
                 seed: $fty,
                 max_evals: u32,
-                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty, $d>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>,
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>,
                 prob: *mut $fty,
             ) {
                 let shared_spectrometer_ptr;
                 asm!(
                     ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
                     ptr = out(reg64) shared_spectrometer_ptr,
-                    size = const core::mem::size_of::<Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty, $d>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>>(),
+                    size = const core::mem::size_of::<Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>>(),
                     options(readonly, nostack, preserves_flags)
                 );
                 let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
@@ -225,7 +224,6 @@ macro_rules! gen_kernel {
     };
     ([$($n:literal),*]) => {
         $( gen_kernel!(@inner FastFloat<f32>; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        $( gen_kernel!(@inner FastFloat<f64>; f64 GaussianBeam Plane     CurvedPlane $n 2); )*
         $( gen_kernel!(@inner FastFloat<f32>; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }

@@ -1,4 +1,4 @@
-use crate::{cbrt::approx_cbrt, geometry::SandwichBounds, *};
+use crate::{cbrt::approx_cbrt, geometry::SandwichBounds, utils::Ring, *};
 
 fn sqr<T: Copy + core::ops::Mul<T, Output = T>>(v: T) -> T {
     v * v
@@ -21,15 +21,15 @@ pub struct ToricSurface<T> {
     poloidal_radius: T,
 }
 
-// impl<T: Copy + Ring + LossyFrom<u32>> ToricSurface<T> {
-//     pub fn implicit(self, p: Vector<T, 3>) -> T {
-//         let u = p - self.center;
-//         sqr(u.norm_squared() + self.toroidal_radius.sqr() - self.poloidal_radius.sqr())
-//             - T::lossy_from(4u32)
-//                 * self.toroidal_radius.sqr()
-//                 * crate::vector::cross_prod_magnitude_sq(u, self.toroidal_normal)
-//     }
-// }
+impl<T: Copy + Ring + LossyFrom<u32>> ToricSurface<T> {
+    pub fn implicit(self, p: Vector<T, 3>) -> T {
+        let u = p - self.center;
+        sqr(u.norm_squared() + self.toroidal_radius.sqr() - self.poloidal_radius.sqr())
+            - T::lossy_from(4u32)
+                * self.toroidal_radius.sqr()
+                * crate::vector::cross_prod_magnitude_sq(u, self.toroidal_normal)
+    }
+}
 
 #[inline]
 fn sympy_soln<F: FloatExt>(r_2: F, R_2: F, dp_magn_sq: F, dp_v: F, dp_n: F, n_v: F) -> [F; 4] {
@@ -194,6 +194,26 @@ impl<T: FloatExt, B: Copy + Bounds<T, 3>> HyperSurface<T, B, 3> for ToricSurface
         //     }
         // }?;
         let [r0, r1, r2, r3] = sympy_soln(r_2, R_2, dp_magn_sq, dp_v, dp_n, n_v);
+        float_eq::debug_assert_float_eq!(
+            self.implicit(direction.mul_add(r0, origin)),
+            T::ZERO,
+            abs <= T::lossy_from(1e-5_f64)
+        );
+        float_eq::debug_assert_float_eq!(
+            self.implicit(direction.mul_add(r1, origin)),
+            T::ZERO,
+            abs <= T::lossy_from(1e-5_f64)
+        );
+        float_eq::debug_assert_float_eq!(
+            self.implicit(direction.mul_add(r2, origin)),
+            T::ZERO,
+            abs <= T::lossy_from(1e-5_f64)
+        );
+        float_eq::debug_assert_float_eq!(
+            self.implicit(direction.mul_add(r3, origin)),
+            T::ZERO,
+            abs <= T::lossy_from(1e-5_f64)
+        );
         let (distance, p) = check_root(r0)
             .or_else(|| check_root(r1))
             .or_else(|| check_root(r2))
@@ -247,7 +267,7 @@ impl<T: FloatExt> FromParametrizedHyperPlane<T, 3> for ToricLens<T, 3> {
         Self {
             surface: ToricSurface {
                 center,
-                toroidal_normal: UnitVector::new(hyperplane.normal.0.rot_90_xy()),
+                toroidal_normal: UnitVector::new(hyperplane.normal.rot_90_xy()),
                 toroidal_radius,
                 poloidal_radius,
             },
@@ -261,6 +281,37 @@ impl<T: FloatExt> FromParametrizedHyperPlane<T, 3> for ToricLens<T, 3> {
                 height: sagitta,
             },
             marker: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: FloatExt, const D: usize> Drawable<T> for ToricLens<T, D> {
+    fn draw(&self) -> Path<T> {
+        let half_height = self.bounds.center.y();
+        let dx = self.bounds.normal.tan_xy() * half_height;
+        let ux = self.bounds.center.x() - dx;
+        let lx = self.bounds.center.x() + dx;
+        // let quasi_radius = (lx - self.surface.center.x()).hypot(self.surface.center.y());
+        let quasi_radius = self.surface.poloidal_radius;
+        let midpt = self
+            .bounds
+            .normal
+            .mul_add(self.bounds.height, self.bounds.center);
+        Path::Arc {
+            a: Point {
+                x: ux,
+                y: half_height * T::lossy_from(2u32),
+            },
+            b: Point { x: lx, y: T::ZERO },
+            midpt: Point {
+                x: midpt.x(),
+                y: midpt.y(),
+            },
+            // center: Point {
+            //     x: self.surface.center.x(),
+            //     y: self.surface.center.y(),
+            // },
+            radius: quasi_radius,
         }
     }
 }

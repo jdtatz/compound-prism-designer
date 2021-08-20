@@ -45,42 +45,19 @@ pub struct DesignFitness<F> {
 ///
 /// # Arguments
 ///  * `wavelength` - given wavelength
-pub fn p_dets_l_wavelength<
-    F: FloatExt,
-    W: Distribution<F, Output = F>,
-    B: Distribution<F, Output = Ray<F, D>>,
-    S0: Copy + Surface<F, D>,
-    SI: Copy + Surface<F, D>,
-    SN: Copy + Surface<F, D>,
-    const N: usize,
-    const D: usize,
->(
-    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+pub fn p_dets_l_wavelength<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize>(
+    spectrometer: &S,
     wavelength: F,
     max_n: usize,
 ) -> impl Iterator<Item = F> {
-    let nbin = spectrometer.detector.bin_count() as usize;
-    vector_quasi_monte_carlo_integration(max_n, F::lossy_from(5e-3f64), nbin, move |q: F| {
+    let nbin = spectrometer.detector_bin_count() as usize;
+    vector_quasi_monte_carlo_integration(max_n, F::lossy_from(5e-3f64), nbin, move |q| {
         // Inverse transform sampling-method
-        let ray = spectrometer.beam.inverse_cdf(q);
-        if let Ok((bin_idx, t)) = ray.propagate(
-            wavelength,
-            &spectrometer.compound_prism,
-            &spectrometer.detector,
-        ) {
-            debug_assert!(t.is_finite());
-            debug_assert!(F::zero() <= t && t <= F::one());
-            // What is actually being integrated is
-            // pdf_t = t * pdf(y, z);
-            // But because of importance sampling using the same distribution
-            // pdf_t /= pdf(y, z);
-            // the pdf(y, z) is cancelled, so.
-            // pdf_t = t;
-            let pdf_t = t;
-            Some((bin_idx as usize, pdf_t))
-        } else {
-            None
-        }
+        let ray = spectrometer.sample_ray(q);
+        spectrometer
+            .propagate(ray, wavelength)
+            .ok()
+            .map(|(idx, t)| (idx as usize, t))
     })
     .into_iter()
     .map(|w| w.mean)
@@ -94,21 +71,12 @@ pub fn p_dets_l_wavelength<
 /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-pub fn mutual_information<
-    F: FloatExt,
-    W: Distribution<F, Output = F>,
-    B: Distribution<F, Output = Ray<F, D>>,
-    S0: Copy + Surface<F, D>,
-    SI: Copy + Surface<F, D>,
-    SN: Copy + Surface<F, D>,
-    const N: usize,
-    const D: usize,
->(
-    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+pub fn mutual_information<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize>(
+    spectrometer: &S,
     max_n: usize,
     max_m: usize,
 ) -> F {
-    let nbin = spectrometer.detector.bin_count() as usize;
+    let nbin = spectrometer.detector_bin_count() as usize;
     // p(d=D)
     let mut p_dets = vec![Welford::new(); nbin];
     // -H(D|Λ)
@@ -116,7 +84,7 @@ pub fn mutual_information<
     let qrng = Qrng::new(F::lossy_from(0.5f64));
     for u in qrng.take(max_n) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
-        let w = spectrometer.wavelengths.inverse_cdf(u);
+        let w = spectrometer.sample_wavelength(u);
         // p(d=D|λ=Λ)
         let p_dets_l_w = p_dets_l_wavelength(spectrometer, w, max_m);
         // -H(D|λ=Λ)
@@ -149,17 +117,8 @@ pub fn mutual_information<
 /// * size = the distance from the mean starting position of the beam to the center of detector array
 /// * info = I(Λ; D)
 /// * deviation = sin(abs(angle of deviation))
-pub fn fitness<
-    F: FloatExt,
-    W: Copy + Distribution<F, Output = F>,
-    B: Copy + Distribution<F, Output = Ray<F, D>>,
-    S0: Copy + Surface<F, D>,
-    SI: Copy + Surface<F, D>,
-    SN: Copy + Surface<F, D>,
-    const N: usize,
-    const D: usize,
->(
-    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+pub fn fitness<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize>(
+    spectrometer: &S,
     max_n: usize,
     max_m: usize,
 ) -> DesignFitness<F> {
@@ -245,7 +204,6 @@ mod tests {
         let beam = GaussianBeam {
             width: 0.2,
             y_mean: 0.95,
-            marker: core::marker::PhantomData,
         };
 
         const NBIN: usize = 32;
@@ -253,7 +211,7 @@ mod tests {
         let spec_max_accepted_angle = (60_f64).to_radians();
         let det_angle = 0.0;
         let (det_pos, det_flipped) =
-            detector_array_positioning(prism, pmt_length, det_angle, wavelengths, beam.median_y())
+            detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam)
                 .expect("This is a valid spectrometer design.");
         let detarr = LinearDetectorArray::new(
             NBIN as u32,

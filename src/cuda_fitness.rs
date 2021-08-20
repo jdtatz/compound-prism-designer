@@ -22,14 +22,13 @@ pub trait Kernel: DeviceCopy {
 macro_rules! kernel_impl {
     (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
         paste::paste! {
-            impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty, $d>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d> {
+            impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d> {
                 const FNAME: &'static [u8] = concat!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]), "\0").as_bytes();
             }
         }
     };
     ([$($n:literal),*]) => {
         $( kernel_impl!(@inner f32; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        $( kernel_impl!(@inner f64; f64 GaussianBeam Plane     CurvedPlane $n 2); )*
         $( kernel_impl!(@inner f32; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }
@@ -57,35 +56,25 @@ impl CudaFitnessContext {
 
     fn launch_p_dets_l_ws<
         F: FloatExt + DeviceCopy,
-        W: Distribution<F, Output = F>,
-        B: Distribution<F, Output = Ray<F, D>>,
-        S0: Surface<F, D>,
-        SI: Surface<F, D>,
-        SN: Surface<F, D>,
-        const N: usize,
+        S: GenericSpectrometer<F, D> + Kernel,
         const D: usize,
     >(
         &mut self,
         seed: f64,
-        spec: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+        spec: &S,
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
-    ) -> rustacuda::error::CudaResult<Vec<F>>
-    where
-        Spectrometer<F, W, B, S0, SI, SN, N, D>: Kernel,
-    {
+    ) -> rustacuda::error::CudaResult<Vec<F>> {
         ContextStack::push(&self.ctxt)?;
 
-        let nbin = spec.detector.bin_count();
+        let nbin = spec.detector_bin_count();
         let nprobs = (max_n * nbin) as usize;
         let mut dev_spec = ManuallyDrop::new(DeviceBox::new(spec)?);
         let mut dev_probs = ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(nprobs) }?);
-        let function = self.module.get_function(unsafe {
-            CStr::from_bytes_with_nul_unchecked(
-                <Spectrometer<F, W, B, S0, SI, SN, N, D> as Kernel>::FNAME,
-            )
-        })?;
+        let function = self
+            .module
+            .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(<S as Kernel>::FNAME) })?;
         let dynamic_shared_mem = nbin * nwarp * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
@@ -137,30 +126,22 @@ where
 
 pub fn cuda_fitness<
     F: FloatExt + DeviceCopy,
-    W: Copy + Distribution<F, Output = F>,
-    B: Copy + Distribution<F, Output = Ray<F, D>>,
-    S0: Copy + Surface<F, D>,
-    SI: Copy + Surface<F, D>,
-    SN: Copy + Surface<F, D>,
-    const N: usize,
+    S: GenericSpectrometer<F, D> + Kernel,
     const D: usize,
 >(
-    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+    spectrometer: &S,
     seeds: &[f64],
     max_n: u32,
     nwarp: u32,
     max_eval: u32,
-) -> rustacuda::error::CudaResult<Option<DesignFitness<F>>>
-where
-    Spectrometer<F, W, B, S0, SI, SN, N, D>: Kernel,
-{
+) -> rustacuda::error::CudaResult<Option<DesignFitness<F>>> {
     let max_err = F::lossy_from(5e-3f64);
     let max_err_sq = max_err * max_err;
 
     let mut lock = CACHED_CUDA_FITNESS_CONTEXT.lock();
     let state = get_or_try_insert_with(&mut *lock, || CudaFitnessContext::new(quick_init()?))?;
 
-    let nbin = spectrometer.detector.bin_count() as usize;
+    let nbin = spectrometer.detector_bin_count() as usize;
     // p(d=D)
     let mut p_dets = vec![Welford::new(); nbin];
     // -H(d=D|Λ)

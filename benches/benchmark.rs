@@ -1,4 +1,3 @@
-#![feature(array_map)]
 #![allow(clippy::excessive_precision)]
 #[macro_use]
 extern crate criterion;
@@ -18,7 +17,6 @@ impl criterion::profiler::Profiler for GProf {
 
     fn stop_profiling(&mut self, benchmark_id: &str, benchmark_dir: &std::path::Path) {
         use pprof::protos::Message;
-        use std::io::Write;
         std::fs::create_dir_all(benchmark_dir).unwrap();
         let profile_path = benchmark_dir.join(format!("{}.pb", benchmark_id));
         if profile_path.exists() {
@@ -120,7 +118,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let beam = GaussianBeam {
         width: 0.2,
         y_mean: 0.95,
-        marker: core::marker::PhantomData,
     };
 
     const NBIN: usize = 32;
@@ -128,7 +125,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let spec_max_accepted_angle = (60_f32).to_radians();
     let det_angle = 0.0;
     let (det_pos, det_flipped) =
-        detector_array_positioning(prism, pmt_length, det_angle, wavelengths, beam.median_y())
+        detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam)
             .expect("This is a valid spectrometer design.");
     let detarr = LinearDetectorArray::new(
         NBIN as u32,

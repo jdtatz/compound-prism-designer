@@ -11,9 +11,12 @@ detector-array-length = 32
 max-incident-angle = 45
 angle-is-rad = false
 wavelength-range = [ 0.5, 0.82,]
-beam-width = 3.2
+fiber-core-radius = 0.050
+numerical-aperture = 0.32
 ar-coated = true
 
 [optimizer]
 cpu-only = false
 parallelize = false
+optimize-size = true
+optimize-deviation = false
