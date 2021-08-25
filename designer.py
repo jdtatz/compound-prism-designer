@@ -31,9 +31,12 @@ class CompoundPrismSpectrometerConfig:
     max_incident_angle: float
     angle_is_rad: bool
     wavelength_range: Tuple[float, float]
-    fiber_core_radius: float
-    numerical_aperture: float
     ar_coated: bool
+    # Gaussian Beam
+    beam_width: Optional[float] = None
+    # Fiber Beam
+    fiber_core_radius: Optional[float] = None
+    numerical_aperture: Optional[float] = None
 
     glass_catalog_path: Optional[Path] = None
 
@@ -103,6 +106,9 @@ class CompoundPrismSpectrometerProblem(Problem):
         angle_bounds = (-np.pi / 2, np.pi / 2)
         len_bounds = (0, 10)
         nglass_or_const_glasses = config.nglass_or_const_glasses
+        self.use_gaussian_beam = config.spectrometer.beam_width is not None
+        self.use_fiber_beam = config.spectrometer.fiber_core_radius is not None and config.spectrometer.numerical_aperture is not None
+        assert self.use_gaussian_beam or self.use_fiber_beam
 
         if isinstance(nglass_or_const_glasses, int):
             nglass = nglass_or_const_glasses
@@ -111,8 +117,7 @@ class CompoundPrismSpectrometerProblem(Problem):
                 ("glass_find", (np.float64, (nglass,))),
                 ("angles", (np.float64, (nglass + 1,))),
                 ("lengths", (np.float64, (nglass,))),
-                ("initial_curvature", (np.float64, (2,))),
-                ("final_curvature", (np.float64, (2,))),
+                ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
                 ("height", np.float64),
                 ("normalized_y_mean", np.float64),
                 ("detector_array_angle", np.float64),
@@ -122,8 +127,7 @@ class CompoundPrismSpectrometerProblem(Problem):
                 "glass_find": [catalog_bounds] * nglass,
                 "angles": [angle_bounds] * (nglass + 1),
                 "lengths": [len_bounds] * nglass,
-                "initial_curvature": [curvature_bounds] * 2,
-                "final_curvature": [curvature_bounds] * 2,
+                "curvature": [curvature_bounds] * (1 if self.use_gaussian_beam else 4),
                 "height": height_bounds,
                 "normalized_y_mean": normalized_y_mean_bounds,
                 "detector_array_angle": det_arr_angle_bounds,
@@ -138,8 +142,7 @@ class CompoundPrismSpectrometerProblem(Problem):
             self._numpy_dtype = np.dtype([
                 ("angles", (np.float64, (nglass + 1,))),
                 ("lengths", (np.float64, (nglass,))),
-                ("initial_curvature", (np.float64, (2,))),
-                ("final_curvature", (np.float64, (2,))),
+                ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
                 ("height", np.float64),
                 ("normalized_y_mean", np.float64),
                 ("detector_array_angle", np.float64),
@@ -147,8 +150,7 @@ class CompoundPrismSpectrometerProblem(Problem):
             bounds = {
                 "angles": [angle_bounds] * (nglass + 1),
                 "lengths": [len_bounds] * nglass,
-                "initial_curvature": [curvature_bounds] * 2,
-                "final_curvature": [curvature_bounds] * 2,
+                "curvature": [curvature_bounds] * (1 if self.use_gaussian_beam else 4),
                 "height": height_bounds,
                 "normalized_y_mean": normalized_y_mean_bounds,
                 "detector_array_angle": det_arr_angle_bounds,
@@ -171,25 +173,33 @@ class CompoundPrismSpectrometerProblem(Problem):
 
     def create_spectrometer(self, params: np.ndarray) -> Spectrometer:
         params = params.view(self._numpy_dtype)[0]
-        ic0, ic1 = params["initial_curvature"]
-        fc0, fc1 = params["final_curvature"]
+        if self.use_gaussian_beam:
+            curvature = params["curvature"]
+        else:
+            ic0, ic1, fc0, fc1 = params["curvature"]
+            curvature = ((-ic0, ic1), (fc0, fc1))
         compound_prism = CompoundPrism(
             glasses=self._glasses if self._glasses is not None else [self.glass_list[int(np.clip(i, 0, len(self.glass_list) - 1))] for i in params["glass_find"]],
             angles=params["angles"],
             lengths=params["lengths"],
-            initial_curvature=(-ic0, ic1),
-            final_curvature=(fc0, fc1),
+            curvature=curvature,
             height=params["height"],
             width=self.config.spectrometer.prism_width,
             ar_coated=self.config.spectrometer.ar_coated
         )
         # print(compound_prism)
         wavelengths = UniformWavelengthDistribution(self.config.spectrometer.wavelength_range)
-        beam = FiberBeam(
-            core_radius=self.config.spectrometer.fiber_core_radius,
-            numerical_aperture=self.config.spectrometer.numerical_aperture,
-            center_y=params["height"] * params["normalized_y_mean"]
-        )
+        if self.use_gaussian_beam:
+            beam = GaussianBeam(
+                width=self.config.spectrometer.beam_width,
+                y_mean=params["height"] * params["normalized_y_mean"],
+            )
+        else:
+            beam = FiberBeam(
+                core_radius=self.config.spectrometer.fiber_core_radius,
+                numerical_aperture=self.config.spectrometer.numerical_aperture,
+                center_y=params["height"] * params["normalized_y_mean"]
+            )
         x, y = params["position"]
         position = x, y
         flipped = False

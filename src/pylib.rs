@@ -365,6 +365,16 @@ impl PyFiberBeam {
     fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
         (self.core_radius, self.numerical_aperture, self.center_y)
     }
+
+    #[getter]
+    fn get_y_mean(&self) -> impl IntoPy<PyObject> {
+        self.center_y
+    }
+
+    #[getter]
+    fn get_width(&self) -> impl IntoPy<PyObject> {
+        self.core_radius
+    }
 }
 
 #[pyproto]
@@ -666,9 +676,7 @@ impl IntoPy<PyObject> for DimensionedCurvature {
 }
 
 #[pyclass(name = "CompoundPrism", module = "compound_prism_designer")]
-#[pyo3(
-    text_signature = "(glasses, angles, lengths, curvature, curvature, height, width, ar_coated)"
-)]
+#[pyo3(text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)")]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
     compound_prism: DimensionedSizedCompoundPrism<f64>,
@@ -699,8 +707,6 @@ impl PyCompoundPrism {
         angles: Vec<f64>,
         lengths: Vec<f64>,
         curvature: DimensionedCurvature,
-        initial_curvature: (f64, f64),
-        final_curvature: (f64, f64),
         height: f64,
         width: f64,
         ar_coated: bool,

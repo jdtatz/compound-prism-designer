@@ -15,7 +15,7 @@ class ZemaxException(Exception):
 
 def create_zemax_file(spec: Spectrometer, zemax_file: str):
     cmpnd = spec.compound_prism
-    beam = spec.gaussian_beam
+    beam = spec.beam
     detarr = spec.detector_array
 
     EnsureModule("ZOSAPI_Interfaces", 0, 1, 0)
