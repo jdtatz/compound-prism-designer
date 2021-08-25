@@ -50,16 +50,16 @@ OBJECT 'DETECTOR'
     INTERFACE COATING ASB AIR AIR
 
 WAVELENGTH {wi}
-GAUSSIAN X 0 0 1000 {spectrometer.gaussian_beam.width}
-SHIFT Y {spectrometer.gaussian_beam.y_mean - spectrometer.compound_prism.height / 2}
+GAUSSIAN X 0 0 1000 {spectrometer.beam.width}
+SHIFT Y {spectrometer.beam.y_mean - spectrometer.compound_prism.height / 2}
 
 WAVELENGTH {wm}
-GAUSSIAN X 0 0 1000 {spectrometer.gaussian_beam.width}
-SHIFT Y {spectrometer.gaussian_beam.y_mean - spectrometer.compound_prism.height / 2}
+GAUSSIAN X 0 0 1000 {spectrometer.beam.width}
+SHIFT Y {spectrometer.beam.y_mean - spectrometer.compound_prism.height / 2}
 
 WAVELENGTH {wf}
-GAUSSIAN X 0 0 1000 {spectrometer.gaussian_beam.width}
-SHIFT Y {spectrometer.gaussian_beam.y_mean - spectrometer.compound_prism.height / 2}
+GAUSSIAN X 0 0 1000 {spectrometer.beam.width}
+SHIFT Y {spectrometer.beam.y_mean - spectrometer.compound_prism.height / 2}
 
 RETURN
 

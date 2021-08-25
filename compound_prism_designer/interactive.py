@@ -94,13 +94,13 @@ class Interactive:
         p_w_l_D = transmission.sum(axis=1)
 
         # Draw Spectrometer
-        beam = spectrometer.fiber_beam
+        beam = spectrometer.beam
         wmin, wmax = spectrometer.wavelengths.bounds
         draw_spectrometer(
             self.prism_ax,
             spectrometer,
             zip((wmin, (wmin + wmax) / 2, wmax), ("r", "g", "b")),
-            (beam.center_y - beam.core_radius, beam.center_y, beam.center_y + beam.core_radius),
+            (beam.y_mean - beam.width, beam.y_mean, beam.y_mean + beam.width),
         )
 
         # Plot Design Results
