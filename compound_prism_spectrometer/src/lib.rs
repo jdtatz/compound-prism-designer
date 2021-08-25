@@ -2,7 +2,7 @@
     all(any(not(feature = "std"), target_arch = "nvptx64"), not(test)),
     no_std
 )]
-#![feature(array_zip, min_type_alias_impl_trait)]
+#![feature(array_zip, type_alias_impl_trait)]
 #![allow(
     clippy::blocks_in_if_conditions,
     clippy::range_plus_one,
