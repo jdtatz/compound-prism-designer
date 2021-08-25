@@ -381,16 +381,16 @@ enum BeamDistributions {
 }
 
 macro_rules! map_beam_distributions {
-    ($beam_distribution:expr => |$distribution:ident| $body:expr ) => {
+    ($beam_distribution:expr => |$distribution:ident $(, $beam_ty:ident)?| $body:expr ) => {
         match $beam_distribution {
             BeamDistributions::Gaussian(PyGaussianBeam {
                 gaussian_beam: $distribution,
                 ..
-            }) => $body,
+            }) => {$(type $beam_ty<T> = GaussianBeam<T>;)? $body},
             BeamDistributions::Fiber(PyFiberBeam {
                 fiber_beam: $distribution,
                 ..
-            }) => $body,
+            }) => {$(type $beam_ty<T> = FiberBeam<T>;)? $body},
         }
     };
 }
@@ -415,7 +415,8 @@ macro_rules! call_sized_macro {
 macro_rules! define_sized_compound_prism {
     ([$($n:literal),+]) => {
         paste::paste! {
-            #[derive(Debug, Clone, Copy, From)]
+            #[derive(Debug, Clone, Copy, From, WrappedFrom)]
+            #[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
             enum SizedCompoundPrism<F: FloatExt, S0: Surface<F, D>, SI: Surface<F, D>, SN: Surface<F, D>, const D: usize> {
                 $( [<CompoundPrism $n>](CompoundPrism<F, S0, SI, SN, $n, D>) ),*
             }
@@ -581,45 +582,6 @@ where
         let close_p = path_cls.getattr("CLOSEPOLY")?;
 
         let point2array = |Point { x, y }: Point<f64>| (x, y);
-        // let createArc = |a: Point<f64>, b: Point<f64>, midpt: Point<f64>, center: Point<f64>, radius: f64| {
-        //     let mut t1 = f64::to_degrees(f64::atan2(b.y - center.y, b.x - center.x));
-        //     let mut t2 = f64::to_degrees(f64::atan2(a.y - center.y, a.x - center.x));
-        //     let is_rightward = midpt.x >= center.x;
-        //     if !is_rightward {
-        //         core::mem::swap(&mut t1, &mut t2);
-        //     }
-        //     let arc = path_cls.call_method1("arc", (t1, t2))?;
-        //     let transform = affine_cls
-        //         .call0()?
-        //         .call_method1("scale", (radius,))?
-        //         .call_method1("translate", (center.x, center.y))?;
-        //     arc.call_method1("transformed", (transform,))
-        // };
-
-        // let path2Path = |p: Path<f64>| match p {
-        //     Path::Line { a, b } => path_cls.call1((array![[a.x, a.y], [b.x, b.y]].to_pyarray(py),)),
-        //     Path::Arc {
-        //         a,
-        //         b,
-        //         midpt,
-        //         center,
-        //         radius,
-        //     } => {
-        //         let mut t1 = f64::to_degrees(f64::atan2(b.y - center.y, b.x - center.x));
-        //         let mut t2 = f64::to_degrees(f64::atan2(a.y - center.y, a.x - center.x));
-        //         let is_rightward = midpt.x >= center.x;
-        //         if !is_rightward {
-        //             core::mem::swap(&mut t1, &mut t2);
-        //         }
-        //         let arc = path_cls.call_method1("arc", (t1, t2))?;
-        //         let transform = affine_cls
-        //             .call0()?
-        //             .call_method1("scale", (radius,))?
-        //             .call_method1("translate", (center.x, center.y))?;
-        //         arc.call_method1("transformed", (transform,))
-        //     }
-        // };
-
         let path2Path = |p: Path<f64>, start_code| match p {
             Path::Line { a, b } => (
                 vec![point2array(a), point2array(b)],
@@ -643,8 +605,6 @@ where
                     ],
                     vec![start_code, curve_4, curve_4, curve_4],
                 )
-                // let [[a, c0, c1, midpt], [_, c2, c3, b]] = arc_as_2_cubic_béziers(a, midpt, b, curvature);
-                // (vec![point2array(a), point2array(c0), point2array(c1), point2array(midpt), point2array(c2), point2array(c3), point2array(b)], vec![start_code, curve_4, curve_4, curve_4, curve_4, curve_4, curve_4])
             }
         };
 
@@ -658,144 +618,71 @@ where
                     let verts: Vec<_> = vertL.into_iter().chain(vertR).chain(core::iter::once(point2array(pathL.start()))).collect();
                     let codes: Vec<_> = codesL.into_iter().chain(codesR).chain(core::iter::once(close_p)).collect();
                     path_cls.call1((verts, codes))
-
-                    // let pL = path2Path(pathL)?;
-                    // let pR = path2Path(pathR)?;
-                    // match (pathL, pathR) {
-                    //     (Path::Line { a, b }, Path::Line { a: c, b: d }) => path_cls.call1(((point2array(a), point2array(b), point2array(c), point2array(d)),)),
-                    //     (Path::Line { a, b }, Path::Arc { a: c, b: d, center, radius, midpt }) => path_cls.call_method1("make_compound_path", (createArc(c, d, midpt, center, radius)?, path_cls.call1(((point2array(c), point2array(b), point2array(a), point2array(d)),))?)),
-                    //     (Path::Arc { a, b, center, radius, midpt }, Path::Line { a: c, b: d }) => path_cls.call_method1("make_compound_path", (createArc(b, a, midpt, center, radius)?, path_cls.call1(((point2array(b), point2array(c), point2array(d), point2array(a)),))?)),
-                    //     (Path::Arc { a, b, center: cL, radius: rL, midpt: mL }, Path::Arc { a: c, b: d, center: cR, radius: rR, midpt: mR }) => path_cls.call_method1("make_compound_path", (createArc(b, a, mL, cL, rL)?, createArc(c, d, mR, cR, rR)?)),
-                    // }
-                    // let mid = (point2array(pathL.end()), point2array(pathR.start()));
-                    // let fin = (point2array(pathR.end()), point2array(pathL.start()));
-                    // let mid = path_cls.call1((mid,))?;
-                    // let fin = path_cls.call1((fin,))?;
-                    // path_cls.call_method1("make_compound_path", (pL, mid, pR, fin))
                 })
                 .collect::<PyResult<Vec<_>>>()
         })
     }
 }
 
-// #[pyclass(name = "CompoundPrism", gc, module = "compound_prism_designer")]
-// #[pyo3(text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)")]
-// #[derive(Debug, Clone)]
-// struct PyCompoundPrism2D {
-//     compound_prism: SizedCompoundPrism<f64, Plane<f64, 2>, Plane<f64, 2>, CurvedPlane<f64, 2>, 2>,
-//     #[pyo3(get)]
-//     glasses: Vec<Py<PyGlass>>,
-//     #[pyo3(get)]
-//     angles: Vec<f64>,
-//     #[pyo3(get)]
-//     lengths: Vec<f64>,
-//     #[pyo3(get)]
-//     curvature: f64,
-//     #[pyo3(get)]
-//     height: f64,
-//     #[pyo3(get)]
-//     width: f64,
-//     #[pyo3(get)]
-//     ar_coated: bool,
+#[derive(Debug, Clone, Copy, From, WrappedFrom)]
+#[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
+enum DimensionedSizedCompoundPrism<F: FloatExt> {
+    Dim2(SizedCompoundPrism<F, Plane<F, 2>, Plane<F, 2>, CurvedPlane<F, 2>, 2>),
+    Dim3(SizedCompoundPrism<F, ToricLens<F, 3>, Plane<F, 3>, ToricLens<F, 3>, 3>),
+}
+
+macro_rules! map_dimensioned_sized_compound_prism {
+    ($dimensioned_sized_compound_prism:expr => |$compound_prism:ident $(, $dim:ident)?| $body:expr ) => {
+        match $dimensioned_sized_compound_prism {
+            DimensionedSizedCompoundPrism::Dim2($compound_prism) => { $(const $dim: usize = 2;)? map_sized_compound_prism!($compound_prism => |$compound_prism| $body)},
+            DimensionedSizedCompoundPrism::Dim3($compound_prism) => { $(const $dim: usize = 3;)? map_sized_compound_prism!($compound_prism => |$compound_prism| $body)},
+        }
+    };
+}
+
+// #[derive(Debug, Clone, Copy, From)]
+// enum DimensionedSizedSpectrometer<
+//     F: FloatExt,
+//     W: Distribution<F, Output = F>,
+//     B: Beam<F, 2> + Beam<F, 3>,
+// > {
+//     Dim2(SizedSpectrometer<F, W, B, Plane<F, 2>, Plane<F, 2>, CurvedPlane<F, 2>, 2>),
+//     Dim3(SizedSpectrometer<F, W, B, ToricLens<F, 3>, Plane<F, 3>, ToricLens<F, 3>, 3>),
 // }
 
-// #[pymethods]
-// impl PyCompoundPrism2D {
-//     #[new]
-//     fn create(
-//         glasses: Vec<Py<PyGlass>>,
-//         angles: Vec<f64>,
-//         lengths: Vec<f64>,
-//         curvature: f64,
-//         height: f64,
-//         width: f64,
-//         ar_coated: bool,
-//         py: Python,
-//     ) -> PyResult<Self> {
-//         let initial_plane_parametrization = PlaneParametrization { height, width };
-//         let lens_parametrization = CurvedPlaneParametrization {
-//             signed_normalized_curvature: curvature,
-//             height,
-//         };
-//         let compound_prism = SizedCompoundPrism::new(
-//             py,
-//             &glasses,
-//             &angles,
-//             &lengths,
-//             initial_plane_parametrization,
-//             lens_parametrization,
-//             height,
-//             width,
-//             ar_coated,
-//         )?;
-//         Ok(PyCompoundPrism2D {
-//             compound_prism,
-//             glasses,
-//             angles,
-//             lengths,
-//             curvature,
-//             height,
-//             width,
-//             ar_coated,
-//         })
-//     }
+#[derive(Debug, Clone, Copy, From, FromPyObject)]
+enum DimensionedCurvature {
+    Dim2(f64),
+    Dim3((f64, f64), (f64, f64)),
+}
 
-//     fn __getnewargs__(&self, py: Python) -> PyResult<impl IntoPy<PyObject> + '_> {
-//         Ok((
-//             self.glasses
-//                 .iter()
-//                 .map(|p| p.as_ref(py).try_borrow().map(|v| v.clone()))
-//                 .collect::<Result<Vec<PyGlass>, _>>()?,
-//             self.angles.clone(),
-//             self.lengths.clone(),
-//             self.curvature,
-//             self.height,
-//             self.width,
-//             self.ar_coated,
-//         ))
-//     }
-
-//    fn polygons<'p>(&self, py: Python<'p>) -> PyResult<Vec<&'p PyAny>> {
-//        self.compound_prism.polygons(py)
-//    }
-// }
-
-// #[pyproto]
-// impl PyGCProtocol for PyCompoundPrism2D {
-//     fn __traverse__(&self, visit: PyVisit) -> Result<(), PyTraverseError> {
-//         for obj in self.glasses.iter() {
-//             visit.call(obj)?
-//         }
-//         Ok(())
-//     }
-
-//     fn __clear__(&mut self) {}
-// }
-
-// #[pyproto]
-// impl PyObjectProtocol for PyCompoundPrism2D {
-//     fn __repr__(&self) -> PyResult<String> {
-//         Ok(format!("{:#?}", self))
-//     }
-// }
+impl IntoPy<PyObject> for DimensionedCurvature {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        match self {
+            DimensionedCurvature::Dim2(v) => v.into_py(py),
+            DimensionedCurvature::Dim3(i, f) => (i, f).into_py(py),
+        }
+    }
+}
 
 #[pyclass(name = "CompoundPrism", module = "compound_prism_designer")]
 #[pyo3(
-    text_signature = "(glasses, angles, lengths, initial_curvature, final_curvature, height, width, ar_coated)"
+    text_signature = "(glasses, angles, lengths, curvature, curvature, height, width, ar_coated)"
 )]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
-    compound_prism: SizedCompoundPrism<f64, ToricLens<f64, 3>, Plane<f64, 3>, ToricLens<f64, 3>, 3>,
+    compound_prism: DimensionedSizedCompoundPrism<f64>,
     #[pyo3(get)]
     glasses: Vec<PyGlass>,
     #[pyo3(get)]
     angles: Vec<f64>,
     #[pyo3(get)]
     lengths: Vec<f64>,
-    #[pyo3(get)]
-    initial_curvature: (f64, f64),
-    #[pyo3(get)]
-    final_curvature: (f64, f64),
+    curvature: DimensionedCurvature,
+    // #[pyo3(get)]
+    // initial_curvature: (f64, f64),
+    // #[pyo3(get)]
+    // final_curvature: (f64, f64),
     #[pyo3(get)]
     height: f64,
     #[pyo3(get)]
@@ -811,6 +698,7 @@ impl PyCompoundPrism {
         glasses: Vec<PyGlass>,
         angles: Vec<f64>,
         lengths: Vec<f64>,
+        curvature: DimensionedCurvature,
         initial_curvature: (f64, f64),
         final_curvature: (f64, f64),
         height: f64,
@@ -818,36 +706,59 @@ impl PyCompoundPrism {
         ar_coated: bool,
         py: Python,
     ) -> PyResult<Self> {
-        let initial_parametrization = ToricLensParametrization {
-            signed_normalized_poloidal_curvature: initial_curvature.0,
-            normalized_toroidal_curvature: initial_curvature.1,
-            height,
-            width,
+        let compound_prism = match curvature {
+            DimensionedCurvature::Dim2(curvature) => {
+                let initial_parametrization = PlaneParametrization { height, width };
+                let final_parametrization = CurvedPlaneParametrization {
+                    signed_normalized_curvature: curvature,
+                    height,
+                };
+                let compound_prism = SizedCompoundPrism::new(
+                    py,
+                    &glasses,
+                    &angles,
+                    &lengths,
+                    initial_parametrization,
+                    final_parametrization,
+                    height,
+                    width,
+                    ar_coated,
+                )?;
+                DimensionedSizedCompoundPrism::Dim2(compound_prism)
+            }
+            DimensionedCurvature::Dim3(initial_curvature, final_curvature) => {
+                let initial_parametrization = ToricLensParametrization {
+                    signed_normalized_poloidal_curvature: initial_curvature.0,
+                    normalized_toroidal_curvature: initial_curvature.1,
+                    height,
+                    width,
+                };
+                let final_parametrization = ToricLensParametrization {
+                    signed_normalized_poloidal_curvature: final_curvature.0,
+                    normalized_toroidal_curvature: final_curvature.1,
+                    height,
+                    width,
+                };
+                let compound_prism = SizedCompoundPrism::new(
+                    py,
+                    &glasses,
+                    &angles,
+                    &lengths,
+                    initial_parametrization,
+                    final_parametrization,
+                    height,
+                    width,
+                    ar_coated,
+                )?;
+                DimensionedSizedCompoundPrism::Dim3(compound_prism)
+            }
         };
-        let final_parametrization = ToricLensParametrization {
-            signed_normalized_poloidal_curvature: final_curvature.0,
-            normalized_toroidal_curvature: final_curvature.1,
-            height,
-            width,
-        };
-        let compound_prism = SizedCompoundPrism::new(
-            py,
-            &glasses,
-            &angles,
-            &lengths,
-            initial_parametrization,
-            final_parametrization,
-            height,
-            width,
-            ar_coated,
-        )?;
         Ok(PyCompoundPrism {
             compound_prism,
             glasses,
             angles,
             lengths,
-            initial_curvature,
-            final_curvature,
+            curvature,
             height,
             width,
             ar_coated,
@@ -859,24 +770,30 @@ impl PyCompoundPrism {
             self.glasses.clone(),
             self.angles.clone(),
             self.lengths.clone(),
-            self.initial_curvature,
-            self.final_curvature,
+            self.curvature,
             self.height,
             self.width,
             self.ar_coated,
         ))
     }
+
     fn exit_ray<'p>(
         &self,
         y: f64,
         wavelength: f64,
         py: Python<'p>,
     ) -> PyResult<(PyVector2D, PyUnitVector2D)> {
-        self.compound_prism.exit_ray(y, wavelength, py)
+        match self.compound_prism {
+            DimensionedSizedCompoundPrism::Dim2(c) => c.exit_ray(y, wavelength, py),
+            DimensionedSizedCompoundPrism::Dim3(c) => c.exit_ray(y, wavelength, py),
+        }
     }
 
     fn polygons<'p>(&self, py: Python<'p>) -> PyResult<Vec<&'p PyAny>> {
-        self.compound_prism.polygons(py)
+        match self.compound_prism {
+            DimensionedSizedCompoundPrism::Dim2(c) => c.polygons(py),
+            DimensionedSizedCompoundPrism::Dim3(c) => c.polygons(py),
+        }
     }
 }
 
@@ -896,7 +813,7 @@ fn position_detector_array(
     wavelengths: WavelengthDistributions,
     beam: BeamDistributions,
 ) -> PyResult<((f64, f64), bool)> {
-    let (pos, flipped) = map_sized_compound_prism!(compound_prism.compound_prism => |prism|
+    let (pos, flipped) = map_dimensioned_sized_compound_prism!(compound_prism.compound_prism => |prism, D|
         map_beam_distributions!(beam => |beam|
             map_wavelength_distributions!(wavelengths => |ws|
                 detector_array_positioning(
@@ -905,7 +822,7 @@ fn position_detector_array(
                     angle,
                     ws,
                     &beam,
-                ).map_err(map_ray_trace_err)?
+                ).map(|(v, f)| ([v[0], v[1]], f)).map_err(map_ray_trace_err)?
             )
         )
     );
@@ -1000,6 +917,34 @@ impl PyObjectProtocol for PyDetectorArray {
     }
 }
 
+impl<'p, const D: usize> From<&'p PyDetectorArray> for LinearDetectorArray<f64, D> {
+    fn from(pda: &'p PyDetectorArray) -> Self {
+        LinearDetectorArray::new(
+            pda.bin_count,
+            pda.bin_size,
+            pda.linear_slope,
+            pda.linear_intercept,
+            pda.max_incident_angle.cos(),
+            pda.angle,
+            pda.length,
+            Vector::from_xy(pda.position.0, pda.position.1),
+            pda.flipped,
+        )
+    }
+}
+
+use crate::SpectrometerFitness;
+
+trait PySpectrometerFitness<T: FloatExt, const D: usize>:
+    SpectrometerFitness<T, D> + Send + 'static + core::fmt::Debug
+{
+}
+
+impl<T: FloatExt, S, const D: usize> PySpectrometerFitness<T, D> for S where
+    S: SpectrometerFitness<T, D> + Send + 'static + core::fmt::Debug
+{
+}
+
 /// Compound Prism Spectrometer specification
 ///
 /// Args:
@@ -1009,17 +954,8 @@ impl PyObjectProtocol for PyDetectorArray {
 ///     gaussian_beam (GaussianBeam): input gaussian beam specification
 #[pyclass(name = "Spectrometer", gc, module = "compound_prism_designer")]
 #[pyo3(text_signature = "(compound_prism, detector_array, wavelengths, beam)")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct PySpectrometer {
-    spectrometer: SizedSpectrometer<
-        f64,
-        UniformDistribution<f64>,
-        FiberBeam<f64>,
-        ToricLens<f64, 3>,
-        Plane<f64, 3>,
-        ToricLens<f64, 3>,
-        3,
-    >,
     /// compound prism specification : CompoundPrism
     #[pyo3(get)]
     compound_prism: Py<PyCompoundPrism>,
@@ -1031,7 +967,7 @@ struct PySpectrometer {
     wavelengths: WavelengthDistributions,
     /// input gaussian beam specification : GaussianBeam
     #[pyo3(get)]
-    fiber_beam: Py<PyFiberBeam>,
+    beam: BeamDistributions,
 }
 
 #[pymethods]
@@ -1041,21 +977,14 @@ impl PySpectrometer {
         compound_prism: Py<PyCompoundPrism>,
         detector_array: Py<PyDetectorArray>,
         wavelengths: WavelengthDistributions,
-        fiber_beam: Py<PyFiberBeam>,
+        beam: BeamDistributions,
         py: Python,
     ) -> PyResult<Self> {
-        let WavelengthDistributions::Uniform(PyUniformWavelengthDistribution { distribution: w }) =
-            wavelengths;
-        let gb = fiber_beam.as_ref(py).try_borrow()?.fiber_beam;
-        let da = detector_array.as_ref(py).try_borrow()?.detector_array;
-        let scp = compound_prism.as_ref(py).try_borrow()?.compound_prism;
-        let spectrometer = create_sized_spectrometer!(scp; w; gb; da);
         Ok(PySpectrometer {
             compound_prism,
             detector_array,
             wavelengths,
-            fiber_beam,
-            spectrometer,
+            beam,
         })
     }
 
@@ -1064,15 +993,28 @@ impl PySpectrometer {
             &self.compound_prism,
             &self.detector_array,
             self.wavelengths,
-            &self.fiber_beam,
+            self.beam,
         )
     }
 
     /// Computes the spectrometer fitness using on the cpu
     #[pyo3(text_signature = "($self, /, *, max_n = 16_384, max_m = 16_384)")]
     #[args("*", max_n = 16_384, max_m = 16_384)]
-    fn cpu_fitness(&self, py: Python, max_n: usize, max_m: usize) -> PyDesignFitness {
-        py.allow_threads(|| map_sized_spectrometer!(self.spectrometer => |s| crate::fitness(&s, max_n, max_m).into()))
+    fn cpu_fitness(&self, py: Python, max_n: usize, max_m: usize) -> PyResult<PyDesignFitness> {
+        let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
+        let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
+        Ok(py.allow_threads(|| {
+            map_dimensioned_sized_compound_prism!(compound_prism => |c, D|
+                map_wavelength_distributions!(self.wavelengths => |w|
+                    map_beam_distributions!(self.beam => |b| {
+                        let detarr = LinearDetectorArray::<f64, D>::from(&py_detarr);
+                        let s = Spectrometer::new(w, b, c, detarr);
+                        crate::fitness(&s, max_n, max_m).into()
+                    }
+                    )
+                )
+            )
+        }))
     }
 
     #[pyo3(text_signature = "($self, /, wavelengths, *, max_m = 16_384)")]
@@ -1083,21 +1025,29 @@ impl PySpectrometer {
         py: Python<'p>,
         max_m: usize,
     ) -> PyResult<&'p PyArray2<f64>> {
-        map_sized_spectrometer!(self.spectrometer => |spec| {
-            let readonly = wavelengths.readonly();
-            let wavelengths_array = readonly.as_array();
-            py.allow_threads(|| {
-                wavelengths_array
-                    .into_iter()
-                    .flat_map(|w| crate::p_dets_l_wavelength(&spec, *w, max_m))
-                    .collect::<Vec<_>>()
-            })
-            .to_pyarray(py)
-            .reshape((
-                wavelengths.len(),
-                self.detector_array.as_ref(py).try_borrow()?.bin_count as usize,
-            ))
-        })
+        let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
+        let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
+        map_dimensioned_sized_compound_prism!(compound_prism => |c, D|
+            map_wavelength_distributions!(self.wavelengths => |w|
+                map_beam_distributions!(self.beam => |b| {
+                    let detarr = LinearDetectorArray::<f64, D>::from(&py_detarr);
+                    let spec = Spectrometer::new(w, b, c, detarr);
+                    let readonly = wavelengths.readonly();
+                    let wavelengths_array = readonly.as_array();
+                    py.allow_threads(|| {
+                        wavelengths_array
+                            .into_iter()
+                            .flat_map(|w| crate::p_dets_l_wavelength(&spec, *w, max_m))
+                            .collect::<Vec<_>>()
+                    })
+                    .to_pyarray(py)
+                    .reshape((
+                        wavelengths.len(),
+                        self.detector_array.as_ref(py).try_borrow()?.bin_count as usize,
+                    ))
+                })
+            )
+        )
     }
 
     #[pyo3(text_signature = "($self, /, wavelength, inital_y)")]
@@ -1107,12 +1057,22 @@ impl PySpectrometer {
         inital_y: f64,
         py: Python<'p>,
     ) -> PyResult<&'p PyArray2<f64>> {
-        let spec = &self.spectrometer;
+        let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
+        let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
+        map_dimensioned_sized_compound_prism!(compound_prism => |c, D|
+                        map_wavelength_distributions!(self.wavelengths => |w|
+                            map_beam_distributions!(self.beam => |b| {
+                                let detarr = LinearDetectorArray::<f64, D>::from(&py_detarr);
+                                let spec = Spectrometer::new(w, b, c, detarr);
         Ok(Array2::from(
-            map_sized_spectrometer!(spec => |s| s.propagation_path(Ray::new_from_start(inital_y), wavelength).map(|GeometricRay { origin: Vector([x, y, _]), direction: UnitVector(Vector([ux, uy, _])) } | [x, y, ux, uy])
-            .collect::<Vec<_>>()),
-        )
-        .to_pyarray(py))
+                    spec.propagation_path(Ray::new_from_start(inital_y), wavelength).map(|GeometricRay { origin: Vector([x, y, ..]), direction: UnitVector(Vector([ux, uy, ..])) } | [x, y, ux, uy])
+                    .collect::<Vec<_>>()
+                )
+                .to_pyarray(py))
+                            }
+                            )
+                        )
+                    )
     }
 
     /// Computes the spectrometer fitness using on the gpu with float32
@@ -1127,13 +1087,43 @@ impl PySpectrometer {
         nwarp: u32,
         max_eval: u32,
     ) -> PyResult<Option<PyDesignFitness>> {
+        let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
+        let compound_prism: DimensionedSizedCompoundPrism<f32> = compound_prism.lossy_into();
+        let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
-        let spec: SizedSpectrometer<f32, _, _, _, _, _, 3> =
-            LossyFrom::lossy_from(self.spectrometer);
-        let fit = py.allow_threads(||
-            map_sized_spectrometer!(spec => |spec| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval))).map_err(map_cuda_err)?;
-        Ok(fit.map(Into::into))
+        map_wavelength_distributions!(self.wavelengths => |w| {
+            match compound_prism {
+                DimensionedSizedCompoundPrism::Dim2(compound_prism) => map_sized_compound_prism!(compound_prism => |c| {
+                    const D: usize = 2;
+                    if let BeamDistributions::Gaussian(PyGaussianBeam { gaussian_beam: b, .. }) = self.beam {
+                        type B<T> = GaussianBeam<T>;
+
+                        let detarr: LinearDetectorArray<f32, D> = LinearDetectorArray::<f64, D>::from(&py_detarr).lossy_into();
+                        let b: B<f32> = LossyFrom::lossy_from(b);
+                        let spec = Spectrometer::new(w.lossy_into(), b, c, detarr);
+                        let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval)).map_err(map_cuda_err)?;
+                        Ok(fit.map(Into::into))
+                    } else {
+                        Err(pyo3::exceptions::PyNotImplementedError::new_err("No kernel compiled for this Spectrometer"))
+                    }
+            }),
+                DimensionedSizedCompoundPrism::Dim3(compound_prism) => map_sized_compound_prism!(compound_prism => |c| {
+                    const D: usize = 3;
+                    if let BeamDistributions::Fiber(PyFiberBeam { fiber_beam: b, .. }) = self.beam {
+                        type B<T> = FiberBeam<T>;
+
+                        let detarr: LinearDetectorArray<f32, D> = LinearDetectorArray::<f64, D>::from(&py_detarr).lossy_into();
+                        let b: B<f32> = LossyFrom::lossy_from(b);
+                        let spec = Spectrometer::new(w.lossy_into(), b, c, detarr);
+                        let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval)).map_err(map_cuda_err)?;
+                        Ok(fit.map(Into::into))
+                    } else {
+                        Err(pyo3::exceptions::PyNotImplementedError::new_err("No kernel compiled for this Spectrometer"))
+                    }
+            }),
+            }
+        })
     }
 
     #[getter]
@@ -1164,7 +1154,6 @@ impl PyGCProtocol for PySpectrometer {
     fn __traverse__(&self, visit: PyVisit) -> Result<(), PyTraverseError> {
         visit.call(&self.compound_prism)?;
         visit.call(&self.detector_array)?;
-        visit.call(&self.fiber_beam)?;
         Ok(())
     }
 
