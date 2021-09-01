@@ -135,6 +135,30 @@ where
     SI: Copy + Surface<T, D> + Drawable<T>,
     SN: Surface<T, D> + Drawable<T>,
 {
+    pub fn surfaces(
+        &self,
+    ) -> (
+        (crate::Point<T>, crate::Point<T>, Option<T>),
+        [(crate::Point<T>, crate::Point<T>, Option<T>); N],
+        (crate::Point<T>, crate::Point<T>, Option<T>),
+    ) {
+        let path2surface = |p: crate::Path<T>| match p {
+            crate::Path::Line { a, b } => (a, b, None),
+            crate::Path::Arc {
+                a,
+                b,
+                midpt: _,
+                radius,
+            } => (a, b, Some(radius)),
+        };
+        let s_0 = path2surface(self.initial_prism.surface.draw());
+        let s_i = self
+            .prisms
+            .map(|PrismSurface { surface: s, .. }| path2surface(s.draw()));
+        let s_n = path2surface(self.final_surface.draw());
+        (s_0, s_i, s_n)
+    }
+
     pub fn polygons(&self) -> ([Polygon<T>; N], Polygon<T>) {
         let mut path0 = self.initial_prism.surface.draw();
         let polys = self.prisms.map(|PrismSurface { surface: s, .. }| {

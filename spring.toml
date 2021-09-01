@@ -22,4 +22,4 @@ ar-coated = true
 cpu-only = false
 parallelize = false
 optimize-size = true
-optimize-deviation = false
+optimize-deviation = true

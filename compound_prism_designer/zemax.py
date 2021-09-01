@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from typing import Optional, Iterable
-from .compound_prism_designer import Spectrometer
+from .compound_prism_designer import Spectrometer, Vector2D
 from platform import system
 
 if system() == "Windows":
@@ -45,18 +45,16 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
 
     # fields = system.SystemData.Fields
 
-    polys, lens_poly, _, _ = cmpnd.polygons()
-    thickness = [
-        (l1 + u1) / 2 - (l0 + u0) / 2 for (l0, u0, l1, u1) in [*polys, lens_poly]
-    ]
+    surfaces = cmpnd.surfaces()
+    assert all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None, "Only 2D CompoundPrism designs can be translated to Zemax"
+    midpts = [Vector2D((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2) for s in surfaces]
+    thickness = [m1.x - m0.x for m0, m1 in zip(midpts[:-1], midpts[1:])]
     angles = cmpnd.angles
     ytans = np.tan(angles)
     dpos = np.array(spec.position)
     ddir = np.array(spec.direction)
     detmid = dpos + ddir * detarr.length / 2
-    [_, _, l, u] = lens_poly
-    lmidpt = np.array([(l + u) / 2, cmpnd.height / 2])
-    detarr_offset = detmid - lmidpt
+    detarr_offset = detmid - midpts[-1]
 
     c, s = np.cos(angles[-1]), np.sin(angles[-1])
     chord = cmpnd.height / c
