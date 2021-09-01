@@ -1,17 +1,4 @@
 {
-  "abi-blacklist": [
-    "cdecl",
-    "stdcall",
-    "fastcall",
-    "vectorcall",
-    "thiscall",
-    "aapcs",
-    "win64",
-    "sysv64",
-    "msp430-interrupt",
-    "x86-interrupt",
-    "amdgpu-kernel"
-  ],
   "arch": "nvptx64",
   "cpu": "sm_50",
   "features": "+ptx60",
