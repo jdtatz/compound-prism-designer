@@ -2,6 +2,7 @@
 Fast Calculation of Cube and Inverse Cube Roots Using a Magic Constant and Its Implementation on Microcontrollers
 Leonid Moroz, Volodymyr Samotyy, Cezary J. Walczyk, and Jan L. Cieśliński
 "#]
+#![allow(clippy::many_single_char_names)]
 use crate::FloatExt;
 
 #[inline(always)]

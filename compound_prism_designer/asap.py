@@ -1,14 +1,18 @@
 from __future__ import annotations
 import numpy as np
-from .compound_prism_designer import Spectrometer
+from .compound_prism_designer import Spectrometer, Vector2D
 
 
 def create_asap_macro(spectrometer: Spectrometer) -> str:
-    polys, lens_poly, lens_center, lens_radius = spectrometer.compound_prism.polygons()
-    midpts = [(l0 + u0) / 2 for l0, u0, _, _ in polys] + [(lens_poly[0] + lens_poly[1]) / 2]
-    lengths = [np.linalg.norm(u0 - l0) for l0, u0, _, _ in polys] + [np.linalg.norm(lens_poly[1] - lens_poly[0])]
-    lens_midpt = (lens_poly[-2] + lens_poly[-1]) / 2
-    lens_len = np.linalg.norm(lens_poly[-1] - lens_poly[-2])
+    surfaces = spectrometer.compound_prism.surfaces()
+    assert all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None, "Only 2D CompoundPrism designs can be translated to ASAP"
+    midpts = [Vector2D((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2) for s in surfaces]
+
+    lengths = [np.linalg.norm(Vector2D(s.upper_pt.x - s.lower_pt.x, s.upper_pt.y - s.lower_pt.y)) for s in surfaces]
+    (*midpts, lens_midpt) = midpts
+    (*lengths, lens_len) = lengths
+    lens_radius = surfaces[-1].radius
+
     glass_names = ["AIR"] + [g.name.replace("-", "_") for g in spectrometer.compound_prism.glasses] + ["AIR"]
     planes = '\n'.join(f"""\
 SURFACE
@@ -18,7 +22,7 @@ OBJECT
     INTERFACE COATING {"AR" if spectrometer.compound_prism.ar_coated else "BARE"} {g1} {g2}
 """ for (angle, midpt, l, g1, g2) in zip(spectrometer.compound_prism.angles, midpts, lengths, glass_names[:-1], glass_names[1:]))
     det_midpt = np.asarray(spectrometer.position) + np.asarray(spectrometer.direction) * spectrometer.detector_array.length / 2
-    wi, wf = spectrometer.gaussian_beam.wavelength_range
+    wi, wf = spectrometer.wavelengths.bounds
     wm = (wi + wf) / 2
     media = "\n".join(f"    {g(wi)} {g(wm)} {g(wf)} '{g.name.replace('-', '_')}'" for g in set(spectrometer.compound_prism.glasses))
     return f"""\

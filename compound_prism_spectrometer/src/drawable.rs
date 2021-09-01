@@ -1,3 +1,4 @@
+#![allow(clippy::just_underscores_and_digits)]
 use crate::{FloatExt, Vector};
 
 #[derive(Debug, Clone, Copy)]
