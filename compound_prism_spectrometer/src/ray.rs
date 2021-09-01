@@ -31,20 +31,25 @@ pub trait DetectorArray<T, const D: usize>: Surface<T, D> {
     fn mid_pt(&self) -> Vector<T, D>;
 }
 
+#[derive(Debug, Clone, Copy, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+pub struct PrismSurface<T, S> {
+    /// glass
+    pub glass: Glass<T, 6>,
+    /// initial boundary surface
+    pub surface: S,
+}
+
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
-    /// First glass
-    glass0: Glass<T, 6>,
-    /// First boundary surface
-    surface0: S0,
-    /// List of glasses the compound prism is composed of, in order
-    glasses: [Glass<T, 6>; N],
-    /// Inter-media boundary surfaces
-    isurfaces: [SI; N],
+    /// initial prism surface
+    initial_prism: PrismSurface<T, S0>,
+    /// rest of the prism surfaces
+    prisms: [PrismSurface<T, SI>; N],
     /// Final boundary surface
-    surfaceN: SN,
+    final_surface: SN,
     /// Height of compound prism
     pub(crate) height: T,
     /// Width of compound prism
@@ -104,14 +109,19 @@ where
             lengths,
         );
         let surface0 = S0::from_hyperplane(surface0, s0_parametrization);
+        let initial_prism = PrismSurface {
+            glass: glass0,
+            surface: surface0,
+        };
         let isurfaces = isurfaces.map(|s| Plane::new(s, prism_bounds));
-        let surfaceN = SN::from_hyperplane(last_surface, sn_parametrization);
+        let prisms = glasses
+            .zip(isurfaces)
+            .map(|(glass, surface)| PrismSurface { glass, surface });
+        let final_surface = SN::from_hyperplane(last_surface, sn_parametrization);
         Self {
-            glass0,
-            glasses,
-            surface0,
-            isurfaces,
-            surfaceN,
+            initial_prism,
+            prisms,
+            final_surface,
             height,
             width,
             ar_coated: coat,
@@ -126,14 +136,14 @@ where
     SN: Surface<T, D> + Drawable<T>,
 {
     pub fn polygons(&self) -> ([Polygon<T>; N], Polygon<T>) {
-        let mut path0 = self.surface0.draw();
-        let polys = self.isurfaces.map(|s| {
+        let mut path0 = self.initial_prism.surface.draw();
+        let polys = self.prisms.map(|PrismSurface { surface: s, .. }| {
             let path1 = s.draw();
             let poly = Polygon([path0.reverse(), path1]);
             path0 = path1;
             poly
         });
-        let path1 = self.surfaceN.draw();
+        let path1 = self.final_surface.draw();
         let final_poly = Polygon([path0.reverse(), path1]);
         (polys, final_poly)
     }
@@ -366,11 +376,11 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         let mut ray = self;
         let mut n1 = T::one();
 
-        let glass = cmpnd.glass0;
-        let surf = cmpnd.surface0;
-        let n2 = glass.calc_n(wavelength);
+        let n2 = cmpnd.initial_prism.glass.calc_n(wavelength);
         debug_assert!(n2 >= T::one());
-        let GeometricRayIntersection { distance, normal } = surf
+        let GeometricRayIntersection { distance, normal } = cmpnd
+            .initial_prism
+            .surface
             .intersection(ray.into())
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
         ray = ray
@@ -380,11 +390,10 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
 
         // for (glass, plane) in core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces)) {
         for i in 0..N {
-            let glass = cmpnd.glasses[i];
-            let plane = cmpnd.isurfaces[i];
-            let n2 = glass.calc_n(wavelength);
+            let n2 = cmpnd.prisms[i].glass.calc_n(wavelength);
             debug_assert!(n2 >= T::one());
-            let GeometricRayIntersection { distance, normal } = plane
+            let GeometricRayIntersection { distance, normal } = cmpnd.prisms[i]
+                .surface
                 .intersection(ray.into())
                 .ok_or(RayTraceError::NoSurfaceIntersection)?;
             ray = ray
@@ -394,7 +403,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         }
         let n2 = T::one();
         let GeometricRayIntersection { distance, normal } = cmpnd
-            .surfaceN
+            .final_surface
             .intersection(ray.into())
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
         ray.translate(distance)
@@ -447,12 +456,16 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ) -> impl Iterator<Item = GeometricRay<T, D>> {
         let mut ray = self;
         let mut n1 = T::one();
-        let mut prism0 = Some((cmpnd.glass0, cmpnd.surface0));
-        let mut prisms = core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces));
+        let mut prism0 = Some(cmpnd.initial_prism);
+        let mut prisms = core::array::IntoIter::new(cmpnd.prisms);
         let mut internal = true;
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<_>, RayTraceError> {
-            if let Some((glass, surf)) = prism0.take() {
+            if let Some(PrismSurface {
+                glass,
+                surface: surf,
+            }) = prism0.take()
+            {
                 let n2 = glass.calc_n(wavelength);
                 let GeometricRayIntersection { distance, normal } =
                     surf.intersection(ray.into())
@@ -464,7 +477,10 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
                 return Ok(Some(GeometricRay::from(ray)));
             }
             match prisms.next() {
-                Some((glass, surf)) => {
+                Some(PrismSurface {
+                    glass,
+                    surface: surf,
+                }) => {
                     let n2 = glass.calc_n(wavelength);
                     let GeometricRayIntersection { distance, normal } = surf
                         .intersection(ray.into())
@@ -479,7 +495,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
                     internal = false;
                     let n2 = T::one();
                     let GeometricRayIntersection { distance, normal } = cmpnd
-                        .surfaceN
+                        .final_surface
                         .intersection(ray.into())
                         .ok_or(RayTraceError::NoSurfaceIntersection)?;
                     ray = ray

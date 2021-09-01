@@ -6,12 +6,21 @@
 use crate::utils::*;
 
 fn polynomial<F: FloatExt, const N: usize>(z: F, coeff: [F; N]) -> F {
-    // core::array::IntoIter::new(coeff)
-    coeff
-        .iter()
-        .copied()
+    core::array::IntoIter::new(coeff)
+        // coeff
+        //     .iter()
+        //     .copied()
         .reduce(|s, c| s.mul_add(z, c))
         .expect("`polynomial` called with a zero-sized array")
+}
+
+macro_rules! polynomial_eval {
+    ($z:ident ; [ $coeff0:expr , $($coeffs:expr),*  $(,)? ] ) => {
+        $coeff0 $( .mul_add( $z , $coeffs ) )*
+    };
+    ($z:ident ; [ $($coeffs:literal),*  $(,)? ] as $t:ty ) => {
+        polynomial_eval!( $z ; [ $( <$t as LossyFrom<f64>>::lossy_from($coeffs) ),* ] )
+    };
 }
 
 const SHAW_P: [f64; 8] = [
@@ -62,24 +71,24 @@ pub fn norminv<F: FloatExt>(x: F) -> F {
     (v * p / q).copy_sign(x - F::lossy_from(0.5f64))
 }
 
-const FAST_SHAW_P: [f64; 6] = [
-    1.1051591117060895699e-4,
-    0.011900603295838260268,
-    0.23753954196273241709,
-    1.3348090307272045436,
-    2.4101601285733391215,
-    1.2533141012558299407,
-];
+// const FAST_SHAW_P: [f64; 6] = [
+//     1.1051591117060895699e-4,
+//     0.011900603295838260268,
+//     0.23753954196273241709,
+//     1.3348090307272045436,
+//     2.4101601285733391215,
+//     1.2533141012558299407,
+// ];
 
-const FAST_SHAW_Q: [f64; 7] = [
-    2.5996479253181457637e-6,
-    0.0010579909915338770381,
-    0.046292707412622896113,
-    0.50950202270351517687,
-    1.8481138350821456213,
-    2.4230267574304831865,
-    1.0,
-];
+// const FAST_SHAW_Q: [f64; 7] = [
+//     2.5996479253181457637e-6,
+//     0.0010579909915338770381,
+//     0.046292707412622896113,
+//     0.50950202270351517687,
+//     1.8481138350821456213,
+//     2.4230267574304831865,
+//     1.0,
+// ];
 
 /// Fast Non-branching Standard Normal inverse CDF
 /// To transform into a normal distribution with stddev=a and mean=b
@@ -100,8 +109,25 @@ pub fn fast_norminv<F: FloatExt>(u: F) -> F {
         x += F::lossy_from(2u32);
     }
     let v = -F::ln(x);
-    let p = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_P));
-    let q = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_Q));
+    // let p = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_P));
+    // let q = polynomial(v, LossyFrom::lossy_from(FAST_SHAW_Q));
+    let p = polynomial_eval!(v; [
+        1.1051591117060895699e-4,
+        0.011900603295838260268,
+        0.23753954196273241709,
+        1.3348090307272045436,
+        2.4101601285733391215,
+        1.2533141012558299407,
+    ] as F);
+    let q = polynomial_eval!(v; [
+        2.5996479253181457637e-6_f64,
+        0.0010579909915338770381,
+        0.046292707412622896113,
+        0.50950202270351517687,
+        1.8481138350821456213,
+        2.4230267574304831865,
+        1.0,
+    ] as F);
     (-(p / q)) * v.copy_sign(half_minus_u)
 }
 
@@ -109,7 +135,7 @@ pub fn fast_norminv<F: FloatExt>(u: F) -> F {
 mod test {
     use super::*;
     use float_eq::assert_float_eq as assert_almost_eq;
-    use statrs::distribution::{InverseCDF, Normal};
+    use statrs::distribution::{ContinuousCDF, Normal};
 
     #[test]
     fn test_shaw() {

@@ -2,7 +2,7 @@
 default_to_workspace = false
 
 [tasks.check]
-# env = {RUSTFLAGS = "-Z macro-backtrace" }
+env = {RUSTFLAGS = "-Z macro-backtrace" }
 command = "cargo"
 args = ["check", "--all-features", "--all-targets"]
 
@@ -28,7 +28,8 @@ args = [
     "-Cllvm-args=--nvptx-sched4reg",
     "-Cllvm-args=--mul-constant-optimization",
     "-Cllvm-args=--enable-local-reassign",
-    "-Cllvm-args=--enable-dse-memoryssa",
+    # "-Cllvm-args=--enable-dse-memoryssa",
+    "-Cllvm-args=--enable-memcpyopt-memoryssa",
     "-Cllvm-args=--inline-threshold=1024",
     "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll",
     "-Cpasses=mem2reg sroa",
@@ -42,7 +43,10 @@ args = [
     "-Z", "no-link",
     "-Z", "mir-opt-level=4",
     "-Z", "combine_cgu",
-    "-Z", "mutable-noalias=yes"
+    "-Z", "mutable-noalias=yes",
+    "-Z", "inline-mir=yes",
+    "-Z", "new-llvm-pass-manager=yes",
+    "-Z", "unsound-mir-opts=yes",
 ]
 
 [tasks.verify-kernel]
