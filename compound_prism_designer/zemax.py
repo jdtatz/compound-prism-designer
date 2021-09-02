@@ -47,8 +47,8 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
 
     surfaces = cmpnd.surfaces()
     assert all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None, "Only 2D CompoundPrism designs can be translated to Zemax"
-    midpts = [Vector2D((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2) for s in surfaces]
-    thickness = [m1.x - m0.x for m0, m1 in zip(midpts[:-1], midpts[1:])]
+    midpts = [np.array(((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2)) for s in surfaces]
+    thickness = [m1[0] - m0[0] for m0, m1 in zip(midpts[:-1], midpts[1:])]
     angles = cmpnd.angles
     ytans = np.tan(angles)
     dpos = np.array(spec.position)
@@ -58,10 +58,7 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
 
     c, s = np.cos(angles[-1]), np.sin(angles[-1])
     chord = cmpnd.height / c
-    # curvature = R_max / R_lens
-    # R_max = chord / 2
-    # R_lens = chord / (2 curvature)
-    lens_radius = chord / (2 * cmpnd.curvature)
+    lens_radius = surfaces[-1].radius
 
     start = _create_standard(system)
     _create_coord_break(system, decenter_y=cmpnd.height / 2 - beam.y_mean)

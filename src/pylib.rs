@@ -1177,12 +1177,15 @@ fn compound_prism_designer(py: Python, m: &PyModule) -> PyResult<()> {
     m.add("CudaError", py.get_type::<CudaError>())?;
     m.add_class::<PyGlass>()?;
     m.add_class::<PyDesignFitness>()?;
-    m.add_class::<PyCompoundPrism>()?;
-    m.add_class::<PyDetectorArray>()?;
-    m.add_function(wrap_pyfunction!(position_detector_array, m)?)?;
+    m.add_class::<PyVector2D>()?;
+    m.add_class::<PyUnitVector2D>()?;
+    m.add_class::<PySurface>()?;
     m.add_class::<PyUniformWavelengthDistribution>()?;
     m.add_class::<PyGaussianBeam>()?;
     m.add_class::<PyFiberBeam>()?;
+    m.add_class::<PyCompoundPrism>()?;
+    m.add_function(wrap_pyfunction!(position_detector_array, m)?)?;
+    m.add_class::<PyDetectorArray>()?;
     m.add_class::<PySpectrometer>()?;
     Ok(())
 }
