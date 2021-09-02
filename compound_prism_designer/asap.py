@@ -6,9 +6,9 @@ from .compound_prism_designer import Spectrometer, Vector2D
 def create_asap_macro(spectrometer: Spectrometer) -> str:
     surfaces = spectrometer.compound_prism.surfaces()
     assert all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None, "Only 2D CompoundPrism designs can be translated to ASAP"
-    midpts = [Vector2D((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2) for s in surfaces]
+    midpts = [np.array(((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2)) for s in surfaces]
 
-    lengths = [np.linalg.norm(Vector2D(s.upper_pt.x - s.lower_pt.x, s.upper_pt.y - s.lower_pt.y)) for s in surfaces]
+    lengths = [np.linalg.norm((s.upper_pt.x - s.lower_pt.x, s.upper_pt.y - s.lower_pt.y)) for s in surfaces]
     (*midpts, lens_midpt) = midpts
     (*lengths, lens_len) = lengths
     lens_radius = surfaces[-1].radius
