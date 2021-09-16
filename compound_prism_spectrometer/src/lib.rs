@@ -19,6 +19,7 @@ mod drawable;
 mod erf;
 mod geometry;
 mod glasscat;
+pub mod kernel;
 mod qrng;
 mod ray;
 mod spectrometer;

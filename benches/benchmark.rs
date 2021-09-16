@@ -4,14 +4,13 @@ extern crate criterion;
 use criterion::Criterion;
 
 use compound_prism_designer::*;
-use compound_prism_spectrometer::*;
 
 #[cfg(unix)]
 struct GProf(Option<pprof::ProfilerGuard<'static>>);
 
 #[cfg(unix)]
 impl criterion::profiler::Profiler for GProf {
-    fn start_profiling(&mut self, benchmark_id: &str, benchmark_dir: &std::path::Path) {
+    fn start_profiling(&mut self, _benchmark_id: &str, _benchmark_dir: &std::path::Path) {
         self.0.replace(pprof::ProfilerGuard::new(100).unwrap());
     }
 
