@@ -3,7 +3,7 @@
 import itertools
 from typing import Union, Sequence, List, Tuple, NamedTuple, Callable, Optional, Iterator
 import numpy as np
-from pymoo.model.problem import Problem
+from pymoo.core.problem import ElementwiseProblem
 from pymoo.factory import get_algorithm, get_crossover, get_mutation, get_sampling
 from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
 from pymoo.optimize import minimize
@@ -15,6 +15,9 @@ from dataclasses import dataclass, is_dataclass, fields
 from serde import deserialize, serialize
 from serde.toml import from_toml, to_toml
 from pathlib import Path
+from functools import reduce, partial
+from operator import mul
+rprod = partial(reduce, mul)
 
 
 @serialize(rename_all="spinalcase")
@@ -92,7 +95,7 @@ class CompoundPrismSpectrometerProblemConfig:
 
 
 
-class CompoundPrismSpectrometerProblem(Problem):
+class CompoundPrismSpectrometerProblem(ElementwiseProblem):
     def __init__(self, config: CompoundPrismSpectrometerProblemConfig, **kwargs):
         self.config = config
         self.cpu_only = config.optimizer.cpu_only
@@ -114,7 +117,7 @@ class CompoundPrismSpectrometerProblem(Problem):
             nglass = nglass_or_const_glasses
             self._glasses = None
             self._numpy_dtype = np.dtype([
-                ("glass_find", (np.float64, (nglass,))),
+                ("glass_find", (np.int64, (nglass,))),
                 ("angles", (np.float64, (nglass + 1,))),
                 ("lengths", (np.float64, (nglass,))),
                 ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
@@ -157,6 +160,9 @@ class CompoundPrismSpectrometerProblem(Problem):
             }
         xl, xu = zip(*itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], bounds.values())))
 
+        fix_indicies = np.add.accumulate([np.prod(self._numpy_dtype[n].shape, dtype=np.int64) for n in self._numpy_dtype.names])[:-1]
+        self._fix_params = lambda *params: np.array(tuple(a.squeeze() for a in np.split(params, fix_indicies)), dtype=self._numpy_dtype)
+
         if config.optimizer.parallelize and "parallelization" not in kwargs:
             pool = ThreadPool()
             kwargs["parallelization"] = ('starmap', pool.starmap)
@@ -167,12 +173,11 @@ class CompoundPrismSpectrometerProblem(Problem):
             n_constr=1,
             xl=xl,
             xu=xu,
-            elementwise_evaluation=True,
             **kwargs
         )
 
     def create_spectrometer(self, params: np.ndarray) -> Spectrometer:
-        params = params.view(self._numpy_dtype)[0]
+        params = (self._fix_params)(*params)
         if self.use_gaussian_beam:
             curvature = params["curvature"]
         else:
@@ -225,7 +230,7 @@ class CompoundPrismSpectrometerProblem(Problem):
         return Spectrometer(compound_prism, detector_array, wavelengths, beam)
 
     def _evaluate(self, x, out, *args, **kwargs):
-        max_size = self.config.spectrometer.max_height * 40
+        max_size = (self.config.spectrometer.max_height * 40) if self.config.optimizer.optimize_size else np.inf
         max_info = np.log2(self.config.spectrometer.bin_count)
         try:
             spectrometer = self.create_spectrometer(x)
@@ -259,7 +264,7 @@ class CompoundPrismSpectrometerProblem(Problem):
             out["G"] = 1
 
 
-class MetaCompoundPrismSpectrometerProblem(Problem):
+class MetaCompoundPrismSpectrometerProblem(ElementwiseProblem):
     def __init__(self, max_nglass: int, minimizer: Callable[[CompoundPrismSpectrometerProblem], Sequence[Design]], config: CompoundPrismSpectrometerProblemConfig):
         self.minimizer = minimizer
         self.config = config
@@ -269,7 +274,6 @@ class MetaCompoundPrismSpectrometerProblem(Problem):
             n_constr=0,
             xl=0,
             xu=1,
-            elementwise_evaluation=True,
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
@@ -289,10 +293,36 @@ with open("spring.toml") as f:
 # spring_config.optimizer.cpu_only = True
 problem = CompoundPrismSpectrometerProblem(spring_config) #, cpu_only=True, parallelization = ('starmap', pool.starmap))
 
+
+from pymoo.operators.mixed_variable_operator import MixedVariableSampling, MixedVariableMutation, MixedVariableCrossover
+from pymoo.algorithms.moo.age import AGEMOEA
+
+
+# sampling=get_sampling('real_lhs')
+
+nglass = problem.config.nglass or 0
+mask = [*(["int"] * nglass), *(["real"] * (problem.n_var - nglass))]
+
+sampling = MixedVariableSampling(mask, {
+    "real": get_sampling("real_lhs"),
+    "int": get_sampling("int_random")
+})
+
+crossover = MixedVariableCrossover(mask, {
+    "real": get_crossover("real_sbx", eta=15, prob=0.9),
+    "int": get_crossover("int_sbx", eta=15, prob=0.9)
+})
+
+mutation = MixedVariableMutation(mask, {
+    "real": get_mutation("real_pm", prob=None, eta=20),
+    "int": get_mutation("int_pm", prob=None, eta=20)
+})
+
 # ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()
 # 'ga', 'brkga', 'de', 'nelder-mead', 'pattern-search', 'cmaes', 'nsga2', 'rnsga2', 'nsga3', 'unsga3', 'rnsga3', 'moead'
 # algorithm = get_algorithm("unsga3", ref_dirs, pop_size=100)
-algorithm = get_algorithm("nsga2", pop_size=1000, sampling=get_sampling('real_lhs'))
+# algorithm = get_algorithm("nsga2", pop_size=1000, sampling=sampling, crossover=crossover, mutation=mutation)
+algorithm = AGEMOEA(pop_size=1000, sampling=sampling, crossover=crossover, mutation=mutation)
 
 result = minimize(
     problem,
@@ -310,5 +340,6 @@ def create_designs():
 
 
 designs = list(create_designs())
-print(designs)
+for design in designs:
+    print(design)
 interactive_show(designs)
