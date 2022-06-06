@@ -6,15 +6,20 @@ edition = "2021"
 include = ["/src/**/*", "/Cargo.toml"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["dylib"]
 
 # [[bin]]
 # name = "kernel"
 # path = "src/kernel.rs"
 
-[target.'cfg(target_arch="nvptx64")'.dependencies]
+[target.'cfg(any(target_arch="nvptx64", target_arch = "spirv"))'.dependencies]
 derive_more = "0.99"
 libm = "0.2"
 compound_prism_spectrometer = { path = "../compound_prism_spectrometer" }
-nvptx-sys = { git = "https://github.com/jdtatz/nvptx-sys.git", features = ["panic"] }
 paste = "1.0"
+
+[target.'cfg(target_arch="nvptx64")'.dependencies]
+nvptx-sys = { git = "https://github.com/jdtatz/nvptx-sys.git", features = ["panic"] }
+
+[target.'cfg(target_arch="spirv")'.dependencies]
+spirv-std = { git = "https://github.com/EmbarkStudios/rust-gpu", features = ["glam"] }

@@ -1,0 +1,9 @@
+[target.'cfg(target_arch="spirv")']
+# [target.'spirv-unknown-vulkan1.2']
+rustflags = [
+    "-Zcodegen-backend=/home/julia/Repos/rust-gpu/target/release/librustc_codegen_spirv.so",
+    "-Zsymbol-mangling-version=v0",
+    "-Ccodegen-units=1",
+    "-Ctarget-feature=+GenericPointer,+VariablePointers,+Addresses,+Int8,+Int16,+Int64,+Groups,+GroupNonUniformBallot,+GroupNonUniformVote,+GroupNonUniformShuffle,+GroupNonUniformArithmetic,+ext:SPV_KHR_variable_pointers,+Linkage",
+    "-Zmir-opt-level=4",
+]

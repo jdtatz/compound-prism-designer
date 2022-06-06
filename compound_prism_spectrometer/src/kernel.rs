@@ -1,29 +1,29 @@
 use crate::{
-    Beam, CurvedPlane, DetectorArray, Distribution, FiberBeam, Float, FloatExt, GaussianBeam,
-    Plane, Qrng, Ray, Spectrometer, Surface, ToricLens, UniformDistribution, Welford,
+    Beam, DetectorArray, Distribution, Float, FloatExt, Qrng, Spectrometer, Surface, Welford,
 };
 use core::ptr::NonNull;
 use core::slice::from_raw_parts_mut;
 
 pub trait GPU {
+    const ZERO_INITIALIZED_SHARED_MEMORY: bool;
     fn warp_size() -> u32;
-    fn thread_id() -> u32;
-    fn block_dim() -> u32;
-    fn block_id() -> u32;
-    fn grid_dim() -> u32;
+    // fn thread_id() -> u32;
+    // fn block_dim() -> u32;
+    // fn block_id() -> u32;
+    // fn grid_dim() -> u32;
 
-    fn lane_id() -> u32 {
-        Self::thread_id() % Self::warp_size()
-    }
-    fn warp_id() -> u32 {
-        Self::thread_id() / Self::warp_size()
-    }
-    fn nwarps() -> u32 {
-        Self::block_dim() / Self::warp_size()
-    }
-    fn global_warp_id() -> u32 {
-        Self::block_id() * Self::nwarps() + Self::warp_id()
-    }
+    // fn lane_id() -> u32 {
+    //     Self::thread_id() % Self::warp_size()
+    // }
+    // fn warp_id() -> u32 {
+    //     Self::thread_id() / Self::warp_size()
+    // }
+    // fn nwarps() -> u32 {
+    //     Self::block_dim() / Self::warp_size()
+    // }
+    // fn global_warp_id() -> u32 {
+    //     Self::block_id() * Self::nwarps() + Self::warp_id()
+    // }
 
     fn sync_warp();
     fn warp_any(pred: bool) -> bool;
@@ -58,6 +58,27 @@ impl<F: Copy, G: GPUShuffle<F>> GPUShuffle<Welford<F>> for G {
     }
 }
 
+// #[inline(always)]
+// pub unsafe fn get_warp_shared<T>(shared_ptr: NonNull<()>, warp_id: u32, n: u32) -> NonNull<[T]> {
+//     unsafe {
+//         NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
+//             shared_ptr.cast::<T>().as_ptr().add((warp_id * n) as usize),
+//             n as usize,
+//         ))
+//     }
+// }
+
+// #[inline(always)]
+// pub unsafe fn get_warp_global<T>(global_ptr: NonNull<()>, global_warp_id: u32, n: u32) -> NonNull<[T]> {
+//     unsafe {
+//         NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
+//             global_ptr.cast::<T>().as_ptr().add((global_warp_id * n) as usize),
+//             n as usize,
+//         ))
+//     }
+// }
+
+#[inline(always)]
 pub unsafe fn kernel<
     G: GPUShuffle<F> + GPUShuffle<u32>,
     F: FloatExt,
@@ -74,6 +95,10 @@ pub unsafe fn kernel<
     spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
     probability_ptr: NonNull<F>,
     shared_ptr: NonNull<Welford<F>>,
+    warp_size: u32,
+    lane_id: u32,
+    warp_id: u32,
+    global_warp_id: u32,
 ) {
     if max_evals == 0 {
         return;
@@ -83,35 +108,36 @@ pub unsafe fn kernel<
     const PHI: f64 = 1.61803398874989484820458683436563;
     const ALPHA: f64 = 1_f64 / PHI;
 
-    let tid = G::thread_id();
-    let warpid = G::warp_id();
-    let nwarps = G::nwarps();
-    let laneid = G::lane_id();
-
     let nbin = spectrometer.detector.bin_count();
     let shared = core::ptr::slice_from_raw_parts_mut(
-        shared_ptr.as_ptr().add((warpid * nbin) as usize),
+        shared_ptr.as_ptr().add((warp_id * nbin) as usize),
         nbin as usize,
     );
-    let mut i = laneid;
-    while i < nbin {
-        (*shared)[i as usize] = Welford::new();
-        i += G::warp_size();
+    if !G::ZERO_INITIALIZED_SHARED_MEMORY {
+        let mut i = lane_id;
+        while i < nbin {
+            (*shared)[i as usize] = Welford::NEW;
+            i += G::warp_size();
+        }
+        G::sync_warp();
     }
-    G::sync_warp();
-    let mut shared = &mut *shared;
+    let shared = &mut *shared;
 
-    let id = G::global_warp_id();
-
-    let u = (F::lossy_from(id))
+    let u = (F::lossy_from(global_warp_id))
         .mul_add(F::lossy_from(ALPHA), seed)
         .fract();
     let wavelength = spectrometer.wavelengths.inverse_cdf(u);
+    let initial_refractive_index = spectrometer.compound_prism.initial_glass.calc_n(wavelength);
+    // let refractive_indicies = spectrometer.compound_prism.glasses.map(|glass| glass.calc_n(wavelength));
+    let mut refractive_indicies = [F::ZERO; N];
+    for i in 0..N {
+        refractive_indicies[i] = spectrometer.compound_prism.glasses[i].calc_n(wavelength);
+    }
 
     let mut count = F::zero();
-    let mut index = laneid;
+    let mut index = lane_id;
     let mut qrng = Qrng::new_from_scalar(seed);
-    qrng.next_by(laneid);
+    qrng.next_by(lane_id);
     let max_evals = max_evals - (max_evals % G::warp_size());
     while index < max_evals {
         count += F::lossy_from(G::warp_size());
@@ -119,8 +145,12 @@ pub unsafe fn kernel<
         let ray = spectrometer.beam.inverse_cdf(q);
         let (mut bin_index, t) = ray
             .propagate(
-                wavelength,
-                &spectrometer.compound_prism,
+                initial_refractive_index,
+                refractive_indicies,
+                spectrometer.compound_prism.initial_surface,
+                spectrometer.compound_prism.inter_surfaces,
+                spectrometer.compound_prism.final_surface,
+                spectrometer.compound_prism.ar_coated,
                 &spectrometer.detector,
             )
             .unwrap_or((nbin, F::zero()));
@@ -133,7 +163,7 @@ pub unsafe fn kernel<
             }
             det_count -= G::warp_ballot(bin_index == min_index);
             let bin_t = if bin_index == min_index { t } else { F::zero() };
-            let mut welford = if laneid == 0 {
+            let mut welford = if lane_id == 0 {
                 shared[min_index as usize]
             } else {
                 Welford::NEW
@@ -141,7 +171,7 @@ pub unsafe fn kernel<
             welford.next_sample(bin_t);
             welford = G::warp_fold(welford, |w1, w2| w1 + w2);
             welford.skip(count);
-            if laneid == 0 {
+            if lane_id == 0 {
                 shared[min_index as usize] = welford;
             }
             G::sync_warp();
@@ -158,10 +188,12 @@ pub unsafe fn kernel<
     }
     G::sync_warp();
     let probability = from_raw_parts_mut(
-        probability_ptr.as_ptr().add((nbin * id) as usize),
+        probability_ptr
+            .as_ptr()
+            .add((nbin * global_warp_id) as usize),
         nbin as usize,
     );
-    let mut i = laneid;
+    let mut i = lane_id;
     while i < nbin {
         let w = &mut shared[i as usize];
         w.skip(count);

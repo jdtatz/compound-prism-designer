@@ -31,32 +31,25 @@ pub trait DetectorArray<T, const D: usize>: Surface<T, D> {
     fn mid_pt(&self) -> Vector<T, D>;
 }
 
-#[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct PrismSurface<T, S> {
-    /// glass
-    pub glass: Glass<T, 6>,
-    /// initial boundary surface
-    pub surface: S,
-}
-
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
+    pub(crate) initial_glass: Glass<T, 6>,
+    pub(crate) glasses: [Glass<T, 6>; N],
     /// initial prism surface
-    initial_prism: PrismSurface<T, S0>,
+    pub(crate) initial_surface: S0,
     /// rest of the prism surfaces
-    prisms: [PrismSurface<T, SI>; N],
+    pub(crate) inter_surfaces: [SI; N],
     /// Final boundary surface
-    final_surface: SN,
+    pub(crate) final_surface: SN,
     /// Height of compound prism
     pub(crate) height: T,
     /// Width of compound prism
     pub(crate) width: T,
     /// Are the inter-media surfaces coated(anti-reflective)?
     #[wrapped_from(skip)]
-    ar_coated: bool,
+    pub(crate) ar_coated: bool,
 }
 
 // pub type PlanerCompoundPrism<V, const N: usize> = CompoundPrism<V, Plane<V>, Plane<V>, Plane<V>, N>;
@@ -109,22 +102,17 @@ where
             lengths,
         );
         let surface0 = S0::from_hyperplane(surface0, s0_parametrization);
-        let initial_prism = PrismSurface {
-            glass: glass0,
-            surface: surface0,
-        };
         let isurfaces = isurfaces.map(|s| Plane::new(s, prism_bounds));
-        let prisms = glasses
-            .zip(isurfaces)
-            .map(|(glass, surface)| PrismSurface { glass, surface });
         let final_surface = SN::from_hyperplane(last_surface, sn_parametrization);
         Self {
-            initial_prism,
-            prisms,
             final_surface,
             height,
             width,
             ar_coated: coat,
+            initial_glass: glass0,
+            glasses,
+            initial_surface: surface0,
+            inter_surfaces: isurfaces,
         }
     }
 }
@@ -151,17 +139,15 @@ where
                 radius,
             } => (a, b, Some(radius)),
         };
-        let s_0 = path2surface(self.initial_prism.surface.draw());
-        let s_i = self
-            .prisms
-            .map(|PrismSurface { surface: s, .. }| path2surface(s.draw()));
+        let s_0 = path2surface(self.initial_surface.draw());
+        let s_i = self.inter_surfaces.map(|s| path2surface(s.draw()));
         let s_n = path2surface(self.final_surface.draw());
         (s_0, s_i, s_n)
     }
 
     pub fn polygons(&self) -> ([Polygon<T>; N], Polygon<T>) {
-        let mut path0 = self.initial_prism.surface.draw();
-        let polys = self.prisms.map(|PrismSurface { surface: s, .. }| {
+        let mut path0 = self.initial_surface.draw();
+        let polys = self.inter_surfaces.map(|s| {
             let path1 = s.draw();
             let poly = Polygon([path0.reverse(), path1]);
             path0 = path1;
@@ -274,6 +260,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         let cr = cr_sq.sqrt();
         debug_assert!(T::zero() <= cr && cr <= T::one());
         let v = UnitVector::new((self.direction.0) * r + (normal.0) * (r * ci - cr));
+        debug_assert!(v.x() >= T::one());
         let (s_transmittance, p_transmittance) = if ar_coated && ci > T::lossy_from(0.5f64) {
             (
                 self.s_transmittance * T::lossy_from(0.99f64),
@@ -365,7 +352,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///
     /// # Arguments
     ///  * `detector` - detector array specification
-    fn intersect_detector_array(
+    pub fn intersect_detector_array(
         self,
         detector: &(impl Copy + DetectorArray<T, D>),
     ) -> Result<(Vector<T, D>, u32, T), RayTraceError> {
@@ -387,6 +374,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     /// # Arguments
     ///  * `cmpnd` - the compound prism specification
     ///  * `wavelength` - the wavelength of the light ray
+    #[inline(always)]
     pub fn propagate_internal<
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
@@ -394,44 +382,39 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         const N: usize,
     >(
         self,
-        cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
-        wavelength: T,
+        initial_refractive_index: T,
+        refractive_indicies: [T; N],
+        initial_surface: S0,
+        isurfaces: [SI; N],
+        final_surface: SN,
+        ar_coated: bool,
     ) -> Result<Self, RayTraceError> {
         let mut ray = self;
         let mut n1 = T::one();
 
-        let n2 = cmpnd.initial_prism.glass.calc_n(wavelength);
+        let n2 = initial_refractive_index;
         debug_assert!(n2 >= T::one());
-        let GeometricRayIntersection { distance, normal } = cmpnd
-            .initial_prism
-            .surface
+        let GeometricRayIntersection { distance, normal } = initial_surface
             .intersection(ray.into())
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
-        ray = ray
-            .translate(distance)
-            .refract(normal, n1, n2, cmpnd.ar_coated)?;
+        ray = ray.translate(distance).refract(normal, n1, n2, ar_coated)?;
         n1 = n2;
 
-        // for (glass, plane) in core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces)) {
+        // for (n2, plane) in core::array::IntoIter::new(refractive_indicies.zip(cmpnd.isurfaces)) {
         for i in 0..N {
-            let n2 = cmpnd.prisms[i].glass.calc_n(wavelength);
+            let n2 = refractive_indicies[i];
             debug_assert!(n2 >= T::one());
-            let GeometricRayIntersection { distance, normal } = cmpnd.prisms[i]
-                .surface
+            let GeometricRayIntersection { distance, normal } = isurfaces[i]
                 .intersection(ray.into())
                 .ok_or(RayTraceError::NoSurfaceIntersection)?;
-            ray = ray
-                .translate(distance)
-                .refract(normal, n1, n2, cmpnd.ar_coated)?;
+            ray = ray.translate(distance).refract(normal, n1, n2, ar_coated)?;
             n1 = n2;
         }
         let n2 = T::one();
-        let GeometricRayIntersection { distance, normal } = cmpnd
-            .final_surface
+        let GeometricRayIntersection { distance, normal } = final_surface
             .intersection(ray.into())
             .ok_or(RayTraceError::NoSurfaceIntersection)?;
-        ray.translate(distance)
-            .refract(normal, n1, n2, cmpnd.ar_coated)
+        ray.translate(distance).refract(normal, n1, n2, ar_coated)
     }
 
     /// Propagate a ray of `wavelength` through the compound prism and
@@ -442,6 +425,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `wavelength` - the wavelength of the light ray
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
+    #[inline(always)]
     pub fn propagate<
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
@@ -449,12 +433,23 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         const N: usize,
     >(
         self,
-        wavelength: T,
-        cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
+        initial_refractive_index: T,
+        refractive_indicies: [T; N],
+        initial_surface: S0,
+        isurfaces: [SI; N],
+        final_surface: SN,
+        ar_coated: bool,
         detector: &(impl Copy + DetectorArray<T, D>),
     ) -> Result<(u32, T), RayTraceError> {
         let (_, idx, t) = self
-            .propagate_internal(cmpnd, wavelength)?
+            .propagate_internal(
+                initial_refractive_index,
+                refractive_indicies,
+                initial_surface,
+                isurfaces,
+                final_surface,
+                ar_coated,
+            )?
             .intersect_detector_array(detector)?;
         Ok((idx, t))
     }
@@ -480,16 +475,12 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ) -> impl Iterator<Item = GeometricRay<T, D>> {
         let mut ray = self;
         let mut n1 = T::one();
-        let mut prism0 = Some(cmpnd.initial_prism);
-        let mut prisms = cmpnd.prisms.into_iter();
+        let mut prism0 = Some((cmpnd.initial_glass, cmpnd.initial_surface));
+        let mut prisms = core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.inter_surfaces));
         let mut internal = true;
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<_>, RayTraceError> {
-            if let Some(PrismSurface {
-                glass,
-                surface: surf,
-            }) = prism0.take()
-            {
+            if let Some((glass, surf)) = prism0.take() {
                 let n2 = glass.calc_n(wavelength);
                 let GeometricRayIntersection { distance, normal } =
                     surf.intersection(ray.into())
@@ -501,10 +492,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
                 return Ok(Some(GeometricRay::from(ray)));
             }
             match prisms.next() {
-                Some(PrismSurface {
-                    glass,
-                    surface: surf,
-                }) => {
+                Some((glass, surf)) => {
                     let n2 = glass.calc_n(wavelength);
                     let GeometricRayIntersection { distance, normal } = surf
                         .intersection(ray.into())
@@ -550,5 +538,32 @@ impl<T, const D: usize> From<Ray<T, D>> for GeometricRay<T, D> {
             origin, direction, ..
         } = ray;
         Self { origin, direction }
+    }
+}
+
+impl<
+        T: FloatExt,
+        S0: Copy + Surface<T, D>,
+        SI: Copy + Surface<T, D>,
+        SN: Copy + Surface<T, D>,
+        const N: usize,
+        const D: usize,
+    > CompoundPrism<T, S0, SI, SN, N, D>
+{
+    pub fn propagate_internal_helper(
+        &self,
+        ray: Ray<T, D>,
+        wavelength: T,
+    ) -> Result<Ray<T, D>, RayTraceError> {
+        let initial_refractive_index = self.initial_glass.calc_n(wavelength);
+        let refractive_indicies = self.glasses.map(|glass| glass.calc_n(wavelength));
+        ray.propagate_internal(
+            initial_refractive_index,
+            refractive_indicies,
+            self.initial_surface,
+            self.inter_surfaces.map(|surface| surface),
+            self.final_surface,
+            self.ar_coated,
+        )
     }
 }

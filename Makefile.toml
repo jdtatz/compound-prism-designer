@@ -12,6 +12,7 @@ command = "cargo"
 args = ["fmt"]
 
 [tasks.kernel]
+env = {RUSTFLAGS = "-Z macro-backtrace" }
 toolchain = "nightly"
 command = "cargo"
 args = [
@@ -20,6 +21,7 @@ args = [
     "--manifest-path=compound_prism_designer_kernel/Cargo.toml",
     "--release",
     "--target=nvptx64-nvidia-cuda.json",
+    "--target-dir", "target/gpu-target",
     "-Z", "build-std=core",
     "--",
     "-Cllvm-args=--nvptx-fma-level=2",
@@ -29,18 +31,20 @@ args = [
     "-Cllvm-args=--mul-constant-optimization",
     "-Cllvm-args=--enable-local-reassign",
     # "-Cllvm-args=--enable-dse-memoryssa",
-    "-Cllvm-args=--inline-threshold=1024",
-    "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll",
-    "-Cpasses=mem2reg sroa",
+    "-Cllvm-args=--inline-threshold=4096",
+    "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll,mir=kernel.mir",
+    "-Cpasses=mem2reg memcpyopt sroa dot-cfg",
     "-Copt-level=3",
     # "-Cdebuginfo=2",
     "-Clto",
     "-Cembed-bitcode=yes",
-    "-Ctarget-cpu=sm_32",
-    "-Ctarget-feature=+ptx60",
+    "-Ctarget-cpu=sm_52",
+    "-Ctarget-feature=+ptx72",
     "-Clinker=echo",
+    "-Z", "print-llvm-passes",
     "-Z", "no-link",
     "-Z", "mir-opt-level=4",
+    "-Z", "fuel=compound_prism_designer_kernel=100024",
     "-Z", "combine_cgu",
     "-Z", "mutable-noalias=yes",
     "-Z", "inline-mir=yes",
@@ -52,6 +56,28 @@ args = [
 dependencies = ["kernel"]
 command = "ptxas"
 args = ["-v", "-arch=sm_52", "src/kernel.ptx"]
+
+[tasks.shader]
+# env = { "RUSTFLAGS" = "-Zcodegen-backend=/home/julia/Repos/rust-gpu/target/release/librustc_codegen_spirv.so -Zsymbol-mangling-version=v0 -Ccodegen-units=1 -Ctarget-feature=+GenericPointer,+VariablePointers,+Addresses,+Int8,+Int16,+Int64,+ext:SPV_KHR_variable_pointers -Zmir-opt-level=4" }
+env = { "RUSTFLAGS" = "-Zcodegen-backend=/home/julia/Repos/rust-gpu/target/release/librustc_codegen_spirv.so -Clto=off -Zinline-mir-threshold=1000000 -Zmir-opt-level=4 -Zunsound-mir-opts -Ctarget-feature=+Shader,+GenericPointer,+VariablePointers,+Addresses,+Int8,+Int16,+Int64,+Groups,+GroupNonUniformBallot,+GroupNonUniformVote,+GroupNonUniformShuffle,+GroupNonUniformArithmetic,+ext:SPV_KHR_variable_pointers,+Linkage" }
+toolchain = "nightly"
+command = "cargo"
+args = [
+    "rustc",
+    "--release",
+    "--manifest-path=compound_prism_designer_kernel/Cargo.toml",
+    "--lib",
+    "--target=spirv-unknown-spv1.5",
+    "--target-dir", "target/shader-target",
+    "-Z", "build-std=core",
+    "-Z", "build-std-features=compiler-builtins-mem",
+    "--",
+    "-Zcodegen-backend=/home/julia/Repos/rust-gpu/target/release/librustc_codegen_spirv.so",
+    "-Zsymbol-mangling-version=v0",
+    "-Ccodegen-units=1",
+    "-Ctarget-feature=+Shader,+GenericPointer,+VariablePointers,+Addresses,+Int8,+Int16,+Int64,+Groups,+GroupNonUniformBallot,+GroupNonUniformVote,+GroupNonUniformShuffle,+GroupNonUniformArithmetic,+ext:SPV_KHR_variable_pointers,+Linkage",
+    "-Zmir-opt-level=4",
+]
 
 [tasks.bench]
 env = {RUSTFLAGS = "-Ctarget-feature=+fma -Ctarget-cpu=native" }
@@ -83,7 +109,7 @@ command = "maturin"
 args = [
     "develop",
     "--release",
-    "--rustc-extra-args=-Ctarget-feature=+fma -Ctarget-cpu=native",
+    "--rustc-extra-args=-Ctarget-feature=+fma -Ctarget-cpu=native -Cdebug-assertions=yes",
     "--cargo-extra-args=\"--features=pyext\""
 ]
 

@@ -564,7 +564,7 @@ where
 
     fn exit_ray(&self, y: f64, wavelength: f64) -> PyResult<(PyVector2D, PyUnitVector2D)> {
         let ray = Ray::new_from_start(y);
-        match map_sized_compound_prism!(self => |c| ray.propagate_internal(c, wavelength)) {
+        match map_sized_compound_prism!(self => |c| c.propagate_internal_helper(ray, wavelength)) {
             Ok(r) => Ok((r.origin.lossy_into(), r.direction.lossy_into())),
             Err(e) => Err(map_ray_trace_err(e)),
         }

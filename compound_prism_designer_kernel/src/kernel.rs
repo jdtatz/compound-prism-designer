@@ -5,9 +5,38 @@ use compound_prism_spectrometer::{
 };
 use core::{arch::asm, ptr::NonNull};
 use nvptx_sys::{
-    blockDim, blockIdx, dynamic_shared_memory, gridDim, syncthreads, threadIdx, vote_any,
+    blockDim, blockIdx, dynamic_shared_memory, gridDim, laneid, syncthreads, threadIdx, vote_any,
     vote_ballot, warp_sync, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
 };
+
+union GlobalSpectrometer {
+    _1: Spectrometer<
+        FastFloat<f32>,
+        UniformDistribution<FastFloat<f32>>,
+        GaussianBeam<FastFloat<f32>>,
+        Plane<FastFloat<f32>, 2>,
+        Plane<FastFloat<f32>, 2>,
+        CurvedPlane<FastFloat<f32>, 2>,
+        6,
+        2,
+    >,
+    _2: Spectrometer<
+        FastFloat<f32>,
+        UniformDistribution<FastFloat<f32>>,
+        FiberBeam<FastFloat<f32>>,
+        Plane<FastFloat<f32>, 3>,
+        Plane<FastFloat<f32>, 3>,
+        ToricLens<FastFloat<f32>, 3>,
+        6,
+        3,
+    >,
+}
+
+global_asm! {
+    ".const .align {align} .b8 const_spectrometer[{size}];",
+    align = const core::mem::align_of::<GlobalSpectrometer>(),
+    size = const core::mem::size_of::<GlobalSpectrometer>(),
+}
 
 unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     #[allow(clippy::cast_ptr_alignment)]
@@ -26,6 +55,8 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
 
 struct CUDAGPU;
 impl GPU for CUDAGPU {
+    const ZERO_INITIALIZED_SHARED_MEMORY: bool = false;
+
     fn warp_size() -> u32 {
         32
     }
@@ -40,6 +71,10 @@ impl GPU for CUDAGPU {
     }
     fn grid_dim() -> u32 {
         gridDim::x()
+    }
+
+    fn lane_id() -> u32 {
+        laneid()
     }
 
     fn sync_warp() {
@@ -75,34 +110,40 @@ impl<F: FastNum + Shuffle> GPUShuffle<FastFloat<F>> for CUDAGPU {
 }
 
 macro_rules! gen_kernel {
-    (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
+    (@inner $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
         paste::paste! {
             #[no_mangle]
             pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
-                seed: $fty,
+                seed: FastFloat<$fname>,
                 max_evals: u32,
-                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>,
-                prob: *mut $fty,
+                prob: *mut FastFloat<$fname>,
             ) {
-                let shared_spectrometer_ptr;
+                // let shared_spectrometer_ptr;
+                // asm!(
+                //     ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
+                //     ptr = out(reg64) shared_spectrometer_ptr,
+                //     size = const core::mem::size_of::<Spectrometer<FastFloat<$fname>, UniformDistribution<FastFloat<$fname>>, $beam<FastFloat<$fname>>, $s0<FastFloat<$fname>, $d>, Plane<FastFloat<$fname>, $d>, $sn<FastFloat<$fname>, $d>, $n, $d>>(),
+                //     options(readonly, nostack, preserves_flags)
+                // );
+                // let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
+                let spectrometer: *const Spectrometer<FastFloat<$fname>, UniformDistribution<FastFloat<$fname>>, $beam<FastFloat<$fname>>, $s0<FastFloat<$fname>, $d>, Plane<FastFloat<$fname>, $d>, $sn<FastFloat<$fname>, $d>, $n, $d>;
                 asm!(
-                    ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
-                    ptr = out(reg64) shared_spectrometer_ptr,
-                    size = const core::mem::size_of::<Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>>(),
-                    options(readonly, nostack, preserves_flags)
+                    "cvta.const.u64 {ptr}, const_spectrometer;",
+                    ptr = out(reg64) spectrometer,
+                    options(pure, nostack, nomem, preserves_flags)
                 );
-                let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
+                let spectrometer = &*spectrometer;
 
                 let (ptr, _dyn_mem) = dynamic_shared_memory();
-                let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
+                let shared_ptr: NonNull<Welford<FastFloat<$fname>>> = ptr.cast();
 
                 kernel::<CUDAGPU, _, _, _, _, _, _, $n, $d>(seed, max_evals, spectrometer, NonNull::new_unchecked(prob), shared_ptr)
             }
         }
     };
     ([$($n:literal),*]) => {
-        $( gen_kernel!(@inner FastFloat<f32>; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        $( gen_kernel!(@inner FastFloat<f32>; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
+        $( gen_kernel!(@inner f32 GaussianBeam Plane     CurvedPlane $n 2); )*
+        $( gen_kernel!(@inner f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }
 

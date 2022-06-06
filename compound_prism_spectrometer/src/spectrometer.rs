@@ -340,8 +340,8 @@ pub fn detector_array_positioning<
     debug_assert!(wmax.is_finite());
     debug_assert!(wmin > T::zero());
     debug_assert!(wmax > wmin);
-    let lower_ray = ray.propagate_internal(&cmpnd, wmin)?;
-    let upper_ray = ray.propagate_internal(&cmpnd, wmax)?;
+    let lower_ray = cmpnd.propagate_internal_helper(ray, wmin)?;
+    let upper_ray = cmpnd.propagate_internal_helper(ray, wmax)?;
     if lower_ray.average_transmittance() <= T::lossy_from(1e-3f64)
         || upper_ray.average_transmittance() <= T::lossy_from(1e-3f64)
     {
@@ -406,8 +406,11 @@ impl<
     }
 
     fn propagate(&self, ray: Ray<T, D>, wavelength: T) -> Result<(u32, T), RayTraceError> {
-        ray.propagate(wavelength, &self.compound_prism, &self.detector)
-            .map(|(idx, t)| (idx, t))
+        let (_, idx, t) = self
+            .compound_prism
+            .propagate_internal_helper(ray, wavelength)?
+            .intersect_detector_array(&self.detector)?;
+        Ok((idx, t))
     }
 
     fn size_and_deviation(&self) -> (T, T) {
@@ -499,15 +502,15 @@ impl<
 //     // }
 // }
 
-unsafe impl<
-        T: rustacuda_core::DeviceCopy,
-        W,
-        B,
-        S0: Surface<T, D>,
-        SI: Surface<T, D>,
-        SN: Surface<T, D>,
-        const N: usize,
-        const D: usize,
-    > rustacuda_core::DeviceCopy for Spectrometer<T, W, B, S0, SI, SN, N, D>
-{
-}
+// unsafe impl<
+//         T: rustacuda_core::DeviceCopy,
+//         W,
+//         B,
+//         S0: Surface<T, D>,
+//         SI: Surface<T, D>,
+//         SN: Surface<T, D>,
+//         const N: usize,
+//         const D: usize,
+//     > rustacuda_core::DeviceCopy for Spectrometer<T, W, B, S0, SI, SN, N, D>
+// {
+// }

@@ -1,8 +1,12 @@
 #![cfg_attr(
-    all(any(not(feature = "std"), target_arch = "nvptx64"), not(test)),
+    all(
+        any(not(feature = "std"), target_arch = "nvptx64", target_arch = "spirv"),
+        not(test)
+    ),
     no_std
 )]
 #![feature(array_zip, type_alias_impl_trait)]
+#![feature(maybe_uninit_uninit_array)]
 #![allow(
     clippy::blocks_in_if_conditions,
     clippy::range_plus_one,

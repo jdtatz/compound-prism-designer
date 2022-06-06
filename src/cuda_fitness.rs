@@ -10,6 +10,8 @@ use std::mem::ManuallyDrop;
 
 const PTX_BYTES: &[u8] = concat!(include_str!("kernel.ptx"), "\0").as_bytes();
 // const PTX: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(PTX_BYTES) };
+// const PTX: &'static CStr = unsafe { &*(PTX_BYTES as *const [u8] as *const CStr) };
+const PTX: &'static CStr = unsafe { std::mem::transmute(PTX_BYTES) };
 
 // const MAX_N: usize = 256;
 // const MAX_M: usize = 16_384;
@@ -17,13 +19,46 @@ const PTX_BYTES: &[u8] = concat!(include_str!("kernel.ptx"), "\0").as_bytes();
 
 pub trait Kernel: DeviceCopy {
     const FNAME: &'static [u8];
+    // const NAME: &'static CStr = unsafe { CStr::from_bytes_with_nul_unchecked(Self::FNAME) };
+    // const NAME: &'static CStr = unsafe { &*(Self::FNAME as *const [u8] as *const CStr) };
+    const NAME: &'static CStr = unsafe { std::mem::transmute(Self::FNAME) };
 }
+
+union GlobalSpectrometer {
+    _1: Spectrometer<
+        f32,
+        UniformDistribution<f32>,
+        GaussianBeam<f32>,
+        Plane<f32, 2>,
+        Plane<f32, 2>,
+        CurvedPlane<f32, 2>,
+        6,
+        2,
+    >,
+    _2: Spectrometer<
+        f32,
+        UniformDistribution<f32>,
+        FiberBeam<f32>,
+        Plane<f32, 3>,
+        Plane<f32, 3>,
+        ToricLens<f32, 3>,
+        6,
+        3,
+    >,
+}
+unsafe impl DeviceCopy for GlobalSpectrometer {}
+
+const CSNAME_BYTES: &[u8] = concat!("const_spectrometer", "\0").as_bytes();
+// const CSNAME: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(CSNAME_BYTES) };
+// const CSNAME: &'static CStr = unsafe { &*(CSNAME_BYTES as *const [u8] as *const CStr) };
+const CSNAME: &'static CStr = unsafe { std::mem::transmute(CSNAME_BYTES) };
 
 macro_rules! kernel_impl {
     (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
         paste::paste! {
             impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d> {
                 const FNAME: &'static [u8] = concat!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]), "\0").as_bytes();
+                // const NAME: &'static CStr = unsafe { CStr::from_bytes_with_nul_unchecked(concat!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]), "\0").as_bytes()) };
             }
         }
     };
@@ -43,9 +78,7 @@ struct CudaFitnessContext {
 impl CudaFitnessContext {
     fn new(ctxt: Context) -> rustacuda::error::CudaResult<Self> {
         ContextStack::push(&ctxt)?;
-        let ptx_cstr = CStr::from_bytes_with_nul(PTX_BYTES)
-            .unwrap_or_else(|_| unreachable!("Invalid PTX CStr bytes, this should never happen"));
-        let module = Module::load_from_string(ptx_cstr)?;
+        let module = Module::load_from_string(PTX)?;
         let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
         Ok(Self {
             ctxt,
@@ -70,18 +103,16 @@ impl CudaFitnessContext {
 
         let nbin = spec.detector_bin_count();
         let nprobs = (max_n * nbin) as usize;
-        let mut dev_spec = ManuallyDrop::new(DeviceBox::new(spec)?);
+        let mut dev_spec = ManuallyDrop::new(self.module.get_global::<GlobalSpectrometer>(CSNAME)?);
+        dev_spec.copy_from(unsafe { &*(spec as *const _ as *const _) })?;
         let mut dev_probs = ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(nprobs) }?);
-        let function = self
-            .module
-            .get_function(unsafe { CStr::from_bytes_with_nul_unchecked(<S as Kernel>::FNAME) })?;
+        let function = self.module.get_function(<S as Kernel>::NAME)?;
         let dynamic_shared_mem = nbin * nwarp * std::mem::size_of::<Welford<F>>() as u32;
         let stream = &self.stream;
         unsafe {
             launch!(function<<<max_n / nwarp, 32 * nwarp, dynamic_shared_mem, stream>>>(
                 F::lossy_from(seed),
                 max_eval,
-                dev_spec.as_device_ptr(),
                 dev_probs.as_device_ptr()
             ))?;
         }
