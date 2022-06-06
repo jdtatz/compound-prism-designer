@@ -51,9 +51,7 @@ fn associate_bounds(
         Type::BareFn(_) => unimplemented!("BareFn: {:?} is not yet supported", typ),
         Type::TraitObject(_) => unimplemented!("TraitObject: {:?} is not yet supported", typ),
         Type::Verbatim(v) => panic!("Unparseable tokens: {:?}", v),
-        #[cfg(test)]
-        Type::__TestExhaustive(_) => unimplemented!(),
-        #[cfg(not(test))]
+        #[cfg_attr(test, deny(non_exhaustive_omitted_patterns))]
         _ => unimplemented!("type: {:?} is not yet supported", typ),
     }
 }
