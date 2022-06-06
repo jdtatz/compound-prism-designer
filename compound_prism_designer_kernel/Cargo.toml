@@ -2,7 +2,7 @@
 name = "compound_prism_designer_kernel"
 version = "0.1.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
-edition = "2018"
+edition = "2021"
 include = ["/src/**/*", "/Cargo.toml"]
 
 [lib]

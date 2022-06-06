@@ -2,7 +2,7 @@
 name = "compound_prism_designer"
 version = "0.2.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
-edition = "2018"
+edition = "2021"
 include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/make.toml", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
 resolver = "2"
 
@@ -16,9 +16,9 @@ compound_prism_spectrometer = { path = "./compound_prism_spectrometer", features
 derive_more = "0.99"
 libm = "0.2"
 rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update", optional = true }
-parking_lot = { version = "0.11", optional = true }
-pyo3 = { version="0.14", features = ["extension-module", "abi3-py37"], optional = true }
-numpy = { version="0.14", optional = true }
+parking_lot = { version = "0.12", optional = true }
+pyo3 = { version="0.16", features = ["extension-module", "abi3-py37"], optional = true }
+numpy = { version="0.16", optional = true }
 ndarray = { version="0.15", optional = true }
 paste = { version = "1.0", optional = true }
 derive-wrapped-from = { path = "./derive-wrapped-from" }
@@ -26,11 +26,11 @@ derive-wrapped-from = { path = "./derive-wrapped-from" }
 [dev-dependencies]
 rand = "0.8"
 rand_xoshiro = "0.6"
-float_eq = "0.6"
+float_eq = "1.0"
 criterion = "0.3"
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.5", features = ["flamegraph", "protobuf"] }
+pprof = { version = "0.9", features = ["flamegraph", "protobuf"] }
 
 [features]
 default = ["cuda"]

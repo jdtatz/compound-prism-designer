@@ -2,12 +2,7 @@ use compound_prism_spectrometer::*;
 use core::convert::TryInto;
 use ndarray::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
-use pyo3::{
-    create_exception,
-    gc::{PyGCProtocol, PyVisit},
-    prelude::*,
-    wrap_pyfunction, PyObjectProtocol, PyTraverseError,
-};
+use pyo3::{create_exception, gc::PyVisit, prelude::*, wrap_pyfunction, PyTraverseError};
 
 create_exception!(
     compound_prism_designer,
@@ -74,7 +69,6 @@ impl PyGlass {
     ///
     /// Args:
     ///     w (float): wavelength given in units of micrometers
-    #[call]
     fn __call__(&self, w: f64) -> f64 {
         self.glass.calc_n(w)
     }
@@ -83,10 +77,7 @@ impl PyGlass {
     fn get_glass<'p>(&self, py: Python<'p>) -> impl IntoPy<PyObject> + 'p {
         PyArray1::from_slice(py, &self.glass.coefficents)
     }
-}
 
-#[pyproto]
-impl PyObjectProtocol for PyGlass {
     fn __str__(&self) -> PyResult<String> {
         Ok(format!("{}", self))
     }
@@ -128,10 +119,7 @@ impl PyDesignFitness {
     fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
         (self.size, self.info, self.deviation)
     }
-}
 
-#[pyproto]
-impl PyObjectProtocol for PyDesignFitness {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }
@@ -389,10 +377,7 @@ impl PyGaussianBeam {
     fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
         (self.width, self.y_mean)
     }
-}
 
-#[pyproto]
-impl PyObjectProtocol for PyGaussianBeam {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }
@@ -437,10 +422,7 @@ impl PyFiberBeam {
     fn get_width(&self) -> impl IntoPy<PyObject> {
         self.core_radius
     }
-}
 
-#[pyproto]
-impl PyObjectProtocol for PyFiberBeam {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }
@@ -626,7 +608,7 @@ where
 
         map_sized_compound_prism!(self => |c| {
             let (polys, last_poly) = c.polygons();
-            core::array::IntoIter::new(polys)
+            polys.into_iter()
                 .chain(core::iter::once(last_poly))
                 .map(|Polygon([path_l, path_r])| {
                     let (vert_l, codes_l) = path2Path(path_l, move_to);
@@ -789,7 +771,7 @@ impl PyCompoundPrism {
     fn surfaces(&self) -> Vec<PySurface> {
         map_dimensioned_sized_compound_prism!(self.compound_prism => |c| {
             let (s_0, s_i, s_n) = c.surfaces();
-            core::iter::once(s_0).chain(core::array::IntoIter::new(s_i)).chain(core::iter::once(s_n)).zip(self.angles.as_slice()).map(|((start, end, radius), &angle)| {
+            core::iter::once(s_0).chain(s_i).chain(core::iter::once(s_n)).zip(self.angles.as_slice()).map(|((start, end, radius), &angle)| {
                 PySurface {
                     lower_pt: start.lossy_into(),
                     upper_pt: end.lossy_into(),
@@ -799,10 +781,7 @@ impl PyCompoundPrism {
             }).collect()
         })
     }
-}
 
-#[pyproto]
-impl PyObjectProtocol for PyCompoundPrism {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }
@@ -911,10 +890,7 @@ impl PyDetectorArray {
             self.flipped,
         )
     }
-}
 
-#[pyproto]
-impl PyObjectProtocol for PyDetectorArray {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }
@@ -955,7 +931,7 @@ impl<T: FloatExt, S, const D: usize> PySpectrometerFitness<T, D> for S where
 ///     detector_array (DetectorArray): linear detector array specification
 ///     wavelengths (UniformWavelengthDistribution): input wavelength distribution specification
 ///     gaussian_beam (GaussianBeam): input gaussian beam specification
-#[pyclass(name = "Spectrometer", gc, module = "compound_prism_designer")]
+#[pyclass(name = "Spectrometer", module = "compound_prism_designer")]
 #[pyo3(text_signature = "(compound_prism, detector_array, wavelengths, beam)")]
 #[derive(Debug)]
 struct PySpectrometer {
@@ -1149,10 +1125,6 @@ impl PySpectrometer {
             .direction;
         Ok((x, y))
     }
-}
-
-#[pyproto]
-impl PyGCProtocol for PySpectrometer {
     fn __traverse__(&self, visit: PyVisit) -> Result<(), PyTraverseError> {
         visit.call(&self.compound_prism)?;
         visit.call(&self.detector_array)?;
@@ -1160,10 +1132,6 @@ impl PyGCProtocol for PySpectrometer {
     }
 
     fn __clear__(&mut self) {}
-}
-
-#[pyproto]
-impl PyObjectProtocol for PySpectrometer {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }

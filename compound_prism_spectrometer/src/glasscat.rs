@@ -29,7 +29,7 @@ impl<F: Copy + Display, const N: usize> Display for Glass<F, N> {
         for _ in 0..N {
             f.write_char('(')?;
         }
-        let mut it = core::array::IntoIter::new(self.coefficents);
+        let mut it = (self.coefficents).into_iter();
         let cn = it.next().unwrap();
         f.write_fmt(format_args!("{})", cn))?;
         for c in it {

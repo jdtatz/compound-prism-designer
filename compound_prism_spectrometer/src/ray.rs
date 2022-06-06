@@ -481,7 +481,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         let mut ray = self;
         let mut n1 = T::one();
         let mut prism0 = Some(cmpnd.initial_prism);
-        let mut prisms = core::array::IntoIter::new(cmpnd.prisms);
+        let mut prisms = cmpnd.prisms.into_iter();
         let mut internal = true;
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<_>, RayTraceError> {

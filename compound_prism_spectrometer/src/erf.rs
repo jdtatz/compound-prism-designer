@@ -6,7 +6,8 @@
 use crate::utils::*;
 
 fn polynomial<F: FloatExt, const N: usize>(z: F, coeff: [F; N]) -> F {
-    core::array::IntoIter::new(coeff)
+    coeff
+        .into_iter()
         // coeff
         //     .iter()
         //     .copied()

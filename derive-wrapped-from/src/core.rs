@@ -96,7 +96,7 @@ fn construct_fields(
     let ff = fields.map(|f| {
         let field = deconstructed_field(f, i);
         i += 1;
-        if f.skip.is_some() {
+        if f.skip.is_present() {
             quote!(#field)
         } else {
             let value = quote!(#impl_trait :: #function ( #field ));
@@ -206,14 +206,14 @@ impl ToTokens for WrappedFromDerive {
         let assoc = match data.as_ref() {
             ast::Data::Enum(vs) => vs
                 .into_iter()
-                .filter(|v| v.skip.is_none())
+                .filter(|v| !v.skip.is_present())
                 .flat_map(|v| v.fields.iter())
-                .filter(|f| f.skip.is_none())
+                .filter(|f| !f.skip.is_present())
                 .flat_map(|f| associate_bounds(&f.ty, &wf_type_hashmap))
                 .collect(),
             ast::Data::Struct(fs) => fs
                 .into_iter()
-                .filter(|f| f.skip.is_none())
+                .filter(|f| !f.skip.is_present())
                 .flat_map(|f| associate_bounds(&f.ty, &wf_type_hashmap))
                 .collect::<Vec<_>>(),
         };
@@ -283,7 +283,7 @@ impl ToTokens for WrappedFromDerive {
                     let vpath = quote!( #ident :: #vid );
                     let vfs = &v.fields.as_ref();
                     let decon = deconstruct_fields(vfs.clone());
-                    if v.skip.is_some() {
+                    if v.skip.is_present() {
                         quote! { #vpath #decon => #vpath #decon }
                     } else {
                         let wcon = construct_fields(vfs.clone(), &impl_trait, &function);
