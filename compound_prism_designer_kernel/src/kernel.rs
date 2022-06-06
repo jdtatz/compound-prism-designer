@@ -3,7 +3,7 @@ use compound_prism_spectrometer::{
     CurvedPlane, FiberBeam, GaussianBeam, Plane, Spectrometer, ToricLens, UniformDistribution,
     Welford,
 };
-use core::ptr::NonNull;
+use core::{arch::asm, ptr::NonNull};
 use nvptx_sys::{
     blockDim, blockIdx, dynamic_shared_memory, gridDim, syncthreads, threadIdx, vote_any,
     vote_ballot, warp_sync, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,

@@ -29,7 +29,6 @@ args = [
     "-Cllvm-args=--mul-constant-optimization",
     "-Cllvm-args=--enable-local-reassign",
     # "-Cllvm-args=--enable-dse-memoryssa",
-    "-Cllvm-args=--enable-memcpyopt-memoryssa",
     "-Cllvm-args=--inline-threshold=1024",
     "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll",
     "-Cpasses=mem2reg sroa",
@@ -92,7 +91,7 @@ args = [
 dependencies = [
     "format",
     "kernel",
-    "python",
+    "build-python",
 ]
 
 [tasks.flow-develop]
@@ -100,5 +99,5 @@ dependencies = [
     "format",
     "kernel",
     "verify-kernel",
-    "python-devlop",
+    "python-develop",
 ]
