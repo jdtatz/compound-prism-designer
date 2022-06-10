@@ -30,7 +30,7 @@ float_eq = "1.0"
 criterion = "0.3"
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.9", features = ["flamegraph", "protobuf"] }
+pprof = { version = "0.9", features = ["flamegraph", "prost-codec"] }
 
 [features]
 default = ["cuda"]
