@@ -330,12 +330,14 @@ pub fn detector_array_positioning<
     detector_array_angle: T,
     wavelengths: W,
     beam: &B,
+    acceptance: T,
 ) -> Result<(Vector<T, D>, bool), RayTraceError> {
     let ray = Ray::new_from_start(beam.median_y());
-    // let wmin = wavelengths.inverse_cdf(T::lossy_from(0.01_f64));
-    // let wmax = wavelengths.inverse_cdf(T::lossy_from(0.99_f64));
-    let wmin = wavelengths.inverse_cdf(T::zero());
-    let wmax = wavelengths.inverse_cdf(T::one());
+    debug_assert!(acceptance > T::zero());
+    debug_assert!(acceptance <= T::one());
+    let unaccepted_halved = (T::one() - acceptance).max(T::zero()) * T::lossy_from(0.5f64);
+    let wmin = wavelengths.inverse_cdf(unaccepted_halved);
+    let wmax = wavelengths.inverse_cdf(T::one() - unaccepted_halved);
     debug_assert!(wmin.is_finite());
     debug_assert!(wmax.is_finite());
     debug_assert!(wmin > T::zero());

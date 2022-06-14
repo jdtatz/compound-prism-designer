@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 # from __future__ import annotations
 import itertools
-from typing import Union, Sequence, List, Tuple, NamedTuple, Callable, Optional, Iterator
+from typing import Union, Sequence, List, Tuple, Callable, Optional, Iterator
 import numpy as np
 from pymoo.core.problem import ElementwiseProblem
-from pymoo.factory import get_algorithm, get_crossover, get_mutation, get_sampling
-from pymoo.util.ref_dirs.energy import RieszEnergyReferenceDirectionFactory
+from pymoo.factory import get_algorithm, get_crossover, get_mutation, get_sampling, get_reference_directions
 from pymoo.optimize import minimize
 from multiprocessing.pool import ThreadPool
 from compound_prism_designer import RayTraceError, Glass, BUNDLED_CATALOG, CompoundPrism, \
     DetectorArray, UniformWavelengthDistribution, GaussianBeam, FiberBeam, Spectrometer, AbstractGlass, new_catalog, position_detector_array
 from compound_prism_designer.interactive import interactive_show, Design
-from dataclasses import dataclass, is_dataclass, fields
-from serde import deserialize, serialize
-from serde.toml import from_toml, to_toml
+from dataclasses import dataclass
+from serde import serde
+from serde.toml import from_toml
 from pathlib import Path
 from functools import reduce, partial
 from operator import mul
 rprod = partial(reduce, mul)
 
 
-@serialize(rename_all="spinalcase")
-@deserialize(rename_all="spinalcase")
+@serde(rename_all="spinalcase")
 @dataclass
 class CompoundPrismSpectrometerConfig:
     max_height: float
@@ -58,8 +56,7 @@ class CompoundPrismSpectrometerConfig:
         return (g.into_glass(self.wavelength_range)[0] for g in gcat)
 
 
-@serialize(rename_all="spinalcase")
-@deserialize(rename_all="spinalcase")
+@serde(rename_all="spinalcase")
 @dataclass
 class OptimizerConfig:
     cpu_only: bool = False
@@ -68,13 +65,13 @@ class OptimizerConfig:
     optimize_deviation: bool = True
 
 
-@serialize(rename_all="spinalcase")
-@deserialize(rename_all="spinalcase")
+@serde(rename_all="spinalcase")
 @dataclass
 class CompoundPrismSpectrometerProblemConfig:
     spectrometer: CompoundPrismSpectrometerConfig
     optimizer: OptimizerConfig = OptimizerConfig()
 
+    auto_position_detector_acceptance: Optional[float] = None
     nglass: Optional[int] = None
     glass_names: Optional[List[str]] = None
 
@@ -101,63 +98,57 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         self.cpu_only = config.optimizer.cpu_only
         self.glass_list = list(config.spectrometer.glass_catalog)
         self.glass_dict = { g.name: g for g in self.glass_list }
-        catalog_bounds = 0, len(self.glass_list)
+        catalog_bounds = 0, len(self.glass_list) - 1
         height_bounds = (0.0001 * config.spectrometer.max_height, config.spectrometer.max_height)
         normalized_y_mean_bounds = (0, 1)
         curvature_bounds = (0.00001, 1)
         det_arr_angle_bounds = (-np.pi, np.pi)
         angle_bounds = (-np.pi / 2, np.pi / 2)
+        # FIXME Too restrictive, use -log(1 - p) or atanh(p) map and set bounds to [0, 1) to map to non-negative reals with bias to small lengths
         len_bounds = (0, 10)
+        # FIXME Allows for some invalid designs where the array intersects the prisms
+        position_bounds = [(self.config.spectrometer.max_height + config.spectrometer.detector_array_length, self.config.spectrometer.max_height * 40), (-10 * self.config.spectrometer.max_height, 10 * self.config.spectrometer.max_height)]
         nglass_or_const_glasses = config.nglass_or_const_glasses
         self.use_gaussian_beam = config.spectrometer.beam_width is not None
         self.use_fiber_beam = config.spectrometer.fiber_core_radius is not None and config.spectrometer.numerical_aperture is not None
+        self.auto_position_detector_acceptance = config.auto_position_detector_acceptance
         assert self.use_gaussian_beam or self.use_fiber_beam
+        assert self.auto_position_detector_acceptance is None or 0 < self.auto_position_detector_acceptance <= 1
 
         if isinstance(nglass_or_const_glasses, int):
             nglass = nglass_or_const_glasses
             self._glasses = None
-            self._numpy_dtype = np.dtype([
-                ("glass_find", (np.int64, (nglass,))),
-                ("angles", (np.float64, (nglass + 1,))),
-                ("lengths", (np.float64, (nglass,))),
-                ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
-                ("height", np.float64),
-                ("normalized_y_mean", np.float64),
-                ("detector_array_angle", np.float64),
-                ("position", (np.float64, (2,))),
-            ])
-            bounds = {
-                "glass_find": [catalog_bounds] * nglass,
-                "angles": [angle_bounds] * (nglass + 1),
-                "lengths": [len_bounds] * nglass,
-                "curvature": [curvature_bounds] * (1 if self.use_gaussian_beam else 4),
-                "height": height_bounds,
-                "normalized_y_mean": normalized_y_mean_bounds,
-                "detector_array_angle": det_arr_angle_bounds,
-                "position": [(self.config.spectrometer.max_height + config.spectrometer.detector_array_length, self.config.spectrometer.max_height * 40), (-10 * self.config.spectrometer.max_height, 10 * self.config.spectrometer.max_height)]
-            }
+            glass_dtype_fields = [("glass_indices", (np.int64, (nglass,))),]
+            glass_bounds = {"glass_indices": [catalog_bounds] * nglass,}
         else:
-            glasses = [self.glass_dict[n] for n in nglass_or_const_glasses]
-            if not all(isinstance(g, Glass) for g in glasses):
+            self._glasses = [self.glass_dict[n] for n in nglass_or_const_glasses]
+            if not all(isinstance(g, Glass) for g in self._glasses):
                 raise TypeError(f"{nglass_or_const_glasses} is not a sequence of Glass")
-            self._glasses = glasses
             nglass = len(self._glasses)
-            self._numpy_dtype = np.dtype([
-                ("angles", (np.float64, (nglass + 1,))),
-                ("lengths", (np.float64, (nglass,))),
-                ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
-                ("height", np.float64),
-                ("normalized_y_mean", np.float64),
-                ("detector_array_angle", np.float64),
-            ])
-            bounds = {
-                "angles": [angle_bounds] * (nglass + 1),
-                "lengths": [len_bounds] * nglass,
-                "curvature": [curvature_bounds] * (1 if self.use_gaussian_beam else 4),
-                "height": height_bounds,
-                "normalized_y_mean": normalized_y_mean_bounds,
-                "detector_array_angle": det_arr_angle_bounds,
-            }
+            glass_dtype_fields = []
+            glass_bounds = {}
+        dtype_fields = [
+            *glass_dtype_fields,
+            ("angles", (np.float64, (nglass + 1,))),
+            ("lengths", (np.float64, (nglass,))),
+            ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
+            ("height", np.float64),
+            ("normalized_y_mean", np.float64),
+            ("detector_array_angle", np.float64),
+        ]
+        bounds = {
+            **glass_bounds,
+            "angles": [angle_bounds] * (nglass + 1), 
+            "lengths": [len_bounds] * nglass,
+            "curvature": [curvature_bounds] * (1 if self.use_gaussian_beam else 4),
+            "height": height_bounds,
+            "normalized_y_mean": normalized_y_mean_bounds,
+            "detector_array_angle": det_arr_angle_bounds,
+        }
+        if self.auto_position_detector_acceptance is None:
+            dtype_fields.append(("position", (np.float64, (2,))))
+            bounds["position"] = position_bounds
+        self._numpy_dtype = np.dtype(dtype_fields)
         xl, xu = zip(*itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], bounds.values())))
 
         fix_indicies = np.add.accumulate([np.prod(self._numpy_dtype[n].shape, dtype=np.int64) for n in self._numpy_dtype.names])[:-1]
@@ -183,8 +174,12 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         else:
             ic0, ic1, fc0, fc1 = params["curvature"]
             curvature = ((-ic0, ic1), (fc0, fc1))
+        if self._glasses is None:
+            glasses = [self.glass_list[i] for i in params["glass_indices"]]
+        else:
+            glasses = self._glasses
         compound_prism = CompoundPrism(
-            glasses=self._glasses if self._glasses is not None else [self.glass_list[int(np.clip(i, 0, len(self.glass_list) - 1))] for i in params["glass_find"]],
+            glasses=glasses,
             angles=params["angles"],
             lengths=params["lengths"],
             curvature=curvature,
@@ -205,16 +200,19 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
                 numerical_aperture=self.config.spectrometer.numerical_aperture,
                 center_y=params["height"] * params["normalized_y_mean"]
             )
-        x, y = params["position"]
-        position = x, y
-        flipped = False
-        # position, flipped = position_detector_array(
-        #     length=self.config.spectrometer.detector_array_length,
-        #     angle=params["detector_array_angle"],
-        #     compound_prism=compound_prism,
-        #     wavelengths=wavelengths,
-        #     beam=beam,
-        # )
+        if self.auto_position_detector_acceptance is None:
+            x, y = params["position"]
+            position = x, y
+            flipped = False
+        else:
+            position, flipped = position_detector_array(
+                length=self.config.spectrometer.detector_array_length,
+                angle=params["detector_array_angle"],
+                compound_prism=compound_prism,
+                wavelengths=wavelengths,
+                beam=beam,
+                acceptance=self.auto_position_detector_acceptance
+            )
         detector_array=DetectorArray(
             bin_count=self.config.spectrometer.bin_count,
             bin_size=self.config.spectrometer.bin_size,
@@ -250,8 +248,9 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
             if self.config.optimizer.optimize_deviation:
                 result.append(fit.deviation)
             out["F"] = result
-            out["feasible"] = fit.size < max_size
-            out["G"] = 0 if fit.size < max_size else 1
+            feasable_size = np.logical_and(self.config.spectrometer.max_height / 2 < fit.size, fit.size < max_size)
+            out["feasible"] = feasable_size
+            out["G"] = np.where(feasable_size, 0, 1)
         except RayTraceError:
             result = []
             if self.config.optimizer.optimize_size:
@@ -283,22 +282,20 @@ class MetaCompoundPrismSpectrometerProblem(ElementwiseProblem):
 with open("spring.toml") as f:
     spring_config = from_toml(CompoundPrismSpectrometerProblemConfig, f.read())
 
-# glass_cat = {g.name: g for g in BUNDLED_CATALOG}
 # glass_names = "N-SF66", "N-SF14", "N-BAF4"
-# glasses = [glass_cat[n] for n in glass_names]
-# ndim = len(glasses)
+# spring_config.nglass = None
+# spring_config.glass_names = glass_names
 
 # n_threads = 8
 # pool = ThreadPool(n_threads)
-# spring_config.optimizer.cpu_only = True
+spring_config.optimizer.cpu_only = True
+# spring_config.optimizer.optimize_size = False
+# spring_config.optimizer.optimize_deviation = False
+spring_config.auto_position_detector_acceptance = 0.98
 problem = CompoundPrismSpectrometerProblem(spring_config) #, cpu_only=True, parallelization = ('starmap', pool.starmap))
 
 
 from pymoo.operators.mixed_variable_operator import MixedVariableSampling, MixedVariableMutation, MixedVariableCrossover
-from pymoo.algorithms.moo.age import AGEMOEA
-
-
-# sampling=get_sampling('real_lhs')
 
 nglass = problem.config.nglass or 0
 mask = [*(["int"] * nglass), *(["real"] * (problem.n_var - nglass))]
@@ -318,11 +315,27 @@ mutation = MixedVariableMutation(mask, {
     "int": get_mutation("int_pm", prob=None, eta=20)
 })
 
-# ref_dirs = RieszEnergyReferenceDirectionFactory(n_dim=problem.n_obj, n_points=90).do()
-# 'ga', 'brkga', 'de', 'nelder-mead', 'pattern-search', 'cmaes', 'nsga2', 'rnsga2', 'nsga3', 'unsga3', 'rnsga3', 'moead'
-# algorithm = get_algorithm("unsga3", ref_dirs, pop_size=100)
-# algorithm = get_algorithm("nsga2", pop_size=1000, sampling=sampling, crossover=crossover, mutation=mutation)
-algorithm = AGEMOEA(pop_size=1000, sampling=sampling, crossover=crossover, mutation=mutation)
+algorithm_kwargs = dict(sampling=sampling, crossover=crossover, mutation=mutation)
+pop_size = 1000
+ref_dirs = get_reference_directions("energy", problem.n_obj, 1000)
+
+# 'ga', 'brkga', 'de', 'nelder-mead', 'pattern-search', 'cmaes', 'nsga2', 'rnsga2', 'nsga3', 'unsga3', 'rnsga3', 'moead', 'pso'
+method = "age"
+
+
+if method in {"nsga2", "de", "ga", "pso"}:
+    algorithm = get_algorithm(method, pop_size=pop_size, **algorithm_kwargs)
+elif method == "age":
+    from pymoo.algorithms.moo.age import AGEMOEA
+
+    algorithm = AGEMOEA(pop_size=pop_size, **algorithm_kwargs)
+elif method == "age2":
+    from pymoo.algorithms.moo.age2 import AGEMOEA2
+
+    algorithm = AGEMOEA2(pop_size=pop_size, **algorithm_kwargs)
+else:
+    algorithm = get_algorithm(method, ref_dirs=ref_dirs, **algorithm_kwargs)
+
 
 result = minimize(
     problem,
@@ -332,14 +345,20 @@ result = minimize(
     save_history=True
 )
 
-def create_designs():
-    for x, f in zip(result.X, result.opt.get("feasible")):
-        if f:
-            spec = problem.create_spectrometer(x)
-            yield Design(spectrometer=spec, fitness=spec.cpu_fitness())
+if problem.n_obj == 1:
+    spec = problem.create_spectrometer(result.X)
+    design = Design(spectrometer=spec, fitness=spec.cpu_fitness())
+    print(f"Best solution found: {design}")
+    print(result.opt.get("feasible"))
+else:
+    def create_designs():
+        for x, f in zip(result.X, result.opt.get("feasible")):
+            if f:
+                spec = problem.create_spectrometer(x)
+                yield Design(spectrometer=spec, fitness=spec.cpu_fitness())
 
 
-designs = list(create_designs())
-for design in designs:
-    print(design)
-interactive_show(designs)
+    designs = list(create_designs())
+    for design in designs:
+        print(design)
+    interactive_show(designs)

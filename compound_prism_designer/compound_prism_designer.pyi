@@ -115,6 +115,7 @@ def position_detector_array(
     compound_prism: CompoundPrism,
     wavelengths: WavelengthDistribution,
     beam: BeamDistribution,
+    acceptance: float,
 ) -> tuple[tuple[float, float], bool]: ...
 
 class DetectorArray:

@@ -794,6 +794,7 @@ fn position_detector_array(
     compound_prism: &PyCompoundPrism,
     wavelengths: WavelengthDistributions,
     beam: BeamDistributions,
+    acceptance: f64,
 ) -> PyResult<((f64, f64), bool)> {
     let (pos, flipped) = map_dimensioned_sized_compound_prism!(compound_prism.compound_prism => |prism|
         map_beam_distributions!(beam => |beam|
@@ -804,6 +805,7 @@ fn position_detector_array(
                     angle,
                     ws,
                     &beam,
+                    acceptance,
                 ).map(|(v, f)| ([v[0], v[1]], f)).map_err(map_ray_trace_err)?
             )
         )

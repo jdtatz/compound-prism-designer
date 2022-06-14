@@ -148,19 +148,19 @@ class Interactive:
 def get_save_file_name(
     caption: str, filter_name: str, filter_ext: str, default_name: str,
 ) -> Optional[str]:
-    # interactive frameworks = Qt, Gtk3, Wx, Tk, macosx, WebAgg, & nbAgg
+    # interactive frameworks = Qt, Gtk, Wx, Tk, macosx, WebAgg, & nbAgg
     bknd = plt.get_backend().lower()
     default_fname = f"{default_name}.{filter_ext}"
     if "qt" in bknd:
-        from matplotlib.backends.qt_compat import QtWidgets
+        from matplotlib.backends.backend_qt import QtWidgets
 
         filter = f"{filter_name} (*.{filter_ext})"
         filename, _ = QtWidgets.QFileDialog.getSaveFileName(
             caption=caption, filter=filter, dir=default_fname
         )
         return filename
-    elif "gtk3" in bknd:
-        from matplotlib.backends.backend_gtk3 import Gtk
+    elif "gtk" in bknd:
+        from gi.repository import Gtk
 
         dialog = Gtk.FileChooserDialog(
             title=caption,
@@ -194,9 +194,9 @@ def get_save_file_name(
         dialog.destroy()
         return fname
     else:
-        # raise NotImplementedError("The only supported backends for saving are: Qt5 & Gtk3")
+        # raise NotImplementedError("The only supported backends for saving are: Qt & Gtk")
         import warnings
-        warnings.warn("The only supported backends for choosing save path are: Qt5 & Gtk3")
+        warnings.warn("The only supported backends for choosing save path are: Qt & Gtk")
         return default_fname
 
 
