@@ -104,8 +104,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         curvature_bounds = (0.00001, 1)
         det_arr_angle_bounds = (-np.pi, np.pi)
         angle_bounds = (-np.pi / 2, np.pi / 2)
-        # FIXME Too restrictive, use -log(1 - p) or atanh(p) map and set bounds to [0, 1) to map to non-negative reals with bias to small lengths
-        len_bounds = (0, 10)
+        tanh_len_bounds = (0, 1)
         # FIXME Allows for some invalid designs where the array intersects the prisms
         position_bounds = [(self.config.spectrometer.max_height + config.spectrometer.detector_array_length, self.config.spectrometer.max_height * 40), (-10 * self.config.spectrometer.max_height, 10 * self.config.spectrometer.max_height)]
         nglass_or_const_glasses = config.nglass_or_const_glasses
@@ -130,7 +129,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         dtype_fields = [
             *glass_dtype_fields,
             ("angles", (np.float64, (nglass + 1,))),
-            ("lengths", (np.float64, (nglass,))),
+            ("tanh_lengths", (np.float64, (nglass,))),
             ("curvature", (np.float64, (1 if self.use_gaussian_beam else 4,))),
             ("height", np.float64),
             ("normalized_y_mean", np.float64),
@@ -139,7 +138,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         bounds = {
             **glass_bounds,
             "angles": [angle_bounds] * (nglass + 1), 
-            "lengths": [len_bounds] * nglass,
+            "tanh_lengths": [tanh_len_bounds] * nglass,
             "curvature": [curvature_bounds] * (1 if self.use_gaussian_beam else 4),
             "height": height_bounds,
             "normalized_y_mean": normalized_y_mean_bounds,
@@ -181,7 +180,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         compound_prism = CompoundPrism(
             glasses=glasses,
             angles=params["angles"],
-            lengths=params["lengths"],
+            lengths=np.arctanh(params["tanh_lengths"]) * self.config.spectrometer.max_height / 4,
             curvature=curvature,
             height=params["height"],
             width=self.config.spectrometer.prism_width,
