@@ -1,7 +1,6 @@
 use compound_prism_spectrometer::{
-    kernel::{kernel, GPUShuffle, GPU},
-    CurvedPlane, FiberBeam, GaussianBeam, Plane, Spectrometer, ToricLens, UniformDistribution,
-    Welford,
+    kernel::*, Beam, CurvedPlane, FiberBeam, GaussianBeam, GenericSpectrometer, Plane,
+    Spectrometer, ToricLens, UniformDistribution, Welford,
 };
 use core::{arch::asm, ptr::NonNull};
 use nvptx_sys::{
@@ -96,7 +95,18 @@ macro_rules! gen_kernel {
                 let (ptr, _dyn_mem) = dynamic_shared_memory();
                 let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
 
-                kernel::<CUDAGPU, _, _, _, _, _, _, $n, $d>(seed, max_evals, spectrometer, NonNull::new_unchecked(prob), shared_ptr)
+                kernel::<CUDAGPU, _, _, $d>(seed, max_evals, spectrometer, NonNull::new_unchecked(prob), shared_ptr)
+            }
+
+            #[no_mangle]
+            pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>,
+                wavelength_cdf_ptr: *const $fty,
+                ray_cdf_ptr: *const <$beam<$fty> as Beam<$fty, $d>>::Quasi,
+                bin_index_ptr: *mut u32,
+                probability_ptr: *mut $fty,
+            ) {
+                propagation_test_kernel::<CUDAGPU, _, _, $d>(spectrometer, NonNull::new_unchecked(wavelength_cdf_ptr as _), NonNull::new_unchecked(ray_cdf_ptr as _), NonNull::new_unchecked(bin_index_ptr), NonNull::new_unchecked(probability_ptr),)
             }
         }
     };

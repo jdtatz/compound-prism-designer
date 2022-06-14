@@ -1,7 +1,4 @@
-use crate::{
-    Beam, CurvedPlane, DetectorArray, Distribution, FiberBeam, Float, FloatExt, GaussianBeam,
-    Plane, Qrng, Ray, Spectrometer, Surface, ToricLens, UniformDistribution, Welford,
-};
+use crate::{FloatExt, GenericSpectrometer, Qrng, Welford};
 use core::ptr::NonNull;
 use core::slice::from_raw_parts_mut;
 
@@ -61,17 +58,12 @@ impl<F: Copy, G: GPUShuffle<F>> GPUShuffle<Welford<F>> for G {
 pub unsafe fn kernel<
     G: GPUShuffle<F> + GPUShuffle<u32>,
     F: FloatExt,
-    W: Copy + Distribution<F, Output = F>,
-    B: Copy + Beam<F, D>,
-    S0: Copy + Surface<F, D>,
-    SI: Copy + Surface<F, D>,
-    SN: Copy + Surface<F, D>,
-    const N: usize,
+    GS: Copy + GenericSpectrometer<F, D>,
     const D: usize,
 >(
     seed: F,
     max_evals: u32,
-    spectrometer: &Spectrometer<F, W, B, S0, SI, SN, N, D>,
+    spectrometer: &GS,
     probability_ptr: NonNull<F>,
     shared_ptr: NonNull<Welford<F>>,
 ) {
@@ -83,12 +75,10 @@ pub unsafe fn kernel<
     const PHI: f64 = 1.61803398874989484820458683436563;
     const ALPHA: f64 = 1_f64 / PHI;
 
-    let tid = G::thread_id();
     let warpid = G::warp_id();
-    let nwarps = G::nwarps();
     let laneid = G::lane_id();
 
-    let nbin = spectrometer.detector.bin_count();
+    let nbin = spectrometer.detector_bin_count();
     let shared = core::ptr::slice_from_raw_parts_mut(
         shared_ptr.as_ptr().add((warpid * nbin) as usize),
         nbin as usize,
@@ -99,14 +89,14 @@ pub unsafe fn kernel<
         i += G::warp_size();
     }
     G::sync_warp();
-    let mut shared = &mut *shared;
+    let shared = &mut *shared;
 
     let id = G::global_warp_id();
 
     let u = (F::lossy_from(id))
         .mul_add(F::lossy_from(ALPHA), seed)
         .fract();
-    let wavelength = spectrometer.wavelengths.inverse_cdf(u);
+    let wavelength = spectrometer.sample_wavelength(u);
 
     let mut count = F::zero();
     let mut index = laneid;
@@ -116,13 +106,9 @@ pub unsafe fn kernel<
     while index < max_evals {
         count += F::lossy_from(G::warp_size());
         let q = qrng.next_by(G::warp_size());
-        let ray = spectrometer.beam.inverse_cdf(q);
-        let (mut bin_index, t) = ray
-            .propagate(
-                wavelength,
-                &spectrometer.compound_prism,
-                &spectrometer.detector,
-            )
+        let ray = spectrometer.sample_ray(q);
+        let (mut bin_index, t) = spectrometer
+            .propagate(ray, wavelength)
             .unwrap_or((nbin, F::zero()));
         let mut det_count = G::warp_ballot(bin_index < nbin);
         let mut finished = det_count > 0;
@@ -168,4 +154,34 @@ pub unsafe fn kernel<
         probability[i as usize] = w.mean;
         i += G::warp_size();
     }
+}
+
+pub unsafe fn propagation_test_kernel<
+    G: GPU,
+    F: FloatExt,
+    GS: Copy + GenericSpectrometer<F, D>,
+    const D: usize,
+>(
+    spectrometer: &GS,
+    wavelength_cdf_ptr: NonNull<F>,
+    ray_cdf_ptr: NonNull<GS::Q>,
+    bin_index_ptr: NonNull<u32>,
+    probability_ptr: NonNull<F>,
+) {
+    let nbin = spectrometer.detector_bin_count();
+
+    let id = G::global_warp_id() * G::warp_size() + G::lane_id();
+
+    let u = wavelength_cdf_ptr.as_ptr().add(id as _).read();
+    let wavelength = spectrometer.sample_wavelength(u);
+
+    let q = ray_cdf_ptr.as_ptr().add(id as _).read();
+    let ray = spectrometer.sample_ray(q);
+
+    let (bin_index, t) = spectrometer
+        .propagate(ray, wavelength)
+        .unwrap_or((nbin, F::zero()));
+
+    bin_index_ptr.as_ptr().add(id as _).write(bin_index);
+    probability_ptr.as_ptr().add(id as _).write(t);
 }

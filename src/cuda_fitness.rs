@@ -19,11 +19,18 @@ pub trait Kernel: DeviceCopy {
     const FNAME: &'static [u8];
 }
 
+pub trait PropagationKernel: DeviceCopy {
+    const FNAME: &'static [u8];
+}
+
 macro_rules! kernel_impl {
     (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
         paste::paste! {
             impl Kernel for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d> {
                 const FNAME: &'static [u8] = concat!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]), "\0").as_bytes();
+            }
+            impl PropagationKernel for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d> {
+                const FNAME: &'static [u8] = concat!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]), "\0").as_bytes();
             }
         }
     };
@@ -94,6 +101,69 @@ impl CudaFitnessContext {
         let mut p_dets_l_ws = vec![F::zero(); nprobs];
         dev_probs.copy_to(&mut p_dets_l_ws)?;
         Ok(p_dets_l_ws)
+    }
+
+    fn launch_propagation_test<
+        F: FloatExt + DeviceCopy,
+        S: GenericSpectrometer<F, D> + PropagationKernel,
+        const D: usize,
+    >(
+        &mut self,
+        spec: &S,
+
+        wavelength_cdf: &[F],
+        ray_cdf: &[S::Q],
+
+        nwarp: u32,
+    ) -> rustacuda::error::CudaResult<(Vec<u32>, Vec<F>)>
+    where
+        <S as GenericSpectrometer<F, D>>::Q: DeviceCopy,
+    {
+        assert_eq!(wavelength_cdf.len() % 32, 0);
+        assert_eq!(wavelength_cdf.len(), ray_cdf.len());
+        ContextStack::push(&self.ctxt)?;
+
+        let total_nwarp = wavelength_cdf.len() as u32 / 32;
+        let nblock = total_nwarp / nwarp + total_nwarp % nwarp;
+
+        let mut dev_spec = ManuallyDrop::new(DeviceBox::new(spec)?);
+        let mut dev_wavelength_cdf =
+            ManuallyDrop::new({ DeviceBuffer::from_slice(wavelength_cdf) }?);
+        let mut dev_ray_cdf = ManuallyDrop::new({ DeviceBuffer::from_slice(ray_cdf) }?);
+        let mut dev_bin_index =
+            ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(wavelength_cdf.len()) }?);
+        let mut dev_probability =
+            ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(wavelength_cdf.len()) }?);
+
+        let function = self.module.get_function(unsafe {
+            CStr::from_bytes_with_nul_unchecked(<S as PropagationKernel>::FNAME)
+        })?;
+        let dynamic_shared_mem = 0u32;
+        let stream = &self.stream;
+        unsafe {
+            launch!(function<<<nblock, 32 * nwarp, dynamic_shared_mem, stream>>>(
+                dev_spec.as_device_ptr(),
+                dev_wavelength_cdf.as_device_ptr(),
+                dev_ray_cdf.as_device_ptr(),
+                dev_bin_index.as_device_ptr(),
+                dev_probability.as_device_ptr()
+            ))?;
+        }
+        self.stream.synchronize()?;
+        // When the kernel fails to run correctly, the context becomes unusable
+        // and the device memory that was allocated, can only be freed by destroying the context.
+        // ManuallyDrop is used to prevent rust from trying to deallocate after kernel fail.
+        let _drop = ManuallyDrop::into_inner(dev_spec);
+        let _drop = ManuallyDrop::into_inner(dev_wavelength_cdf);
+        let _drop = ManuallyDrop::into_inner(dev_ray_cdf);
+        let dev_bin_index = ManuallyDrop::into_inner(dev_bin_index);
+        let dev_probability = ManuallyDrop::into_inner(dev_probability);
+
+        let mut bin_index = vec![0u32; wavelength_cdf.len()];
+        let mut probability = vec![F::zero(); wavelength_cdf.len()];
+        dev_bin_index.copy_to(&mut bin_index)?;
+        dev_probability.copy_to(&mut probability)?;
+        Ok((bin_index, probability))
     }
 }
 
@@ -199,4 +269,189 @@ pub fn cuda_fitness<
         max_err, errors, info,
     );
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::distributions::{Distribution, Standard};
+    use rand::prelude::*;
+    use rand_xoshiro::rand_core::SeedableRng;
+    use rand_xoshiro::Xoshiro256StarStar;
+    use std::ptr::NonNull;
+
+    #[test]
+    fn test_propagation_with_known_prism() {
+        let glasses = [
+            // N-PK52A
+            Glass {
+                coefficents: [
+                    -0.19660238,
+                    0.85166448,
+                    -1.49929414,
+                    1.35438084,
+                    -0.64424681,
+                    1.62434799,
+                ],
+            },
+            // N-SF57
+            Glass {
+                coefficents: [
+                    -1.81746234,
+                    7.71730927,
+                    -13.2402884,
+                    11.56821078,
+                    -5.23836004,
+                    2.82403194,
+                ],
+            },
+            // N-FK58
+            Glass {
+                coefficents: [
+                    -0.15938247,
+                    0.69081086,
+                    -1.21697038,
+                    1.10021121,
+                    -0.52409733,
+                    1.55979703,
+                ],
+            },
+        ];
+        let [glass0, glasses @ ..] = glasses;
+        let angles = [-27.2712308, 34.16326141, -42.93207009, 1.06311416];
+        let angles = angles.map(f32::to_radians);
+        let [first_angle, angles @ .., last_angle] = angles;
+        let lengths = [0_f32; 3];
+        let [first_length, lengths @ ..] = lengths;
+        let height = 2.5;
+        let width = 2.0;
+        let prism = CompoundPrism::<f32, Plane<_, 2>, _, CurvedPlane<_, 2>, 2, 2>::new(
+            glass0,
+            glasses,
+            first_angle,
+            angles,
+            last_angle,
+            first_length,
+            lengths,
+            PlaneParametrization { height, width },
+            CurvedPlaneParametrization {
+                signed_normalized_curvature: 0.21,
+                height,
+            },
+            height,
+            width,
+            false,
+        );
+
+        let wavelengths = UniformDistribution {
+            bounds: (0.5, 0.82),
+        };
+        let beam = GaussianBeam {
+            width: 0.2,
+            y_mean: 0.95,
+        };
+
+        const NBIN: usize = 32;
+        let pmt_length = 3.2;
+        let spec_max_accepted_angle = (60_f32).to_radians();
+        let det_angle = 0.0;
+        let (det_pos, det_flipped) =
+            detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
+                .expect("This is a valid spectrometer design.");
+        let detarr = LinearDetectorArray::new(
+            NBIN as u32,
+            0.1,
+            0.1,
+            0.0,
+            spec_max_accepted_angle.cos(),
+            0.,
+            pmt_length,
+            det_pos,
+            det_flipped,
+        );
+        // dbg!((&wavelengths, &beam, &prism, &detarr));
+        let spec = Spectrometer {
+            wavelengths,
+            beam,
+            compound_prism: prism,
+            detector: detarr,
+        };
+
+        let nwarp = 2;
+        let nblock = 16;
+        let nthread = nblock * nwarp * 32;
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let wavelength_cdf: Vec<f32> = Standard.sample_iter(&mut rng).take(nthread).collect();
+        let ray_cdf: Vec<f32> = Standard.sample_iter(&mut rng).take(nthread).collect();
+
+        let mut lock = CACHED_CUDA_FITNESS_CONTEXT.lock();
+        let state =
+            get_or_try_insert_with(&mut *lock, || CudaFitnessContext::new(quick_init()?)).unwrap();
+
+        let (gpu_bin_index, gpu_probability) = state
+            .launch_propagation_test(&spec, &wavelength_cdf, &ray_cdf, nwarp as u32)
+            .unwrap();
+
+        struct MockGpu;
+
+        impl compound_prism_spectrometer::kernel::GPU for MockGpu {
+            fn warp_size() -> u32 {
+                1
+            }
+
+            fn global_warp_id() -> u32 {
+                0
+            }
+
+            fn lane_id() -> u32 {
+                0
+            }
+
+            fn thread_id() -> u32 {
+                todo!()
+            }
+
+            fn block_dim() -> u32 {
+                todo!()
+            }
+
+            fn block_id() -> u32 {
+                todo!()
+            }
+
+            fn grid_dim() -> u32 {
+                todo!()
+            }
+
+            fn sync_warp() {
+                todo!()
+            }
+
+            fn warp_any(pred: bool) -> bool {
+                todo!()
+            }
+
+            fn warp_ballot(pred: bool) -> u32 {
+                todo!()
+            }
+        }
+
+        for i in 0..nthread {
+            let mut cpu_bin_index = 0;
+            let mut cpu_probability = 0.0;
+            unsafe {
+                compound_prism_spectrometer::kernel::propagation_test_kernel::<MockGpu, _, _, 2>(
+                    &spec,
+                    NonNull::from(&wavelength_cdf[i]),
+                    NonNull::from(&ray_cdf[i]),
+                    NonNull::new(&mut cpu_bin_index).unwrap(),
+                    NonNull::new(&mut cpu_probability).unwrap(),
+                );
+            }
+            assert_eq!(cpu_bin_index, gpu_bin_index[i], "index {}", i);
+            // println!("cpu {} ; gpu {}", cpu_probability, gpu_probability[i]);
+            float_eq::assert_float_eq!(cpu_probability, gpu_probability[i], rmax <= 5e-3);
+        }
+    }
 }
