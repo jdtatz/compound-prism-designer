@@ -4,17 +4,16 @@ requires-python = ">=3.7"
 dependencies = [
   "numpy~=1.20",
   "matplotlib~=3.5",
-  "pyserde[toml]~=0.8.0",
-  "pymoo~=0.5",
+  "pyserde[toml]~=0.8.3",
+  "pymoo @ git+https://github.com/anyoptimization/pymoo.git",
   "pywin32 >= 1.0;platform_system=='Windows'"
 ]
 
 [build-system]
-requires = ["maturin>=0.11<0.12"]
+requires = ["maturin>=0.12,<0.13"]
 build-backend = "maturin"
 
 [tool.maturin]
 bindings = "pyo3"
 cargo-extra-args = "--features=pyext"
 rustc-extra-args = "-C target-feature=+fma -C target-cpu=native"
-manylinux = "off"
