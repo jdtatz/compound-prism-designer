@@ -205,7 +205,7 @@ impl<T: FloatExt, const N: usize> Vector<T, N> {
     }
 
     /// unit vector at angle `theta` relative to the x axis in the xy plane.
-    pub(crate) fn angled_xy(theta: T) -> Self {
+    pub fn angled_xy(theta: T) -> Self {
         let (sin, cos) = theta.sin_cos();
         Self::from_xy(cos, sin)
     }

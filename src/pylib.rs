@@ -570,6 +570,10 @@ where
         }
     }
 
+    fn final_midpt(&self) -> PyVector2D {
+        map_sized_compound_prism!(self => |c| c.final_midpt().lossy_into())
+    }
+
     fn polygons<'p>(&self, py: Python<'p>) -> PyResult<Vec<&'p PyAny>> {
         let matplotlib = py.import("matplotlib")?;
         let path_mod = matplotlib.getattr("path")?;
@@ -766,6 +770,17 @@ impl PyCompoundPrism {
             DimensionedSizedCompoundPrism::Dim2(c) => c.polygons(py),
             DimensionedSizedCompoundPrism::Dim3(c) => c.polygons(py),
         }
+    }
+
+    fn final_midpt_and_normal(&self) -> (PyVector2D, PyUnitVector2D) {
+        let midpt = match self.compound_prism {
+            DimensionedSizedCompoundPrism::Dim2(c) => c.final_midpt(),
+            DimensionedSizedCompoundPrism::Dim3(c) => c.final_midpt(),
+        };
+        (
+            midpt,
+            UnitVector(Vector::<f64, 2>::angled_xy(*self.angles.last().unwrap())).lossy_into(),
+        )
     }
 
     fn surfaces(&self) -> Vec<PySurface> {

@@ -171,6 +171,18 @@ where
         let final_poly = Polygon([path0.reverse(), path1]);
         (polys, final_poly)
     }
+
+    pub fn final_midpt(&self) -> crate::Point<T> {
+        let path = self.final_surface.draw();
+        let midpt = match path {
+            crate::Path::Line { a, b } => crate::Point {
+                x: (a.x + b.x) * T::lossy_from(0.5),
+                y: (a.y + b.y) * T::lossy_from(0.5),
+            },
+            crate::Path::Arc { midpt, .. } => midpt,
+        };
+        midpt
+    }
 }
 
 /// Light Ray

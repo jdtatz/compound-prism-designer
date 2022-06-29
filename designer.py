@@ -19,7 +19,7 @@ from operator import mul
 rprod = partial(reduce, mul)
 
 
-@serde(rename_all="spinalcase")
+@serde(rename_all="kebabcase")
 @dataclass
 class CompoundPrismSpectrometerConfig:
     max_height: float
@@ -56,7 +56,7 @@ class CompoundPrismSpectrometerConfig:
         return (g.into_glass(self.wavelength_range)[0] for g in gcat)
 
 
-@serde(rename_all="spinalcase")
+@serde(rename_all="kebabcase")
 @dataclass
 class OptimizerConfig:
     cpu_only: bool = False
@@ -65,7 +65,7 @@ class OptimizerConfig:
     optimize_deviation: bool = True
 
 
-@serde(rename_all="spinalcase")
+@serde(rename_all="kebabcase")
 @dataclass
 class CompoundPrismSpectrometerProblemConfig:
     spectrometer: CompoundPrismSpectrometerConfig
@@ -106,7 +106,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         angle_bounds = (-np.pi / 2, np.pi / 2)
         tanh_len_bounds = (0, 1)
         # FIXME Allows for some invalid designs where the array intersects the prisms
-        position_bounds = [(self.config.spectrometer.max_height + config.spectrometer.detector_array_length, self.config.spectrometer.max_height * 40), (-10 * self.config.spectrometer.max_height, 10 * self.config.spectrometer.max_height)]
+        position_bounds = [(0, self.config.spectrometer.max_height * 40), angle_bounds]
         nglass_or_const_glasses = config.nglass_or_const_glasses
         self.use_gaussian_beam = config.spectrometer.beam_width is not None
         self.use_fiber_beam = config.spectrometer.fiber_core_radius is not None and config.spectrometer.numerical_aperture is not None
@@ -200,8 +200,12 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
                 center_y=params["height"] * params["normalized_y_mean"]
             )
         if self.auto_position_detector_acceptance is None:
-            x, y = params["position"]
-            position = x, y
+            dv, da = params["position"]
+            c, s = np.cos(da), np.sin(da)
+            R = np.array(((c, -s), (s, c)))
+            exit_pos, exit_dir = compound_prism.final_midpt_and_normal()
+            det_dv_dir = R @ (exit_dir.x, exit_dir.y)
+            position = exit_pos.x + det_dv_dir[0] * dv, exit_pos.y + det_dv_dir[1] * dv
             flipped = False
         else:
             position, flipped = position_detector_array(
@@ -290,7 +294,7 @@ with open("spring.toml") as f:
 spring_config.optimizer.cpu_only = True
 # spring_config.optimizer.optimize_size = False
 # spring_config.optimizer.optimize_deviation = False
-spring_config.auto_position_detector_acceptance = 0.98
+# spring_config.auto_position_detector_acceptance = 0.98
 problem = CompoundPrismSpectrometerProblem(spring_config) #, cpu_only=True, parallelization = ('starmap', pool.starmap))
 
 
