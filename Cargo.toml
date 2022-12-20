@@ -27,13 +27,13 @@ derive-wrapped-from = { path = "./derive-wrapped-from" }
 rand = "0.8"
 rand_xoshiro = "0.6"
 float_eq = "1.0"
-criterion = "0.3"
+criterion = {version = "0.4", default-features = false}
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.9", features = ["flamegraph", "prost-codec"] }
 
 [features]
-default = ["cuda"]
+default = []
 cuda = ["rustacuda", "parking_lot", "paste"]
 pyext = ["pyo3", "numpy", "ndarray", "paste"]
 

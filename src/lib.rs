@@ -45,11 +45,11 @@ impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitn
         crate::fitness::fitness(self, max_n, max_m)
     }
 
-    fn p_dets_l_wavelength(&self, wavelength: T, max_n: usize) -> Vec<T> {
+    fn p_dets_l_wavelength(&self, wavelength: F, max_n: usize) -> Vec<F> {
         crate::fitness::p_dets_l_wavelength(self, wavelength, max_n).collect()
     }
 
-    fn propagation_path(&self, ray: Ray<T, D>, wavelength: T) -> Vec<GeometricRay<T, D>> {
+    fn propagation_path(&self, ray: Ray<F, D>, wavelength: F) -> Vec<GeometricRay<F, D>> {
         self.propagation_path(ray, wavelength).collect()
     }
 }

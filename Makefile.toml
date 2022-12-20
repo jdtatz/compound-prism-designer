@@ -56,7 +56,8 @@ args = ["-v", "-arch=sm_52", "src/kernel.ptx"]
 [tasks.bench]
 env = {RUSTFLAGS = "-Ctarget-feature=+fma -Ctarget-cpu=native" }
 command = "cargo"
-args = ["criterion", "--features=cuda", "-p", "compound_prism_designer"]
+# args = ["criterion", "--features=cuda", "-p", "compound_prism_designer"]
+args = ["criterion", "-p", "compound_prism_designer"]
 
 [tasks.test]
 command = "cargo"

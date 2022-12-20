@@ -145,9 +145,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         detector: detarr,
     };
     let cpu_fitness = fitness(&spec, 16_384, 16_384);
+    #[cfg(feature = "cuda")]
     let gpu_fitness = cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
         .unwrap()
         .unwrap();
+    #[cfg(feature = "cuda")]
     float_eq::assert_float_eq!(
         cpu_fitness.info as f64,
         gpu_fitness.info as f64,
@@ -157,6 +159,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("known_design_example", |b| {
         b.iter(|| fitness(&spec, 16_384, 16_384));
     });
+    #[cfg(feature = "cuda")]
     c.bench_function("cuda_known_design_example", |b| {
         b.iter(|| {
             cuda_fitness(&spec, &[0.798713], 256, 2, 16_384)
@@ -165,6 +168,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         })
     });
     println!("cpu: {:?}", cpu_fitness);
+    #[cfg(feature = "cuda")]
     println!("gpu: {:?}", gpu_fitness);
 }
 
