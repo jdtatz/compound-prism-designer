@@ -73,10 +73,7 @@ command = "maturin"
 args = [
     "build",
     "--release",
-    "--no-sdist",
     "--manylinux=off",
-    "--rustc-extra-args=-Ctarget-feature=+fma",
-    "--cargo-extra-args=\"--features=pyext\""
 ]
 
 [tasks.python-develop]
@@ -85,7 +82,6 @@ args = [
     "develop",
     "--release",
     "--rustc-extra-args=-Ctarget-feature=+fma -Ctarget-cpu=native",
-    "--cargo-extra-args=\"--features=pyext\""
 ]
 
 [tasks.flow-build]

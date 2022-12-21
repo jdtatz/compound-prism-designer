@@ -999,11 +999,11 @@ impl PySpectrometer {
         let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
         let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
         Ok(py.allow_threads(|| {
-            map_dimensioned_sized_compound_prism!(compound_prism => |c, D|
-                map_wavelength_distributions!(self.wavelengths => |w|
-                    map_beam_distributions!(self.beam => |b| {
-                        let detarr = LinearDetectorArray::<f64, D>::from(&py_detarr);
-                        let s = Spectrometer::new(w, b, c, detarr);
+            map_dimensioned_sized_compound_prism!(compound_prism => |compound_prism, D|
+                map_wavelength_distributions!(self.wavelengths => |wavelengths|
+                    map_beam_distributions!(self.beam => |beam| {
+                        let detector = LinearDetectorArray::<f64, D>::from(&py_detarr);
+                        let s = Spectrometer { wavelengths, beam, detector, compound_prism };
                         crate::fitness(&s, max_n, max_m).into()
                     }
                     )
@@ -1022,11 +1022,11 @@ impl PySpectrometer {
     ) -> PyResult<&'p PyArray2<f64>> {
         let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
         let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
-        map_dimensioned_sized_compound_prism!(compound_prism => |c, D|
+        map_dimensioned_sized_compound_prism!(compound_prism => |compound_prism, D|
             map_wavelength_distributions!(self.wavelengths => |w|
-                map_beam_distributions!(self.beam => |b| {
-                    let detarr = LinearDetectorArray::<f64, D>::from(&py_detarr);
-                    let spec = Spectrometer::new(w, b, c, detarr);
+                map_beam_distributions!(self.beam => |beam| {
+                    let detector = LinearDetectorArray::<f64, D>::from(&py_detarr);
+                    let spec = Spectrometer { wavelengths: w, beam, detector, compound_prism };
                     let readonly = wavelengths.readonly();
                     let wavelengths_array = readonly.as_array();
                     py.allow_threads(|| {
@@ -1054,20 +1054,20 @@ impl PySpectrometer {
     ) -> PyResult<&'p PyArray2<f64>> {
         let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
         let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
-        map_dimensioned_sized_compound_prism!(compound_prism => |c, D|
-                        map_wavelength_distributions!(self.wavelengths => |w|
-                            map_beam_distributions!(self.beam => |b| {
-                                let detarr = LinearDetectorArray::<f64, D>::from(&py_detarr);
-                                let spec = Spectrometer::new(w, b, c, detarr);
-        Ok(Array2::from(
-                    spec.propagation_path(Ray::new_from_start(inital_y), wavelength).map(|GeometricRay { origin: Vector([x, y, ..]), direction: UnitVector(Vector([ux, uy, ..])) } | [x, y, ux, uy])
-                    .collect::<Vec<_>>()
-                )
-                .to_pyarray(py))
-                            }
-                            )
+        map_dimensioned_sized_compound_prism!(compound_prism => |compound_prism, D|
+            map_wavelength_distributions!(self.wavelengths => |wavelengths|
+                map_beam_distributions!(self.beam => |beam| {
+                    let detector = LinearDetectorArray::<f64, D>::from(&py_detarr);
+                    let spec = Spectrometer { wavelengths, beam, detector, compound_prism,};
+                    Ok(Array2::from(
+                        GenericSpectrometer::propagation_path(&spec, Ray::new_from_start(inital_y), wavelength).map(|GeometricRay { origin: Vector([x, y, ..]), direction: UnitVector(Vector([ux, uy, ..])) } | [x, y, ux, uy])
+                            .collect::<Vec<_>>()
                         )
+                        .to_pyarray(py)
                     )
+                })
+            )
+        )
     }
 
     /// Computes the spectrometer fitness using on the gpu with float32
@@ -1089,28 +1089,28 @@ impl PySpectrometer {
         let seeds = seeds.as_slice().unwrap();
         map_wavelength_distributions!(self.wavelengths => |w| {
             match compound_prism {
-                DimensionedSizedCompoundPrism::Dim2(compound_prism) => map_sized_compound_prism!(compound_prism => |c| {
+                DimensionedSizedCompoundPrism::Dim2(compound_prism) => map_sized_compound_prism!(compound_prism => |compound_prism| {
                     const D: usize = 2;
                     if let BeamDistributions::Gaussian(PyGaussianBeam { gaussian_beam: b, .. }) = self.beam {
                         type B<T> = GaussianBeam<T>;
 
-                        let detarr: LinearDetectorArray<f32, D> = LinearDetectorArray::<f64, D>::from(&py_detarr).lossy_into();
-                        let b: B<f32> = LossyFrom::lossy_from(b);
-                        let spec = Spectrometer::new(w.lossy_into(), b, c, detarr);
+                        let detector: LinearDetectorArray<f32, D> = LinearDetectorArray::<f64, D>::from(&py_detarr).lossy_into();
+                        let beam: B<f32> = LossyFrom::lossy_from(b);
+                        let spec = Spectrometer { wavelengths: w.lossy_into(), beam, detector, compound_prism };
                         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval)).map_err(map_cuda_err)?;
                         Ok(fit.map(Into::into))
                     } else {
                         Err(pyo3::exceptions::PyNotImplementedError::new_err("No kernel compiled for this Spectrometer"))
                     }
             }),
-                DimensionedSizedCompoundPrism::Dim3(compound_prism) => map_sized_compound_prism!(compound_prism => |c| {
+                DimensionedSizedCompoundPrism::Dim3(compound_prism) => map_sized_compound_prism!(compound_prism => |compound_prism| {
                     const D: usize = 3;
                     if let BeamDistributions::Fiber(PyFiberBeam { fiber_beam: b, .. }) = self.beam {
                         type B<T> = FiberBeam<T>;
 
-                        let detarr: LinearDetectorArray<f32, D> = LinearDetectorArray::<f64, D>::from(&py_detarr).lossy_into();
-                        let b: B<f32> = LossyFrom::lossy_from(b);
-                        let spec = Spectrometer::new(w.lossy_into(), b, c, detarr);
+                        let detector: LinearDetectorArray<f32, D> = LinearDetectorArray::<f64, D>::from(&py_detarr).lossy_into();
+                        let beam: B<f32> = LossyFrom::lossy_from(b);
+                        let spec = Spectrometer { wavelengths: w.lossy_into(), beam, detector, compound_prism };
                         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval)).map_err(map_cuda_err)?;
                         Ok(fit.map(Into::into))
                     } else {
