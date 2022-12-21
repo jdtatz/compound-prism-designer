@@ -58,7 +58,7 @@ impl<F: Copy, G: GPUShuffle<F>> GPUShuffle<Welford<F>> for G {
 pub unsafe fn kernel<
     G: GPUShuffle<F> + GPUShuffle<u32>,
     F: FloatExt,
-    GS: Copy + GenericSpectrometer<F, D>,
+    GS: ?Sized + GenericSpectrometer<F, D>,
     const D: usize,
 >(
     seed: F,
@@ -159,7 +159,7 @@ pub unsafe fn kernel<
 pub unsafe fn propagation_test_kernel<
     G: GPU,
     F: FloatExt,
-    GS: Copy + GenericSpectrometer<F, D>,
+    GS: ?Sized + GenericSpectrometer<F, D>,
     const D: usize,
 >(
     spectrometer: &GS,

@@ -472,7 +472,7 @@ macro_rules! define_sized_compound_prism {
             #[derive(Debug, Clone, Copy, From, WrappedFrom)]
             #[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
             enum SizedCompoundPrism<F: FloatExt, S0: Surface<F, D>, SI: Surface<F, D>, SN: Surface<F, D>, const D: usize> {
-                $( [<CompoundPrism $n>](CompoundPrism<F, S0, SI, SN, $n, D>) ),*
+                $( [<CompoundPrism $n>](CompoundPrism<F, S0, SI, SN, [PrismSurface<F, SI> ;$n], D>) ),*
             }
         }
     };

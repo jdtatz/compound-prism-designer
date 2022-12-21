@@ -45,7 +45,7 @@ pub struct DesignFitness<F> {
 ///
 /// # Arguments
 ///  * `wavelength` - given wavelength
-pub fn p_dets_l_wavelength<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize>(
+pub fn p_dets_l_wavelength<F: FloatExt, S: ?Sized + GenericSpectrometer<F, D>, const D: usize>(
     spectrometer: &S,
     wavelength: F,
     max_n: usize,
@@ -71,7 +71,7 @@ pub fn p_dets_l_wavelength<F: FloatExt, S: GenericSpectrometer<F, D>, const D: u
 /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-pub fn mutual_information<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize>(
+pub fn mutual_information<F: FloatExt, S: ?Sized + GenericSpectrometer<F, D>, const D: usize>(
     spectrometer: &S,
     max_n: usize,
     max_m: usize,
@@ -117,7 +117,7 @@ pub fn mutual_information<F: FloatExt, S: GenericSpectrometer<F, D>, const D: us
 /// * size = the distance from the mean starting position of the beam to the center of detector array
 /// * info = I(Λ; D)
 /// * deviation = sin(abs(angle of deviation))
-pub fn fitness<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize>(
+pub fn fitness<F: FloatExt, S: ?Sized + GenericSpectrometer<F, D>, const D: usize>(
     spectrometer: &S,
     max_n: usize,
     max_m: usize,
@@ -180,7 +180,7 @@ mod tests {
         let [first_length, lengths @ ..] = lengths;
         let height = 2.5;
         let width = 2.0;
-        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_, 2>, 2, 2>::new(
+        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_, 2>, _, 2>::new(
             glass0,
             glasses,
             first_angle,

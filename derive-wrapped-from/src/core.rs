@@ -1,5 +1,5 @@
 use darling::{ast, util, FromDeriveInput, ToTokens};
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use std::hash::{Hash, Hasher};
 use std::{collections::HashMap, ops::Range};
@@ -173,6 +173,23 @@ impl<'s> syn::fold::Fold for RenameImpliedBoundTypes<'s> {
     }
 }
 
+struct EnsureSizedTypeParams;
+
+impl syn::fold::Fold for EnsureSizedTypeParams {
+    fn fold_trait_bound(&mut self, bound: syn::TraitBound) -> syn::TraitBound {
+        if matches!(bound.modifier, syn::TraitBoundModifier::Maybe(_))
+            && bound.path == Ident::new("Sized", Span::call_site()).into()
+        {
+            syn::TraitBound {
+                modifier: syn::TraitBoundModifier::None,
+                ..bound
+            }
+        } else {
+            bound
+        }
+    }
+}
+
 impl ToTokens for WrappedFromDerive {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let WrappedFromDerive {
@@ -183,6 +200,8 @@ impl ToTokens for WrappedFromDerive {
             ref function,
             ref bound,
         } = *self;
+
+        let generics = syn::fold::fold_generics(&mut EnsureSizedTypeParams, generics.clone());
 
         // Create unique generic type Ident mapping using hashes
         let wf_type_map: Vec<_> = generics

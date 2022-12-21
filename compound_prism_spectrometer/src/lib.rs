@@ -37,7 +37,7 @@ pub use crate::erf::norminv;
 pub use crate::geometry::*;
 pub use crate::glasscat::Glass;
 pub use crate::qrng::{Qrng, QuasiRandom};
-pub use crate::ray::{CompoundPrism, DetectorArray, Ray, RayTraceError};
+pub use crate::ray::{CompoundPrism, DetectorArray, PrismSurface, Ray, RayTraceError};
 pub use crate::spectrometer::{
     detector_array_positioning, Beam, FiberBeam, GaussianBeam, GenericSpectrometer,
     LinearDetectorArray, Spectrometer,

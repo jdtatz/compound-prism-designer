@@ -1,5 +1,6 @@
 use crate::geometry::*;
 use crate::qrng::QuasiRandom;
+use crate::ray::{Array, PrismSurface};
 use crate::utils::*;
 use crate::{distribution::Distribution, UnitVector, Vector};
 use crate::{distribution::UniformDiscDistribution, erf::norminv};
@@ -322,10 +323,10 @@ pub fn detector_array_positioning<
     S0: Copy + Surface<T, D>,
     SI: Copy + Surface<T, D>,
     SN: Copy + Surface<T, D>,
-    const N: usize,
+    L: Array<Item = PrismSurface<T, SI>>,
     const D: usize,
 >(
-    cmpnd: CompoundPrism<T, S0, SI, SN, N, D>,
+    cmpnd: CompoundPrism<T, S0, SI, SN, L, D>,
     detector_array_length: T,
     detector_array_angle: T,
     wavelengths: W,
@@ -363,22 +364,37 @@ pub fn detector_array_positioning<
 
 pub trait GenericSpectrometer<T, const D: usize> {
     type Q: QuasiRandom<Scalar = T>;
-    type PropagationPathIter: Iterator<Item = GeometricRay<T, D>>;
+    type PropagationPathIter<'p>: 'p + Iterator<Item = GeometricRay<T, D>>
+    where
+        Self: 'p;
     fn sample_wavelength(&self, p: T) -> T;
     fn sample_ray(&self, q: Self::Q) -> Ray<T, D>;
     fn detector_bin_count(&self) -> u32;
     fn propagate(&self, ray: Ray<T, D>, wavelength: T) -> Result<(u32, T), RayTraceError>;
     fn size_and_deviation(&self) -> (T, T);
-    fn propagation_path(&self, ray: Ray<T, D>, wavelength: T) -> Self::PropagationPathIter;
+    fn propagation_path<'s>(
+        &'s self,
+        ray: Ray<T, D>,
+        wavelength: T,
+    ) -> Self::PropagationPathIter<'s>;
 }
 
-#[derive(Constructor, Debug, Clone, Copy, WrappedFrom)]
+#[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct Spectrometer<T, W, B, S0, SI, SN, const N: usize, const D: usize> {
+pub struct Spectrometer<
+    T,
+    W,
+    B,
+    S0,
+    SI,
+    SN,
+    L: ?Sized + Array<Item = PrismSurface<T, SI>>,
+    const D: usize,
+> {
     pub wavelengths: W,
     pub beam: B,
-    pub compound_prism: CompoundPrism<T, S0, SI, SN, N, D>,
     pub detector: LinearDetectorArray<T, D>,
+    pub compound_prism: CompoundPrism<T, S0, SI, SN, L, D>,
 }
 
 impl<
@@ -388,12 +404,12 @@ impl<
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
         SN: Copy + Surface<T, D>,
-        const N: usize,
+        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
         const D: usize,
-    > GenericSpectrometer<T, D> for Spectrometer<T, W, B, S0, SI, SN, N, D>
+    > GenericSpectrometer<T, D> for Spectrometer<T, W, B, S0, SI, SN, L, D>
 {
     type Q = B::Quasi;
-    type PropagationPathIter = impl Iterator<Item = GeometricRay<T, D>>;
+    type PropagationPathIter<'p> = impl 'p + Iterator<Item = GeometricRay<T, D>> where Self: 'p;
 
     fn sample_wavelength(&self, p: T) -> T {
         self.wavelengths.inverse_cdf(p)
@@ -422,8 +438,12 @@ impl<
         (size, deviation)
     }
 
-    fn propagation_path(&self, ray: Ray<T, D>, wavelength: T) -> Self::PropagationPathIter {
-        ray.trace(wavelength, self.compound_prism, self.detector)
+    fn propagation_path<'s>(
+        &'s self,
+        ray: Ray<T, D>,
+        wavelength: T,
+    ) -> Self::PropagationPathIter<'s> {
+        ray.trace(wavelength, &self.compound_prism, self.detector)
     }
 }
 
@@ -508,8 +528,8 @@ unsafe impl<
         S0: Surface<T, D>,
         SI: Surface<T, D>,
         SN: Surface<T, D>,
-        const N: usize,
+        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
         const D: usize,
-    > rustacuda_core::DeviceCopy for Spectrometer<T, W, B, S0, SI, SN, N, D>
+    > rustacuda_core::DeviceCopy for Spectrometer<T, W, B, S0, SI, SN, L, D>
 {
 }

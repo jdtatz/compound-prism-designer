@@ -44,7 +44,6 @@ args = [
     "-Z", "combine_cgu",
     "-Z", "mutable-noalias=yes",
     "-Z", "inline-mir=yes",
-    "-Z", "new-llvm-pass-manager=yes",
     "-Z", "unsound-mir-opts=yes",
 ]
 

@@ -1,6 +1,6 @@
 use compound_prism_spectrometer::{
     kernel::*, Beam, CurvedPlane, FiberBeam, GaussianBeam, GenericSpectrometer, Plane,
-    Spectrometer, ToricLens, UniformDistribution, Welford,
+    PrismSurface, Spectrometer, ToricLens, UniformDistribution, Welford,
 };
 use core::{arch::asm, ptr::NonNull};
 use nvptx_sys::{
@@ -74,24 +74,42 @@ impl<F: FastNum + Shuffle> GPUShuffle<FastFloat<F>> for CUDAGPU {
 }
 
 macro_rules! gen_kernel {
+    (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $d:literal) => {
+        paste::paste! {
+            #[no_mangle]
+            pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>] (
+                seed: $fty,
+                max_evals: u32,
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d>,
+                prob: *mut $fty,
+            ) {
+                let (ptr, _dyn_mem) = dynamic_shared_memory();
+                let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
+
+                kernel::<CUDAGPU, _, _, $d>(seed, max_evals, spectrometer, NonNull::new_unchecked(prob), shared_ptr)
+            }
+
+            #[no_mangle]
+            pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>] (
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d>,
+                wavelength_cdf_ptr: *const $fty,
+                ray_cdf_ptr: *const <$beam<$fty> as Beam<$fty, $d>>::Quasi,
+                bin_index_ptr: *mut u32,
+                probability_ptr: *mut $fty,
+            ) {
+                propagation_test_kernel::<CUDAGPU, _, _, $d>(spectrometer, NonNull::new_unchecked(wavelength_cdf_ptr as _), NonNull::new_unchecked(ray_cdf_ptr as _), NonNull::new_unchecked(bin_index_ptr), NonNull::new_unchecked(probability_ptr),)
+            }
+        }
+    };
     (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
         paste::paste! {
             #[no_mangle]
             pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
                 seed: $fty,
                 max_evals: u32,
-                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>,
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d>,
                 prob: *mut $fty,
             ) {
-                let shared_spectrometer_ptr;
-                asm!(
-                    ".shared .align 16 .b8 shared_spectrometer[{size}]; cvta.shared.u64 {ptr}, shared_spectrometer;",
-                    ptr = out(reg64) shared_spectrometer_ptr,
-                    size = const core::mem::size_of::<Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>>(),
-                    options(readonly, nostack, preserves_flags)
-                );
-                let spectrometer = cuda_memcpy_1d(shared_spectrometer_ptr, spectrometer);
-
                 let (ptr, _dyn_mem) = dynamic_shared_memory();
                 let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
 
@@ -100,7 +118,7 @@ macro_rules! gen_kernel {
 
             #[no_mangle]
             pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
-                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, $n, $d>,
+                spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d>,
                 wavelength_cdf_ptr: *const $fty,
                 ray_cdf_ptr: *const <$beam<$fty> as Beam<$fty, $d>>::Quasi,
                 bin_index_ptr: *mut u32,
@@ -111,7 +129,9 @@ macro_rules! gen_kernel {
         }
     };
     ([$($n:literal),*]) => {
+        gen_kernel!(@inner FastFloat<f32>; f32 GaussianBeam Plane     CurvedPlane 2);
         $( gen_kernel!(@inner FastFloat<f32>; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
+        gen_kernel!(@inner FastFloat<f32>; f32 FiberBeam    ToricLens ToricLens   3);
         $( gen_kernel!(@inner FastFloat<f32>; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }

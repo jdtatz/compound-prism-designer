@@ -1,4 +1,4 @@
-#![feature(array_methods)]
+#![feature(array_methods, ptr_metadata)]
 #![allow(
     clippy::blocks_in_if_conditions,
     clippy::range_plus_one,
@@ -57,7 +57,7 @@ impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitn
 #[cfg(feature = "cuda")]
 impl<
         T: FloatExt + rustacuda::memory::DeviceCopy,
-        S: GenericSpectrometer<T, D> + Kernel,
+        S: ?Sized + GenericSpectrometer<T, D> + Kernel,
         const D: usize,
     > SpectrometerFitness<T, D> for S
 {

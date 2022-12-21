@@ -40,14 +40,35 @@ pub struct PrismSurface<T, S> {
     pub surface: S,
 }
 
+pub trait Array: core::borrow::Borrow<[Self::Item]> {
+    type Item;
+
+    fn as_slice(&self) -> &[Self::Item] {
+        self.borrow()
+    }
+}
+
+impl<T> Array for [T] {
+    type Item = T;
+}
+
+impl<T, const N: usize> Array for [T; N] {
+    type Item = T;
+}
+
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
+pub struct CompoundPrism<
+    T,
+    S0,
+    SI,
+    SN,
+    L: ?Sized + Array<Item = PrismSurface<T, SI>>,
+    const D: usize,
+> {
     /// initial prism surface
     initial_prism: PrismSurface<T, S0>,
-    /// rest of the prism surfaces
-    prisms: [PrismSurface<T, SI>; N],
     /// Final boundary surface
     final_surface: SN,
     /// Height of compound prism
@@ -57,6 +78,8 @@ pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
     /// Are the inter-media surfaces coated(anti-reflective)?
     #[wrapped_from(skip)]
     ar_coated: bool,
+    /// rest of the prism surfaces
+    prisms: L,
 }
 
 // pub type PlanerCompoundPrism<V, const N: usize> = CompoundPrism<V, Plane<V>, Plane<V>, Plane<V>, N>;
@@ -66,7 +89,7 @@ pub struct CompoundPrism<T, S0, SI, SN, const N: usize, const D: usize> {
 //     CompoundPrism<V, CurvedPlane<V>, Plane<V>, CurvedPlane<V>, N>;
 
 impl<T: FloatExt, S0, SN, const N: usize, const D: usize>
-    CompoundPrism<T, S0, Plane<T, D>, SN, N, D>
+    CompoundPrism<T, S0, Plane<T, D>, SN, [PrismSurface<T, Plane<T, D>>; N], D>
 where
     S0: Surface<T, D> + FromParametrizedHyperPlane<T, D>,
     SN: Surface<T, D> + FromParametrizedHyperPlane<T, D>,
@@ -129,7 +152,8 @@ where
     }
 }
 
-impl<T: FloatExt, S0, SI, SN, const N: usize, const D: usize> CompoundPrism<T, S0, SI, SN, N, D>
+impl<T: FloatExt, S0, SI, SN, const N: usize, const D: usize>
+    CompoundPrism<T, S0, SI, SN, [PrismSurface<T, SI>; N], D>
 where
     S0: Surface<T, D> + Drawable<T>,
     SI: Copy + Surface<T, D> + Drawable<T>,
@@ -403,10 +427,10 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
         SN: Copy + Surface<T, D>,
-        const N: usize,
+        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
     >(
         self,
-        cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
+        cmpnd: &CompoundPrism<T, S0, SI, SN, L, D>,
         wavelength: T,
     ) -> Result<Self, RayTraceError> {
         let mut ray = self;
@@ -425,10 +449,10 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         n1 = n2;
 
         // for (glass, plane) in core::array::IntoIter::new(cmpnd.glasses.zip(cmpnd.isurfaces)) {
-        for i in 0..N {
-            let n2 = cmpnd.prisms[i].glass.calc_n(wavelength);
+        for prism in cmpnd.prisms.as_slice() {
+            let n2 = prism.glass.calc_n(wavelength);
             debug_assert!(n2 >= T::one());
-            let GeometricRayIntersection { distance, normal } = cmpnd.prisms[i]
+            let GeometricRayIntersection { distance, normal } = prism
                 .surface
                 .intersection(ray.into())
                 .ok_or(RayTraceError::NoSurfaceIntersection)?;
@@ -458,11 +482,11 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
         SN: Copy + Surface<T, D>,
-        const N: usize,
+        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
     >(
         self,
         wavelength: T,
-        cmpnd: &CompoundPrism<T, S0, SI, SN, N, D>,
+        cmpnd: &CompoundPrism<T, S0, SI, SN, L, D>,
         detector: &(impl Copy + DetectorArray<T, D>),
     ) -> Result<(u32, T), RayTraceError> {
         let (_, idx, t) = self
@@ -480,20 +504,21 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
     pub fn trace<
+        'c,
         S0: Copy + Surface<T, D>,
         SI: Copy + Surface<T, D>,
         SN: Copy + Surface<T, D>,
-        const N: usize,
+        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
     >(
         self,
         wavelength: T,
-        cmpnd: CompoundPrism<T, S0, SI, SN, N, D>,
-        detector: impl DetectorArray<T, D> + Copy,
-    ) -> impl Iterator<Item = GeometricRay<T, D>> {
+        cmpnd: &'c CompoundPrism<T, S0, SI, SN, L, D>,
+        detector: impl 'c + DetectorArray<T, D> + Copy,
+    ) -> impl 'c + Iterator<Item = GeometricRay<T, D>> {
         let mut ray = self;
         let mut n1 = T::one();
         let mut prism0 = Some(cmpnd.initial_prism);
-        let mut prisms = cmpnd.prisms.into_iter();
+        let mut prisms = cmpnd.prisms.as_slice().iter();
         let mut internal = true;
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<_>, RayTraceError> {
