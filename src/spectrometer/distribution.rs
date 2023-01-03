@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, ops::*};
 
-use crate::utils::*;
+use crate::FloatExt;
 
 pub trait Distribution<T> {
     type Output;
@@ -48,7 +48,7 @@ impl<F: FloatExt> Distribution<F> for NormalDistribution<F> {
     type Output = F;
 
     fn inverse_cdf(&self, p: F) -> Self::Output {
-        self.mean + self.stddev * crate::erf::fast_norminv(p)
+        self.mean + self.stddev * super::erf::fast_norminv(p)
     }
 }
 

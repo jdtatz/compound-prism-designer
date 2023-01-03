@@ -1,4 +1,4 @@
-use compound_prism_spectrometer::{
+use crate::spectrometer::{
     kernel::*, Beam, CurvedPlane, FiberBeam, GaussianBeam, GenericSpectrometer, Plane,
     PrismSurface, Spectrometer, ToricLens, UniformDistribution, Welford,
 };
@@ -52,25 +52,8 @@ impl GPU for CUDAGPU {
     }
 }
 
-// FIXME: orphan rules will be the death of me
-// impl<T: Copy + Shuffle> GPUShuffle<T> for CUDAGPU {
-//     fn shfl_bfly_sync(val: T, lane_mask: u32) -> T { Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask) }
-// }
-
-impl GPUShuffle<u32> for CUDAGPU {
-    fn shfl_bfly_sync(val: u32, lane_mask: u32) -> u32 {
-        Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
-    }
-}
-impl GPUShuffle<f32> for CUDAGPU {
-    fn shfl_bfly_sync(val: f32, lane_mask: u32) -> f32 {
-        Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
-    }
-}
-impl<F: FastNum + Shuffle> GPUShuffle<FastFloat<F>> for CUDAGPU {
-    fn shfl_bfly_sync(val: FastFloat<F>, lane_mask: u32) -> FastFloat<F> {
-        Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
-    }
+impl<T: Copy + Shuffle> GPUShuffle<T> for CUDAGPU {
+    fn shfl_bfly_sync(val: T, lane_mask: u32) -> T { Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask) }
 }
 
 macro_rules! gen_kernel {

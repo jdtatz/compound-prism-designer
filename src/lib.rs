@@ -1,3 +1,12 @@
+#![cfg_attr(
+    all(any(not(feature = "std"), target_arch = "nvptx64"), not(test)),
+    no_std
+)]
+#![cfg_attr(
+    target_arch = "nvptx64",
+    feature(abi_ptx, asm_experimental_arch, asm_const)
+)]
+#![feature(array_zip, type_alias_impl_trait)]
 #![feature(array_methods, ptr_metadata)]
 #![allow(
     clippy::blocks_in_if_conditions,
@@ -5,24 +14,27 @@
     clippy::excessive_precision
 )]
 
-#[cfg(feature = "pyext")]
 #[macro_use]
 extern crate derive_more;
-#[cfg(feature = "pyext")]
 #[macro_use]
 extern crate derive_wrapped_from;
 
 #[cfg(feature = "cuda")]
 mod cuda_fitness;
+#[cfg(feature = "std")]
 mod fitness;
 #[cfg(feature = "pyext")]
 mod pylib;
+mod spectrometer;
+mod kernel;
 
+pub use crate::spectrometer::*;
 #[cfg(feature = "cuda")]
 pub use crate::cuda_fitness::*;
+#[cfg(feature = "std")]
 pub use crate::fitness::*;
-pub use compound_prism_spectrometer::*;
 
+#[cfg(feature = "std")]
 pub trait SpectrometerFitness<T: FloatExt, const D: usize> {
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<T>;
 
@@ -39,6 +51,7 @@ pub trait SpectrometerFitness<T: FloatExt, const D: usize> {
     fn propagation_path(&self, ray: Ray<T, D>, wavelength: T) -> Vec<GeometricRay<T, D>>;
 }
 
+#[cfg(feature = "std")]
 #[cfg(not(feature = "cuda"))]
 impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitness<F, D> for S {
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<F> {
@@ -54,6 +67,7 @@ impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitn
     }
 }
 
+#[cfg(feature = "std")]
 #[cfg(feature = "cuda")]
 impl<
         T: FloatExt + rustacuda::memory::DeviceCopy,

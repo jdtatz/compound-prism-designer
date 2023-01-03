@@ -1,7 +1,7 @@
-use crate::glasscat::Glass;
-use crate::utils::*;
-use crate::vector::{UnitVector, Vector};
-use crate::{drawable::Polygon, geometry::*, Drawable};
+use super::glasscat::Glass;
+use super::utils::*;
+use super::vector::{UnitVector, Vector};
+use super::{drawable::Polygon, geometry::*, Drawable};
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {

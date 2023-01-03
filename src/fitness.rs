@@ -1,4 +1,4 @@
-use compound_prism_spectrometer::*;
+use crate::spectrometer::*;
 
 // const MAX_N: usize = 100_000;
 

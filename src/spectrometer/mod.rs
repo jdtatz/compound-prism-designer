@@ -1,18 +1,3 @@
-#![cfg_attr(
-    all(any(not(feature = "std"), target_arch = "nvptx64"), not(test)),
-    no_std
-)]
-#![feature(array_zip, type_alias_impl_trait)]
-#![allow(
-    clippy::blocks_in_if_conditions,
-    clippy::range_plus_one,
-    clippy::excessive_precision
-)]
-#[macro_use]
-extern crate derive_more;
-#[macro_use]
-extern crate derive_wrapped_from;
-
 mod cbrt;
 mod distribution;
 mod drawable;
@@ -27,22 +12,22 @@ mod toric;
 mod utils;
 mod vector;
 mod welford;
-pub use crate::distribution::{
+pub use self::distribution::{
     DiracDeltaDistribution, Distribution, NormalDistribution, UniformDistribution, UserDistribution,
 };
-pub use crate::drawable::{
+pub use self::drawable::{
     arc_as_2_cubic_béziers, arc_as_cubic_bézier, Drawable, Path, Point, Polygon,
 };
-pub use crate::erf::norminv;
-pub use crate::geometry::*;
-pub use crate::glasscat::Glass;
-pub use crate::qrng::{Qrng, QuasiRandom};
-pub use crate::ray::{CompoundPrism, DetectorArray, PrismSurface, Ray, RayTraceError};
-pub use crate::spectrometer::{
+pub use self::erf::norminv;
+pub use self::geometry::*;
+pub use self::glasscat::Glass;
+pub use self::qrng::{Qrng, QuasiRandom};
+pub use self::ray::{CompoundPrism, DetectorArray, PrismSurface, Ray, RayTraceError};
+pub use self::spectrometer::{
     detector_array_positioning, Beam, FiberBeam, GaussianBeam, GenericSpectrometer,
     LinearDetectorArray, Spectrometer,
 };
-pub use crate::toric::{ToricLens, ToricLensParametrization, ToricSurface};
-pub use crate::utils::{Float, FloatExt, LossyFrom, LossyInto, NumAssign, One, Zero};
-pub use crate::vector::{UnitVector, Vector};
-pub use crate::welford::Welford;
+pub use self::toric::{ToricLens, ToricLensParametrization, ToricSurface};
+pub use self::utils::{Float, FloatExt, LossyFrom, LossyInto, NumAssign, One, Zero};
+pub use self::vector::{UnitVector, Vector};
+pub use self::welford::Welford;

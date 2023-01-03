@@ -3,7 +3,7 @@
     clippy::unreadable_literal,
     clippy::excessive_precision
 )]
-use crate::utils::*;
+use crate::{FloatExt, LossyFrom};
 
 fn polynomial<F: FloatExt, const N: usize>(z: F, coeff: [F; N]) -> F {
     coeff

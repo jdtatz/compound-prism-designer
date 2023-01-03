@@ -1,4 +1,4 @@
-use crate::utils::*;
+use crate::FloatExt;
 
 /// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
 #[derive(Copy, Clone)]

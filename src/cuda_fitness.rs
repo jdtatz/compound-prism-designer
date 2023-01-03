@@ -1,5 +1,5 @@
 use crate::fitness::DesignFitness;
-use compound_prism_spectrometer::*;
+use crate::spectrometer::*;
 use parking_lot::{const_mutex, Mutex};
 use rustacuda::context::ContextStack;
 use rustacuda::function::Function;
@@ -530,7 +530,7 @@ mod tests {
 
         struct MockGpu;
 
-        impl compound_prism_spectrometer::kernel::GPU for MockGpu {
+        impl crate::spectrometer::kernel::GPU for MockGpu {
             fn warp_size() -> u32 {
                 1
             }
@@ -576,7 +576,7 @@ mod tests {
             let mut cpu_bin_index = 0;
             let mut cpu_probability = 0.0;
             unsafe {
-                compound_prism_spectrometer::kernel::propagation_test_kernel::<MockGpu, _, _, 2>(
+                crate::spectrometer::kernel::propagation_test_kernel::<MockGpu, _, _, 2>(
                     &spec,
                     NonNull::from(&wavelength_cdf[i]),
                     NonNull::from(&ray_cdf[i]),

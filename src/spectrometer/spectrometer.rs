@@ -1,9 +1,9 @@
-use crate::geometry::*;
-use crate::qrng::QuasiRandom;
-use crate::ray::{Array, PrismSurface};
-use crate::utils::*;
-use crate::{distribution::Distribution, UnitVector, Vector};
-use crate::{distribution::UniformDiscDistribution, erf::norminv};
+use super::geometry::*;
+use super::qrng::QuasiRandom;
+use super::ray::{Array, PrismSurface};
+use super::utils::*;
+use super::{distribution::Distribution, UnitVector, Vector};
+use super::{distribution::UniformDiscDistribution, erf::norminv};
 use crate::{CompoundPrism, DetectorArray, Ray, RayTraceError};
 
 pub trait Beam<T, const D: usize>: Distribution<Self::Quasi, Output = Ray<T, D>> {
@@ -353,7 +353,7 @@ pub fn detector_array_positioning<
     }
     debug_assert!(lower_ray.direction.is_unit());
     debug_assert!(upper_ray.direction.is_unit());
-    crate::geometry::fit_ray_difference_surface(
+    super::geometry::fit_ray_difference_surface(
         lower_ray.into(),
         upper_ray.into(),
         detector_array_length,

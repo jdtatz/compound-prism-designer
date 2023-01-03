@@ -17,9 +17,10 @@ command = "cargo"
 args = [
     "rustc",
     "--lib",
-    "--manifest-path=compound_prism_designer_kernel/Cargo.toml",
+    "--no-default-features",
     "--release",
     "--target=nvptx64-nvidia-cuda.json",
+    "--crate-type=cdylib",
     "-Z", "build-std=core",
     "--",
     "-Cllvm-args=--nvptx-fma-level=2",
@@ -45,6 +46,18 @@ args = [
     "-Z", "mutable-noalias=yes",
     "-Z", "inline-mir=yes",
     "-Z", "unsound-mir-opts=yes",
+]
+
+[tasks.shader]
+toolchain = "nightly"
+command = "cargo"
+args = [
+    "rustc",
+    "--lib",
+    "--manifest-path=compound_prism_designer_kernel/Cargo.toml",
+    "--release",
+    "--target=spirv64-unknown-unknown.json",
+    "-Z", "build-std=core",
 ]
 
 [tasks.verify-kernel]

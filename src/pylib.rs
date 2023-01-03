@@ -1,4 +1,4 @@
-use compound_prism_spectrometer::*;
+use crate::spectrometer::*;
 use core::convert::TryInto;
 use ndarray::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
@@ -10,8 +10,8 @@ create_exception!(
     pyo3::exceptions::PyException
 );
 
-fn map_ray_trace_err(err: compound_prism_spectrometer::RayTraceError) -> PyErr {
-    RayTraceError::new_err(<compound_prism_spectrometer::RayTraceError as Into<
+fn map_ray_trace_err(err: crate::spectrometer::RayTraceError) -> PyErr {
+    RayTraceError::new_err(<crate::spectrometer::RayTraceError as Into<
         &'static str,
     >>::into(err))
 }
@@ -186,9 +186,9 @@ impl<F: FloatExt, const D: usize> LossyFrom<PyVector2D> for Vector<F, D> {
     }
 }
 
-impl<F: FloatExt> LossyFrom<compound_prism_spectrometer::Point<F>> for PyVector2D {
+impl<F: FloatExt> LossyFrom<crate::spectrometer::Point<F>> for PyVector2D {
     fn lossy_from(
-        compound_prism_spectrometer::Point { x, y }: compound_prism_spectrometer::Point<F>,
+        crate::spectrometer::Point { x, y }: crate::spectrometer::Point<F>,
     ) -> Self {
         Self {
             x: x.lossy_into(),

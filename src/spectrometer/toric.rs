@@ -1,4 +1,4 @@
-use crate::{cbrt::approx_cbrt, geometry::SandwichBounds, utils::Ring, *};
+use super::{cbrt::approx_cbrt, geometry::SandwichBounds, utils::Ring, *};
 
 fn sqr<T: Copy + core::ops::Mul<T, Output = T>>(v: T) -> T {
     v * v
@@ -27,7 +27,7 @@ impl<T: Copy + Ring + LossyFrom<u32>> ToricSurface<T> {
         sqr(u.norm_squared() + self.toroidal_radius.sqr() - self.poloidal_radius.sqr())
             - T::lossy_from(4u32)
                 * self.toroidal_radius.sqr()
-                * crate::vector::cross_prod_magnitude_sq(u, self.toroidal_normal)
+                * super::vector::cross_prod_magnitude_sq(u, self.toroidal_normal)
     }
 }
 
@@ -219,7 +219,7 @@ impl<T: FloatExt, B: Copy + Bounds<T, 3>> HyperSurface<T, B, 3> for ToricSurface
             .or_else(|| check_root(r2))
             .or_else(|| check_root(r3))?;
 
-        let t_center = crate::vector::oproj(p - self.center, self.toroidal_normal)
+        let t_center = super::vector::oproj(p - self.center, self.toroidal_normal)
             .normalize()
             .mul_add(self.toroidal_radius, self.center);
         let normal = UnitVector::new((t_center - p) / self.poloidal_radius);

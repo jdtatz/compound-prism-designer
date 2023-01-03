@@ -1,6 +1,6 @@
-use crate::drawable::{Drawable, Path, Point};
-use crate::utils::*;
-use crate::vector::{UnitVector, Vector};
+use super::drawable::{Drawable, Path, Point};
+use super::utils::*;
+use super::vector::{UnitVector, Vector};
 use core::ops::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
