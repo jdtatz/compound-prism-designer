@@ -31,7 +31,7 @@ const PTX: &CStr = include_cstr!("kernel.ptx");
 // const MAX_M: usize = 16_384;
 // const NWARP: u32 = 2;
 
-pub trait Kernel<F, const D: usize>: DeviceCopy + GenericSpectrometer<F, D> {
+pub trait Kernel<const D: usize>: DeviceCopy + GenericSpectrometer<D> {
     const NAME: &'static CStr;
 
     unsafe fn launch(
@@ -40,15 +40,15 @@ pub trait Kernel<F, const D: usize>: DeviceCopy + GenericSpectrometer<F, D> {
         block: u32,
         shared_memory_size: u32,
         stream: &Stream,
-        seed: F,
+        seed: Self::Scalar,
         max_eval: u32,
         dev_spec: DevicePointer<u8>,
         meta: <Self as Pointee>::Metadata,
-        dev_probs: DevicePointer<F>,
+        dev_probs: DevicePointer<Self::Scalar>,
     ) -> rustacuda::error::CudaResult<()>;
 }
 
-pub trait PropagationKernel<F, const D: usize>: DeviceCopy + GenericSpectrometer<F, D>{
+pub trait PropagationKernel<const D: usize>: DeviceCopy + GenericSpectrometer<D>{
     const NAME: &'static CStr;
 
     unsafe fn launch(
@@ -59,17 +59,17 @@ pub trait PropagationKernel<F, const D: usize>: DeviceCopy + GenericSpectrometer
         stream: &Stream,
         dev_spec: DevicePointer<u8>,
         meta: <Self as Pointee>::Metadata,
-        dev_wavelength_cdf: DevicePointer<F>,
+        dev_wavelength_cdf: DevicePointer<Self::Scalar>,
         dev_ray_cdf: DevicePointer<Self::Q>,
         dev_bin_index: DevicePointer<u32>,
-        dev_probability: DevicePointer<F>,
+        dev_probability: DevicePointer<Self::Scalar>,
     ) -> rustacuda::error::CudaResult<()>;
 }
 
 macro_rules! kernel_impl {
     (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $d:literal) => {
         paste::paste! {
-            impl Kernel<$fty, $d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d> {
+            impl Kernel<$d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d> {
                 const NAME: &'static CStr = cstr!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>]));
 
                 unsafe fn launch(function: Function, grid: u32, block: u32, shared_memory_size: u32, stream: &Stream, seed: $fty, max_eval: u32, dev_spec: DevicePointer<u8>, meta: <Self as Pointee>::Metadata, dev_probs: DevicePointer<$fty>) -> rustacuda::error::CudaResult<()> {
@@ -83,7 +83,7 @@ macro_rules! kernel_impl {
                 }
 
             }
-            impl PropagationKernel<$fty, $d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d> {
+            impl PropagationKernel<$d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d> {
                 const NAME: &'static CStr = cstr!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>]));
 
                 unsafe fn launch(
@@ -113,7 +113,7 @@ macro_rules! kernel_impl {
     };
     (@inner $fty:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
         paste::paste! {
-            impl Kernel<$fty, $d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d> {
+            impl Kernel<$d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d> {
                 const NAME: &'static CStr = cstr!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]));
 
                 unsafe fn launch(function: Function, grid: u32, block: u32, shared_memory_size: u32, stream: &Stream, seed: $fty, max_eval: u32, dev_spec: DevicePointer<u8>, _meta: <Self as Pointee>::Metadata, dev_probs: DevicePointer<$fty>) -> rustacuda::error::CudaResult<()> {
@@ -125,7 +125,7 @@ macro_rules! kernel_impl {
                     ))
                 }
             }
-            impl PropagationKernel<$fty, $d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d> {
+            impl PropagationKernel<$d> for Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d> {
                 const NAME: &'static CStr = cstr!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]));
 
                 unsafe fn launch(
@@ -192,7 +192,7 @@ impl CudaFitnessContext {
 
     fn launch_p_dets_l_ws<
         F: FloatExt + DeviceCopy,
-        S: ?Sized + Kernel<F, D>,
+        S: ?Sized + Kernel<D, Scalar=F>,
         const D: usize,
     >(
         &mut self,
@@ -210,10 +210,10 @@ impl CudaFitnessContext {
         let (spec_bytes, spec_count) = as_bytes_and_meta(spec);
         let mut dev_spec = ManuallyDrop::new(DeviceBuffer::from_slice(spec_bytes)?);
         let mut dev_probs = ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(nprobs) }?);
-        let function = self.module.get_function(<S as Kernel<F, D>>::NAME)?;
+        let function = self.module.get_function(<S as Kernel<D>>::NAME)?;
         let dynamic_shared_mem = nbin * nwarp * std::mem::size_of::<Welford<F>>() as u32;
         unsafe {
-            <S as Kernel<F, D>>::launch(
+            <S as Kernel<D>>::launch(
                 function,
                 max_n / nwarp,
                 32 * nwarp,
@@ -239,7 +239,7 @@ impl CudaFitnessContext {
 
     fn launch_propagation_test<
         F: FloatExt + DeviceCopy,
-        S: ?Sized + PropagationKernel<F, D>,
+        S: ?Sized + PropagationKernel<D, Scalar=F>,
         const D: usize,
     >(
         &mut self,
@@ -251,7 +251,7 @@ impl CudaFitnessContext {
         nwarp: u32,
     ) -> rustacuda::error::CudaResult<(Vec<u32>, Vec<F>)>
     where
-        <S as GenericSpectrometer<F, D>>::Q: DeviceCopy,
+        <S as GenericSpectrometer<D>>::Q: DeviceCopy,
     {
         assert_eq!(wavelength_cdf.len() % 32, 0);
         assert_eq!(wavelength_cdf.len(), ray_cdf.len());
@@ -271,11 +271,11 @@ impl CudaFitnessContext {
         let mut dev_probability =
             ManuallyDrop::new(unsafe { DeviceBuffer::uninitialized(wavelength_cdf.len()) }?);
 
-        let function = self.module.get_function(<S as PropagationKernel<F, D>>::NAME)?;
+        let function = self.module.get_function(<S as PropagationKernel<D>>::NAME)?;
         let dynamic_shared_mem = 0u32;
         let stream = &self.stream;
         unsafe {
-            <S as PropagationKernel<F, D>>::launch(function, nblock, 32 * nwarp, dynamic_shared_mem, stream,
+            <S as PropagationKernel<D>>::launch(function, nblock, 32 * nwarp, dynamic_shared_mem, stream,
                 dev_spec.as_device_ptr(),
                 spec_count,
                 dev_wavelength_cdf.as_device_ptr(),
@@ -331,7 +331,7 @@ where
 
 pub fn cuda_fitness<
     F: FloatExt + DeviceCopy,
-    S: ?Sized + Kernel<F, D>,
+    S: ?Sized + Kernel<D, Scalar=F>,
     const D: usize,
 >(
     spectrometer: &S,

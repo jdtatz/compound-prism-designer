@@ -35,8 +35,8 @@ pub use crate::cuda_fitness::*;
 pub use crate::fitness::*;
 
 #[cfg(feature = "std")]
-pub trait SpectrometerFitness<T: FloatExt, const D: usize> {
-    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<T>;
+pub trait SpectrometerFitness<const D: usize>: GenericSpectrometer<D> where <Self as GenericSpectrometer<D>>::Scalar: FloatExt {
+    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<Self::Scalar>;
 
     #[cfg(feature = "cuda")]
     fn cuda_fitness(
@@ -45,15 +45,15 @@ pub trait SpectrometerFitness<T: FloatExt, const D: usize> {
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
-    ) -> rustacuda::error::CudaResult<Option<DesignFitness<T>>>;
+    ) -> rustacuda::error::CudaResult<Option<DesignFitness<Self::Scalar>>>;
 
-    fn p_dets_l_wavelength(&self, wavelength: T, max_n: usize) -> Vec<T>;
-    fn propagation_path(&self, ray: Ray<T, D>, wavelength: T) -> Vec<GeometricRay<T, D>>;
+    fn p_dets_l_wavelength(&self, wavelength: Self::Scalar, max_n: usize) -> Vec<Self::Scalar>;
+    fn propagation_path(&self, ray: Ray<Self::Scalar, D>, wavelength: Self::Scalar) -> Vec<GeometricRay<Self::Scalar, D>>;
 }
 
 #[cfg(feature = "std")]
 #[cfg(not(feature = "cuda"))]
-impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitness<F, D> for S {
+impl<F: FloatExt, S: GenericSpectrometer<D, Scalar = F>, const D: usize> SpectrometerFitness<D> for S {
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<F> {
         crate::fitness::fitness(self, max_n, max_m)
     }
@@ -71,9 +71,9 @@ impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitn
 #[cfg(feature = "cuda")]
 impl<
         T: FloatExt + rustacuda::memory::DeviceCopy,
-        S: ?Sized + Kernel<T, D>,
+        S: ?Sized + Kernel<D, Scalar=T>,
         const D: usize,
-    > SpectrometerFitness<T, D> for S
+    > SpectrometerFitness<D> for S
 {
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<T> {
         crate::fitness::fitness(self, max_n, max_m)

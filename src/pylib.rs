@@ -929,18 +929,6 @@ impl<'p, const D: usize> From<&'p PyDetectorArray> for LinearDetectorArray<f64, 
     }
 }
 
-use crate::SpectrometerFitness;
-
-trait PySpectrometerFitness<T: FloatExt, const D: usize>:
-    SpectrometerFitness<T, D> + Send + 'static + core::fmt::Debug
-{
-}
-
-impl<T: FloatExt, S, const D: usize> PySpectrometerFitness<T, D> for S where
-    S: SpectrometerFitness<T, D> + Send + 'static + core::fmt::Debug
-{
-}
-
 /// Compound Prism Spectrometer specification
 ///
 /// Args:
