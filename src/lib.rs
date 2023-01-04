@@ -71,7 +71,7 @@ impl<F: FloatExt, S: GenericSpectrometer<F, D>, const D: usize> SpectrometerFitn
 #[cfg(feature = "cuda")]
 impl<
         T: FloatExt + rustacuda::memory::DeviceCopy,
-        S: ?Sized + GenericSpectrometer<T, D> + Kernel,
+        S: ?Sized + Kernel<T, D>,
         const D: usize,
     > SpectrometerFitness<T, D> for S
 {

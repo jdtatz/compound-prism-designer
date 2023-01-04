@@ -44,6 +44,7 @@ pyext = ["std", "pyo3", "numpy", "ndarray"]
 [[bench]]
 name = "benchmark"
 harness = false
+required-features = ["std"]
 
 [profile.release]
 opt-level=3
