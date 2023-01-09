@@ -1,0 +1,404 @@
+From c320516757ea50e941a28d161e3508d787536ae4 Mon Sep 17 00:00:00 2001
+From: Julia Tatz <tatz.j@northeastern.edu>
+Date: Sun, 3 Jul 2022 13:48:14 -0400
+Subject: [PATCH 1/3] Can't bitcast pointers in diffrent address spaces Use
+ pointercast instead After llvm transitions to opaque pointers, this will not
+ always be necessary Keeping asserts for now, but need to be removed
+
+---
+ compiler/rustc_codegen_llvm/src/builder.rs    | 24 +++++++++++++++++--
+ compiler/rustc_codegen_llvm/src/intrinsic.rs  | 12 +++++-----
+ compiler/rustc_codegen_ssa/src/base.rs        |  8 ++++++-
+ compiler/rustc_codegen_ssa/src/mir/operand.rs | 18 ++++++++++----
+ 4 files changed, 49 insertions(+), 13 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/builder.rs b/compiler/rustc_codegen_llvm/src/builder.rs
+index 5bf45a81e43..25470226672 100644
+--- a/compiler/rustc_codegen_llvm/src/builder.rs
++++ b/compiler/rustc_codegen_llvm/src/builder.rs
+@@ -837,6 +837,14 @@ fn inttoptr(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
+     }
+ 
+     fn bitcast(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
++        // FIXME: remove before merge
++        assert!(
++            !(matches!(self.cx.type_kind(self.cx.val_ty(val)), TypeKind::Pointer)
++                || matches!(self.cx.type_kind(dest_ty), TypeKind::Pointer)),
++            "val ty is {:?}, dest_ty is {:?}",
++            self.cx.type_kind(self.cx.val_ty(val)),
++            self.cx.type_kind(dest_ty),
++        );
+         unsafe { llvm::LLVMBuildBitCast(self.llbuilder, val, dest_ty, UNNAMED) }
+     }
+ 
+@@ -845,6 +853,14 @@ fn intcast(&mut self, val: &'ll Value, dest_ty: &'ll Type, is_signed: bool) -> &
+     }
+ 
+     fn pointercast(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
++        // FIXME: remove before merge
++        assert!(
++            (matches!(self.cx.type_kind(self.cx.val_ty(val)), TypeKind::Pointer)
++                && matches!(self.cx.type_kind(dest_ty), TypeKind::Pointer)),
++            "val ty is {:?}, dest_ty is {:?}",
++            self.cx.type_kind(self.cx.val_ty(val)),
++            self.cx.type_kind(dest_ty),
++        );
+         unsafe { llvm::LLVMBuildPointerCast(self.llbuilder, val, dest_ty, UNNAMED) }
+     }
+ 
+@@ -1396,7 +1412,7 @@ fn check_store(&mut self, val: &'ll Value, ptr: &'ll Value) -> &'ll Value {
+                     Expected {:?}, got {:?}; inserting bitcast",
+                 dest_ptr_ty, stored_ptr_ty
+             );
+-            self.bitcast(ptr, stored_ptr_ty)
++            self.pointercast(ptr, stored_ptr_ty)
+         }
+     }
+ 
+@@ -1433,7 +1449,11 @@ fn check_call<'b>(
+                             Expected {:?} for param {}, got {:?}; injecting bitcast",
+                         llfn, expected_ty, i, actual_ty
+                     );
+-                    self.bitcast(actual_val, expected_ty)
++                    if let TypeKind::Pointer = self.cx.type_kind(expected_ty) {
++                        self.pointercast(actual_val, expected_ty)
++                    } else {
++                        self.bitcast(actual_val, expected_ty)
++                    }
+                 } else {
+                     actual_val
+                 }
+diff --git a/compiler/rustc_codegen_llvm/src/intrinsic.rs b/compiler/rustc_codegen_llvm/src/intrinsic.rs
+index 680d810f78e..a1c6f9a7712 100644
+--- a/compiler/rustc_codegen_llvm/src/intrinsic.rs
++++ b/compiler/rustc_codegen_llvm/src/intrinsic.rs
+@@ -316,15 +316,15 @@ fn codegen_intrinsic_call(
+                 } else if use_integer_compare {
+                     let integer_ty = self.type_ix(layout.size().bits());
+                     let ptr_ty = self.type_ptr_to(integer_ty);
+-                    let a_ptr = self.bitcast(a, ptr_ty);
++                    let a_ptr = self.pointercast(a, ptr_ty);
+                     let a_val = self.load(integer_ty, a_ptr, layout.align().abi);
+-                    let b_ptr = self.bitcast(b, ptr_ty);
++                    let b_ptr = self.pointercast(b, ptr_ty);
+                     let b_val = self.load(integer_ty, b_ptr, layout.align().abi);
+                     self.icmp(IntPredicate::IntEQ, a_val, b_val)
+                 } else {
+                     let i8p_ty = self.type_i8p();
+-                    let a_ptr = self.bitcast(a, i8p_ty);
+-                    let b_ptr = self.bitcast(b, i8p_ty);
++                    let a_ptr = self.pointercast(a, i8p_ty);
++                    let b_ptr = self.pointercast(b, i8p_ty);
+                     let n = self.const_usize(layout.size().bytes());
+                     let cmp = self.call_intrinsic("memcmp", &[a_ptr, b_ptr, n]);
+                     match self.cx.sess().target.arch.as_ref() {
+@@ -409,7 +409,7 @@ fn type_test(&mut self, pointer: Self::Value, typeid: Self::Value) -> Self::Valu
+         // Test the called operand using llvm.type.test intrinsic. The LowerTypeTests link-time
+         // optimization pass replaces calls to this intrinsic with code to test type membership.
+         let i8p_ty = self.type_i8p();
+-        let bitcast = self.bitcast(pointer, i8p_ty);
++        let bitcast = self.pointercast(pointer, i8p_ty);
+         self.call_intrinsic("llvm.type.test", &[bitcast, typeid])
+     }
+ 
+@@ -746,7 +746,7 @@ fn codegen_emcc_try<'ll>(
+         let catch_data_1 =
+             bx.inbounds_gep(catch_data_type, catch_data, &[bx.const_usize(0), bx.const_usize(1)]);
+         bx.store(is_rust_panic, catch_data_1, i8_align);
+-        let catch_data = bx.bitcast(catch_data, bx.type_i8p());
++        let catch_data = bx.pointercast(catch_data, bx.type_i8p());
+ 
+         let catch_ty = bx.type_func(&[bx.type_i8p(), bx.type_i8p()], bx.type_void());
+         bx.call(catch_ty, None, catch_func, &[data, catch_data], None);
+diff --git a/compiler/rustc_codegen_ssa/src/base.rs b/compiler/rustc_codegen_ssa/src/base.rs
+index d318c15d342..6005fd0bffc 100644
+--- a/compiler/rustc_codegen_ssa/src/base.rs
++++ b/compiler/rustc_codegen_ssa/src/base.rs
+@@ -256,7 +256,13 @@ pub fn unsize_ptr<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+             let lldata_ty = bx.cx().scalar_pair_element_backend_type(dst_layout, 0, true);
+             let llextra_ty = bx.cx().scalar_pair_element_backend_type(dst_layout, 1, true);
+             // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
+-            (bx.bitcast(lldata, lldata_ty), bx.bitcast(llextra, llextra_ty))
++            let data = bx.pointercast(lldata, lldata_ty);
++            let extra = if let TypeKind::Pointer = bx.type_kind(llextra_ty) {
++                bx.pointercast(llextra, llextra_ty)
++            } else {
++                llextra
++            };
++            (data, extra)
+         }
+         _ => bug!("unsize_ptr: called on bad types"),
+     }
+diff --git a/compiler/rustc_codegen_ssa/src/mir/operand.rs b/compiler/rustc_codegen_ssa/src/mir/operand.rs
+index 34a5b638d7e..02b0b452dc2 100644
+--- a/compiler/rustc_codegen_ssa/src/mir/operand.rs
++++ b/compiler/rustc_codegen_ssa/src/mir/operand.rs
+@@ -220,19 +220,29 @@ pub fn extract_field<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
+         };
+ 
+         match (&mut val, field.abi) {
++            // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
++            (OperandValue::Immediate(llval), Abi::Scalar(v_abi))
++                if matches!(v_abi.primitive(), rustc_target::abi::Primitive::Pointer) =>
++            {
++                *llval = bx.pointercast(*llval, bx.cx().immediate_backend_type(field));
++            }
+             (OperandValue::Immediate(llval), _) => {
+                 // Bools in union fields needs to be truncated.
+                 *llval = bx.to_immediate(*llval, field);
+-                // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
+-                *llval = bx.bitcast(*llval, bx.cx().immediate_backend_type(field));
+             }
+             (OperandValue::Pair(a, b), Abi::ScalarPair(a_abi, b_abi)) => {
+                 // Bools in union fields needs to be truncated.
+                 *a = bx.to_immediate_scalar(*a, a_abi);
+                 *b = bx.to_immediate_scalar(*b, b_abi);
+                 // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
+-                *a = bx.bitcast(*a, bx.cx().scalar_pair_element_backend_type(field, 0, true));
+-                *b = bx.bitcast(*b, bx.cx().scalar_pair_element_backend_type(field, 1, true));
++                if let rustc_target::abi::Primitive::Pointer = a_abi.primitive() {
++                    *a = bx
++                        .pointercast(*a, bx.cx().scalar_pair_element_backend_type(field, 0, true));
++                }
++                if let rustc_target::abi::Primitive::Pointer = b_abi.primitive() {
++                    *b = bx
++                        .pointercast(*b, bx.cx().scalar_pair_element_backend_type(field, 1, true));
++                }
+             }
+             (OperandValue::Pair(..), _) => bug!(),
+             (OperandValue::Ref(..), _) => bug!(),
+-- 
+2.39.0
+
+
+From 93b4be96b674fa36809043665179a7ad114f1a89 Mon Sep 17 00:00:00 2001
+From: Julia Tatz <tatz.j@northeastern.edu>
+Date: Sun, 3 Jul 2022 22:32:56 -0400
+Subject: [PATCH 2/3] nvptx fixes
+
+---
+ compiler/rustc_target/src/abi/call/nvptx64.rs | 59 ++-----------------
+ .../src/spec/nvptx64_nvidia_cuda.rs           |  6 +-
+ src/test/assembly/asm/nvptx-types.rs          | 12 ++--
+ 3 files changed, 16 insertions(+), 61 deletions(-)
+
+diff --git a/compiler/rustc_target/src/abi/call/nvptx64.rs b/compiler/rustc_target/src/abi/call/nvptx64.rs
+index 4abe51cd697..3982a41752f 100644
+--- a/compiler/rustc_target/src/abi/call/nvptx64.rs
++++ b/compiler/rustc_target/src/abi/call/nvptx64.rs
+@@ -1,52 +1,12 @@
+-use crate::abi::call::{ArgAbi, FnAbi, PassMode, Reg, Size, Uniform};
+-use crate::abi::{HasDataLayout, TyAbiInterface};
+-
+-fn classify_ret<Ty>(ret: &mut ArgAbi<'_, Ty>) {
+-    if ret.layout.is_aggregate() && ret.layout.size.bits() > 64 {
+-        ret.make_indirect();
+-    }
+-}
++// Reference: PTX Writer's Guide to Interoperability
++// https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability
+ 
+-fn classify_arg<Ty>(arg: &mut ArgAbi<'_, Ty>) {
+-    if arg.layout.is_aggregate() && arg.layout.size.bits() > 64 {
+-        arg.make_indirect();
+-    }
+-}
+-
+-fn classify_arg_kernel<'a, Ty, C>(_cx: &C, arg: &mut ArgAbi<'a, Ty>)
+-where
+-    Ty: TyAbiInterface<'a, C> + Copy,
+-    C: HasDataLayout,
+-{
+-    if matches!(arg.mode, PassMode::Pair(..)) && (arg.layout.is_adt() || arg.layout.is_tuple()) {
+-        let align_bytes = arg.layout.align.abi.bytes();
+-
+-        let unit = match align_bytes {
+-            1 => Reg::i8(),
+-            2 => Reg::i16(),
+-            4 => Reg::i32(),
+-            8 => Reg::i64(),
+-            16 => Reg::i128(),
+-            _ => unreachable!("Align is given as power of 2 no larger than 16 bytes"),
+-        };
+-        arg.cast_to(Uniform { unit, total: Size::from_bytes(2 * align_bytes) });
+-    }
+-}
+-
+-pub fn compute_abi_info<Ty>(fn_abi: &mut FnAbi<'_, Ty>) {
+-    if !fn_abi.ret.is_ignore() {
+-        classify_ret(&mut fn_abi.ret);
+-    }
++use crate::abi::call::FnAbi;
++use crate::abi::{HasDataLayout, TyAbiInterface};
+ 
+-    for arg in fn_abi.args.iter_mut() {
+-        if arg.is_ignore() {
+-            continue;
+-        }
+-        classify_arg(arg);
+-    }
+-}
++pub fn compute_abi_info<Ty>(_fn_abi: &mut FnAbi<'_, Ty>) {}
+ 
+-pub fn compute_ptx_kernel_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
++pub fn compute_ptx_kernel_abi_info<'a, Ty, C>(_cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
+ where
+     Ty: TyAbiInterface<'a, C> + Copy,
+     C: HasDataLayout,
+@@ -54,11 +14,4 @@ pub fn compute_ptx_kernel_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>
+     if !fn_abi.ret.layout.is_unit() && !fn_abi.ret.layout.is_never() {
+         panic!("Kernels should not return anything other than () or !");
+     }
+-
+-    for arg in fn_abi.args.iter_mut() {
+-        if arg.is_ignore() {
+-            continue;
+-        }
+-        classify_arg_kernel(cx, arg);
+-    }
+ }
+diff --git a/compiler/rustc_target/src/spec/nvptx64_nvidia_cuda.rs b/compiler/rustc_target/src/spec/nvptx64_nvidia_cuda.rs
+index b0582b235b9..007753fb5a7 100644
+--- a/compiler/rustc_target/src/spec/nvptx64_nvidia_cuda.rs
++++ b/compiler/rustc_target/src/spec/nvptx64_nvidia_cuda.rs
+@@ -11,8 +11,8 @@ pub fn target() -> Target {
+             os: "cuda".into(),
+             vendor: "nvidia".into(),
+             linker_flavor: LinkerFlavor::Ptx,
+-            // The linker can be installed from `crates.io`.
+-            linker: Some("rust-ptx-linker".into()),
++            linker: None,
++            requires_lto: true,
+ 
+             // With `ptx-linker` approach, it can be later overridden via link flags.
+             cpu: "sm_30".into(),
+@@ -28,7 +28,7 @@ pub fn target() -> Target {
+ 
+             // Avoid using dylib because it contain metadata not supported
+             // by LLVM NVPTX backend.
+-            only_cdylib: true,
++            // only_cdylib: true,
+ 
+             // Let the `ptx-linker` to handle LLVM lowering into MC / assembly.
+             obj_is_bitcode: true,
+diff --git a/src/test/assembly/asm/nvptx-types.rs b/src/test/assembly/asm/nvptx-types.rs
+index c319946b5f5..6282ee7ba88 100644
+--- a/src/test/assembly/asm/nvptx-types.rs
++++ b/src/test/assembly/asm/nvptx-types.rs
+@@ -1,9 +1,10 @@
+ // assembly-output: emit-asm
++// no-prefer-dynamic
+ // compile-flags: --target nvptx64-nvidia-cuda
+-// compile-flags: --crate-type cdylib
+ // needs-llvm-components: nvptx
+ 
+-#![feature(no_core, lang_items, rustc_attrs, asm_experimental_arch)]
++#![feature(no_core, lang_items, rustc_attrs, asm_sym, asm_experimental_arch)]
++#![crate_type = "cdylib"]
+ #![no_core]
+ 
+ #[rustc_builtin_macro]
+@@ -30,9 +31,10 @@ impl Copy for i64 {}
+ impl Copy for f64 {}
+ impl Copy for ptr {}
+ 
+-// NVPTX does not support static variables
+-#[no_mangle]
+-fn extern_func() {}
++extern "C" {
++    fn extern_func();
++    static extern_static: u32;
++}
+ 
+ // CHECK-LABEL: .visible .func sym_fn()
+ // CHECK: // begin inline asm
+-- 
+2.39.0
+
+
+From f5fd5082e8f3e9ddddf3ba5592506f0051c35276 Mon Sep 17 00:00:00 2001
+From: Julia Tatz <tatz.j@northeastern.edu>
+Date: Mon, 12 Sep 2022 17:45:02 -0400
+Subject: [PATCH 3/3] Fix const ptr casts too
+
+---
+ compiler/rustc_codegen_llvm/src/common.rs |  8 ++++----
+ compiler/rustc_codegen_llvm/src/consts.rs | 20 ++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/common.rs b/compiler/rustc_codegen_llvm/src/common.rs
+index acee9134fb9..c80d36f1f29 100644
+--- a/compiler/rustc_codegen_llvm/src/common.rs
++++ b/compiler/rustc_codegen_llvm/src/common.rs
+@@ -279,7 +279,7 @@ fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) ->
+                 let llval = unsafe {
+                     llvm::LLVMRustConstInBoundsGEP2(
+                         self.type_i8(),
+-                        self.const_bitcast(base_addr, self.type_i8p_ext(base_addr_space)),
++                        self.const_ptrcast(base_addr, self.type_i8p_ext(base_addr_space)),
+                         &self.const_usize(offset.bytes()),
+                         1,
+                     )
+@@ -287,7 +287,7 @@ fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) ->
+                 if layout.primitive() != Pointer {
+                     unsafe { llvm::LLVMConstPtrToInt(llval, llty) }
+                 } else {
+-                    self.const_bitcast(llval, llty)
++                    self.const_ptrcast(llval, llty)
+                 }
+             }
+         }
+@@ -316,12 +316,12 @@ fn from_const_alloc(
+             let llval = unsafe {
+                 llvm::LLVMRustConstInBoundsGEP2(
+                     self.type_i8(),
+-                    self.const_bitcast(base_addr, self.type_i8p()),
++                    self.const_ptrcast(base_addr, self.type_i8p()),
+                     &self.const_usize(offset.bytes()),
+                     1,
+                 )
+             };
+-            self.const_bitcast(llval, llty)
++            self.const_ptrcast(llval, llty)
+         };
+         PlaceRef::new_sized(llval, layout)
+     }
+diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
+index 3626aa901c0..f984bb1c73e 100644
+--- a/compiler/rustc_codegen_llvm/src/consts.rs
++++ b/compiler/rustc_codegen_llvm/src/consts.rs
+@@ -200,11 +200,31 @@ fn check_and_apply_linkage<'ll, 'tcx>(
+ }
+ 
+ pub fn ptrcast<'ll>(val: &'ll Value, ty: &'ll Type) -> &'ll Value {
++    // FIXME: remove before merge
++    let val_ty_kind = unsafe { llvm::LLVMRustGetTypeKind(common::val_ty(val)).to_generic() };
++    let dest_ty_kind = unsafe { llvm::LLVMRustGetTypeKind(ty).to_generic() };
++    assert!(
++        (matches!(val_ty_kind, rustc_codegen_ssa::common::TypeKind::Pointer)
++            && matches!(dest_ty_kind, rustc_codegen_ssa::common::TypeKind::Pointer)),
++        "val ty is {:?}, dest_ty is {:?}",
++        val_ty_kind,
++        dest_ty_kind,
++    );
+     unsafe { llvm::LLVMConstPointerCast(val, ty) }
+ }
+ 
+ impl<'ll> CodegenCx<'ll, '_> {
+     pub(crate) fn const_bitcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
++        // FIXME: remove before merge
++        assert!(
++            !(matches!(
++                self.type_kind(self.val_ty(val)),
++                rustc_codegen_ssa::common::TypeKind::Pointer
++            ) || matches!(self.type_kind(ty), rustc_codegen_ssa::common::TypeKind::Pointer)),
++            "val ty is {:?}, dest_ty is {:?}",
++            self.type_kind(self.val_ty(val)),
++            self.type_kind(ty),
++        );
+         unsafe { llvm::LLVMConstBitCast(val, ty) }
+     }
+ 
+-- 
+2.39.0
+

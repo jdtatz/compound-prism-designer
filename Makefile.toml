@@ -12,7 +12,8 @@ command = "cargo"
 args = ["fmt"]
 
 [tasks.kernel]
-toolchain = "nightly"
+#toolchain = "nightly"
+toolchain = "stage1"
 command = "cargo"
 args = [
     "rustc",
@@ -22,6 +23,7 @@ args = [
     "--target=nvptx64-nvidia-cuda.json",
     "--crate-type=cdylib",
     "-Z", "build-std=core",
+    "-Z", "build-std-features=panic_immediate_abort",
     "--",
     "-Cllvm-args=--nvptx-fma-level=2",
     "-Cllvm-args=--nvptx-prec-divf32=0",
@@ -68,8 +70,8 @@ args = ["-v", "-arch=sm_52", "src/kernel.ptx"]
 [tasks.bench]
 env = {RUSTFLAGS = "-Ctarget-feature=+fma -Ctarget-cpu=native" }
 command = "cargo"
-# args = ["criterion", "--features=cuda", "-p", "compound_prism_designer"]
-args = ["criterion", "-p", "compound_prism_designer"]
+args = ["criterion", "--features=cuda", "-p", "compound_prism_designer"]
+# args = ["criterion", "-p", "compound_prism_designer"]
 
 [tasks.test]
 command = "cargo"

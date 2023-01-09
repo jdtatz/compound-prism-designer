@@ -2,7 +2,7 @@ use crate::spectrometer::{
     kernel::*, Beam, CurvedPlane, FiberBeam, GaussianBeam, GenericSpectrometer, Plane,
     PrismSurface, Spectrometer, ToricLens, UniformDistribution, Welford,
 };
-use core::{arch::asm, ptr::NonNull};
+use core::{arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
 use nvptx_sys::{
     blockDim, blockIdx, dynamic_shared_memory, gridDim, syncthreads, threadIdx, vote_any,
     vote_ballot, warp_sync, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
@@ -53,7 +53,26 @@ impl GPU for CUDAGPU {
 }
 
 impl<T: Copy + Shuffle> GPUShuffle<T> for CUDAGPU {
-    fn shfl_bfly_sync(val: T, lane_mask: u32) -> T { Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask) }
+    fn shfl_bfly_sync(val: T, lane_mask: u32) -> T {
+        Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
+    }
+}
+
+#[repr(transparent)]
+pub struct StaticSyncWrapper<T>(UnsafeCell<MaybeUninit<T>>);
+
+unsafe impl<T: Sync> Sync for StaticSyncWrapper<T> {}
+
+impl<T> StaticSyncWrapper<T> {
+    pub const UNINIT: Self = Self(UnsafeCell::new(MaybeUninit::uninit()));
+
+    pub fn as_nonnull(&self) -> NonNull<T> {
+        unsafe { NonNull::new_unchecked(self.0.get()) }.cast()
+    }
+}
+
+extern "C" {
+    static DYN_SHARED: StaticSyncWrapper<[u128; 0]>;
 }
 
 macro_rules! gen_kernel {
@@ -66,8 +85,9 @@ macro_rules! gen_kernel {
                 spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>], $d>,
                 prob: *mut $fty,
             ) {
-                let (ptr, _dyn_mem) = dynamic_shared_memory();
-                let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
+                // let (ptr, _dyn_mem) = dynamic_shared_memory();
+                // let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
+                let shared_ptr: NonNull<Welford<$fty>> = DYN_SHARED.as_nonnull().cast();
 
                 kernel::<CUDAGPU, _, _, $d>(seed, max_evals, spectrometer, NonNull::new_unchecked(prob), shared_ptr)
             }
@@ -93,8 +113,9 @@ macro_rules! gen_kernel {
                 spectrometer: &Spectrometer<$fty, UniformDistribution<$fty>, $beam<$fty>, $s0<$fty, $d>, Plane<$fty, $d>, $sn<$fty, $d>, [PrismSurface<$fty, Plane<$fty, $d>>; $n], $d>,
                 prob: *mut $fty,
             ) {
-                let (ptr, _dyn_mem) = dynamic_shared_memory();
-                let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
+                // let (ptr, _dyn_mem) = dynamic_shared_memory();
+                // let shared_ptr: NonNull<Welford<$fty>> = ptr.cast();
+                let shared_ptr: NonNull<Welford<$fty>> = DYN_SHARED.as_nonnull().cast();
 
                 kernel::<CUDAGPU, _, _, $d>(seed, max_evals, spectrometer, NonNull::new_unchecked(prob), shared_ptr)
             }
