@@ -72,6 +72,7 @@ impl<T> StaticSyncWrapper<T> {
 }
 
 extern "C" {
+    #[address_space(3)]
     static DYN_SHARED: StaticSyncWrapper<[u128; 0]>;
 }
 

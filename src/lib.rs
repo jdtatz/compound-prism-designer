@@ -4,7 +4,7 @@
 )]
 #![cfg_attr(
     target_arch = "nvptx64",
-    feature(abi_ptx, asm_experimental_arch, asm_const)
+    feature(abi_ptx, asm_experimental_arch, asm_const, address_space)
 )]
 #![feature(array_zip, type_alias_impl_trait)]
 #![feature(array_methods, ptr_metadata)]
