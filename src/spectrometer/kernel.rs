@@ -1,4 +1,4 @@
-use crate::{FloatExt, GenericSpectrometer, Qrng, Welford};
+use crate::{FloatExt, GenericSpectrometer, Qrng, Vector, Welford};
 use core::ptr::NonNull;
 use core::slice::from_raw_parts_mut;
 
@@ -58,7 +58,8 @@ impl<F: Copy, G: GPUShuffle<F>> GPUShuffle<Welford<F>> for G {
 pub unsafe fn kernel<
     G: GPUShuffle<F> + GPUShuffle<u32>,
     F: FloatExt,
-    GS: ?Sized + GenericSpectrometer<D, Scalar=F>,
+    V: Vector<D, Scalar = F>,
+    GS: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
     const D: usize,
 >(
     seed: F,
@@ -159,7 +160,8 @@ pub unsafe fn kernel<
 pub unsafe fn propagation_test_kernel<
     G: GPU,
     F: FloatExt,
-    GS: ?Sized + GenericSpectrometer<D, Scalar=F>,
+    V: Vector<D, Scalar = F>,
+    GS: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
     const D: usize,
 >(
     spectrometer: &GS,

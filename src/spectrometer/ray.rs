@@ -24,11 +24,11 @@ impl From<RayTraceError> for &'static str {
     }
 }
 
-pub trait DetectorArray<T, const D: usize>: Surface<T, D> {
+pub trait DetectorArray<V: Vector<DIM>, const DIM: usize>: Surface<V, DIM> {
     fn bin_count(&self) -> u32;
-    fn length(&self) -> T;
-    fn bin_index(&self, intersection: Vector<T, D>) -> Option<u32>;
-    fn mid_pt(&self) -> Vector<T, D>;
+    fn length(&self) -> V::Scalar;
+    fn bin_index(&self, intersection: V) -> Option<u32>;
+    fn mid_pt(&self) -> V;
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
@@ -38,6 +38,25 @@ pub struct PrismSurface<T, S> {
     pub glass: Glass<T, 6>,
     /// initial boundary surface
     pub surface: S,
+}
+
+pub trait ArrayLikeFamily {
+    type Array<T>: ?Sized + core::borrow::Borrow<[T]>;
+
+    fn as_slice<T>(array: &Self::Array<T>) -> &[T] {
+        core::borrow::Borrow::borrow(array)
+    }
+}
+
+pub struct SliceFamily;
+pub struct ArrayFamily<const N: usize>;
+
+impl ArrayLikeFamily for SliceFamily {
+    type Array<T> = [T];
+}
+
+impl<const N: usize> ArrayLikeFamily for ArrayFamily<N> {
+    type Array<T> = [T; N];
 }
 
 pub trait Array: core::borrow::Borrow<[Self::Item]> {
@@ -59,14 +78,7 @@ impl<T, const N: usize> Array for [T; N] {
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct CompoundPrism<
-    T,
-    S0,
-    SI,
-    SN,
-    L: ?Sized + Array<Item = PrismSurface<T, SI>>,
-    const D: usize,
-> {
+pub struct CompoundPrism<T, S0, SI, SN, L: ?Sized + Array<Item = PrismSurface<T, SI>>> {
     /// initial prism surface
     initial_prism: PrismSurface<T, S0>,
     /// Final boundary surface
@@ -88,11 +100,11 @@ pub struct CompoundPrism<
 // pub type CompoundPrismBothLens<V, const N: usize> =
 //     CompoundPrism<V, CurvedPlane<V>, Plane<V>, CurvedPlane<V>, N>;
 
-impl<T: FloatExt, S0, SN, const N: usize, const D: usize>
-    CompoundPrism<T, S0, Plane<T, D>, SN, [PrismSurface<T, Plane<T, D>>; N], D>
+impl<T: FloatExt, V: Vector<DIM, Scalar = T>, S0, SN, const N: usize, const DIM: usize>
+    CompoundPrism<T, S0, Plane<V, DIM>, SN, [PrismSurface<T, Plane<V, DIM>>; N]>
 where
-    S0: Surface<T, D> + FromParametrizedHyperPlane<T, D>,
-    SN: Surface<T, D> + FromParametrizedHyperPlane<T, D>,
+    S0: Surface<V, DIM> + FromParametrizedHyperPlane<V, DIM>,
+    SN: Surface<V, DIM> + FromParametrizedHyperPlane<V, DIM>,
 {
     /// Create a new Compound Prism Specification
     ///
@@ -152,20 +164,21 @@ where
     }
 }
 
-impl<T: FloatExt, S0, SI, SN, const N: usize, const D: usize>
-    CompoundPrism<T, S0, SI, SN, [PrismSurface<T, SI>; N], D>
-where
-    S0: Surface<T, D> + Drawable<T>,
-    SI: Copy + Surface<T, D> + Drawable<T>,
-    SN: Surface<T, D> + Drawable<T>,
+impl<T: FloatExt, S0: Drawable<T>, SI: Copy + Drawable<T>, SN: Drawable<T>, const N: usize>
+    CompoundPrism<T, S0, SI, SN, [PrismSurface<T, SI>; N]>
 {
-    pub fn surfaces(
+    pub fn surfaces<V: Vector<DIM, Scalar = T>, const DIM: usize>(
         &self,
     ) -> (
         (crate::Point<T>, crate::Point<T>, Option<T>),
         [(crate::Point<T>, crate::Point<T>, Option<T>); N],
         (crate::Point<T>, crate::Point<T>, Option<T>),
-    ) {
+    )
+    where
+        S0: Surface<V, DIM>,
+        SI: Surface<V, DIM>,
+        SN: Surface<V, DIM>,
+    {
         let path2surface = |p: crate::Path<T>| match p {
             crate::Path::Line { a, b } => (a, b, None),
             crate::Path::Arc {
@@ -211,24 +224,24 @@ where
 
 /// Light Ray
 #[derive(Constructor, Debug, PartialEq, Clone, Copy)]
-pub struct Ray<T, const D: usize> {
+pub struct Ray<V: Vector<DIM>, const DIM: usize> {
     /// Origin position vector
-    pub origin: Vector<T, D>,
+    pub origin: V,
     /// Unit normal direction vector
-    pub direction: UnitVector<T, D>,
+    pub direction: UnitVector<V>,
     /// S-Polarization Transmittance probability
-    s_transmittance: T,
+    s_transmittance: V::Scalar,
     /// P-Polarization Transmittance probability
-    p_transmittance: T,
+    p_transmittance: V::Scalar,
 }
 
-impl<T: FloatExt, const D: usize> Ray<T, D> {
+impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> Ray<V, DIM> {
     /// Create a new unpolarized ray with full transmittance
     ///
     /// # Arguments
     ///  * `origin` - the initial y value of the ray's position
     ///  * `direction` - the initial y value of the ray's position
-    pub fn new_unpolarized(origin: Vector<T, D>, direction: UnitVector<T, D>) -> Self {
+    pub fn new_unpolarized(origin: V, direction: UnitVector<V>) -> Self {
         Ray {
             origin,
             direction,
@@ -243,10 +256,8 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     /// # Arguments
     ///  * `y` - the initial y value of the ray's position
     pub fn new_from_start(y: T) -> Self {
-        let mut origin = Vector::ZERO;
-        origin[1] = y;
-        let mut direction = Vector::ZERO;
-        direction[0] = T::one();
+        let origin = V::from_xy(T::ZERO, y);
+        let direction = V::from_xy(T::one(), T::ZERO);
         Ray {
             origin,
             direction: UnitVector::new(direction),
@@ -285,7 +296,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `n2` - index of refraction of the new media
     pub fn refract(
         self,
-        normal: UnitVector<T, D>,
+        normal: UnitVector<V>,
         n1: T,
         n2: T,
         ar_coated: bool,
@@ -344,7 +355,7 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     }
 
     #[inline]
-    pub fn surface_propagate<S: Surface<T, D>>(
+    pub fn surface_propagate<S: Surface<V, DIM>>(
         self,
         surface: S,
         n1: T,
@@ -364,9 +375,9 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     // ///  * `cmpnd` - the compound prism specification
     // ///  * `wavelength` - the wavelength of the light ray
     // pub fn propagate_internal<
-    //     S0: Copy + Surface<T, D>,
-    //     SI: Copy + Surface<T, D>,
-    //     SN: Copy + Surface<T, D>,
+    //     S0: Copy + Surface<V, DIM>,
+    //     SI: Copy + Surface<V, DIM>,
+    //     SN: Copy + Surface<V, DIM>,
     //     const N: usize,
     // >(
     //     self,
@@ -403,8 +414,8 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `detector` - detector array specification
     fn intersect_detector_array(
         self,
-        detector: &(impl Copy + DetectorArray<T, D>),
-    ) -> Result<(Vector<T, D>, u32, T), RayTraceError> {
+        detector: &(impl Copy + DetectorArray<V, DIM>),
+    ) -> Result<(V, u32, T), RayTraceError> {
         let GeometricRayIntersection { distance, .. } = detector
             .intersection(GeometricRay {
                 origin: self.origin,
@@ -424,13 +435,13 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `cmpnd` - the compound prism specification
     ///  * `wavelength` - the wavelength of the light ray
     pub fn propagate_internal<
-        S0: Copy + Surface<T, D>,
-        SI: Copy + Surface<T, D>,
-        SN: Copy + Surface<T, D>,
+        S0: Copy + Surface<V, DIM>,
+        SI: Copy + Surface<V, DIM>,
+        SN: Copy + Surface<V, DIM>,
         L: ?Sized + Array<Item = PrismSurface<T, SI>>,
     >(
         self,
-        cmpnd: &CompoundPrism<T, S0, SI, SN, L, D>,
+        cmpnd: &CompoundPrism<T, S0, SI, SN, L>,
         wavelength: T,
     ) -> Result<Self, RayTraceError> {
         let mut ray = self;
@@ -479,15 +490,15 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `cmpnd` - the compound prism specification
     ///  * `detector` - detector array specification
     pub fn propagate<
-        S0: Copy + Surface<T, D>,
-        SI: Copy + Surface<T, D>,
-        SN: Copy + Surface<T, D>,
+        S0: Copy + Surface<V, DIM>,
+        SI: Copy + Surface<V, DIM>,
+        SN: Copy + Surface<V, DIM>,
         L: ?Sized + Array<Item = PrismSurface<T, SI>>,
     >(
         self,
         wavelength: T,
-        cmpnd: &CompoundPrism<T, S0, SI, SN, L, D>,
-        detector: &(impl Copy + DetectorArray<T, D>),
+        cmpnd: &CompoundPrism<T, S0, SI, SN, L>,
+        detector: &(impl Copy + DetectorArray<V, DIM>),
     ) -> Result<(u32, T), RayTraceError> {
         let (_, idx, t) = self
             .propagate_internal(cmpnd, wavelength)?
@@ -505,16 +516,16 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     ///  * `detector` - detector array specification
     pub fn trace<
         'c,
-        S0: Copy + Surface<T, D>,
-        SI: Copy + Surface<T, D>,
-        SN: Copy + Surface<T, D>,
+        S0: Copy + Surface<V, DIM>,
+        SI: Copy + Surface<V, DIM>,
+        SN: Copy + Surface<V, DIM>,
         L: ?Sized + Array<Item = PrismSurface<T, SI>>,
     >(
         self,
         wavelength: T,
-        cmpnd: &'c CompoundPrism<T, S0, SI, SN, L, D>,
-        detector: impl 'c + DetectorArray<T, D> + Copy,
-    ) -> impl 'c + Iterator<Item = GeometricRay<T, D>> {
+        cmpnd: &'c CompoundPrism<T, S0, SI, SN, L>,
+        detector: impl 'c + DetectorArray<V, DIM> + Copy,
+    ) -> impl 'c + Iterator<Item = GeometricRay<V, DIM>> {
         let mut ray = self;
         let mut n1 = T::one();
         let mut prism0 = Some(cmpnd.initial_prism);
@@ -581,8 +592,8 @@ impl<T: FloatExt, const D: usize> Ray<T, D> {
     }
 }
 
-impl<T, const D: usize> From<Ray<T, D>> for GeometricRay<T, D> {
-    fn from(ray: Ray<T, D>) -> Self {
+impl<V: Vector<DIM>, const DIM: usize> From<Ray<V, DIM>> for GeometricRay<V, DIM> {
+    fn from(ray: Ray<V, DIM>) -> Self {
         let Ray {
             origin, direction, ..
         } = ray;

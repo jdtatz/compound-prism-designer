@@ -29,5 +29,5 @@ pub use self::spectrometer::{
 };
 pub use self::toric::{ToricLens, ToricLensParametrization, ToricSurface};
 pub use self::utils::{Float, FloatExt, LossyFrom, LossyInto, NumAssign, One, Zero};
-pub use self::vector::{UnitVector, Vector};
+pub use self::vector::{SimpleVector, UnitVector, Vector};
 pub use self::welford::Welford;

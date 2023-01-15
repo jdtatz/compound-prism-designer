@@ -4,13 +4,16 @@ use super::vector::{UnitVector, Vector};
 use core::ops::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GeometricRay<T, const N: usize> {
-    pub origin: Vector<T, N>,
-    pub direction: UnitVector<T, N>,
+pub struct GeometricRay<V, const DIM: usize> {
+    pub origin: V,
+    pub direction: UnitVector<V>,
 }
 
-impl<T: FloatExt, const N: usize> GeometricRay<T, N> {
-    pub fn translate(self, distance: T) -> Self {
+impl<V: Vector<DIM>, const DIM: usize> GeometricRay<V, DIM>
+where
+    <V as Vector<DIM>>::Scalar: FloatExt,
+{
+    pub fn translate(self, distance: V::Scalar) -> Self {
         let Self { origin, direction } = self;
         let translated = direction.mul_add(distance, origin);
         Self {
@@ -21,29 +24,29 @@ impl<T: FloatExt, const N: usize> GeometricRay<T, N> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GeometricRayIntersection<T, const N: usize> {
+pub struct GeometricRayIntersection<T, V> {
     pub distance: T,
-    pub normal: UnitVector<T, N>,
+    pub normal: UnitVector<V>,
 }
 
-pub trait Bounds<T, const N: usize>: Sized {
-    fn in_bounds(self, position: Vector<T, N>) -> bool;
+pub trait Bounds<V, const DIM: usize>: Sized {
+    fn in_bounds(self, position: V) -> bool;
 }
 
-pub trait HyperSurface<T, B: Bounds<T, N>, const N: usize>: Sized {
+pub trait HyperSurface<V: Vector<DIM>, B: Bounds<V, DIM>, const DIM: usize>: Sized {
     /// If there are multiple intersections, the closest one is returned
     fn intersection(
         self,
-        ray: GeometricRay<T, N>,
+        ray: GeometricRay<V, DIM>,
         bounds: B,
-    ) -> Option<GeometricRayIntersection<T, N>>;
+    ) -> Option<GeometricRayIntersection<V::Scalar, V>>;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct NoBounds;
 
-impl<T, const N: usize> Bounds<T, N> for NoBounds {
-    fn in_bounds(self, _: Vector<T, N>) -> bool {
+impl<V: Vector<DIM>, const DIM: usize> Bounds<V, DIM> for NoBounds {
+    fn in_bounds(self, _: V) -> bool {
         true
     }
 }
@@ -55,43 +58,49 @@ pub struct PrismBounds<T> {
     pub half_width: T,
 }
 
-impl<T: ConstZero + PartialOrd> Bounds<T, 2> for PrismBounds<T> {
-    fn in_bounds(self, position: Vector<T, 2>) -> bool {
-        let Vector([_, y]) = position;
+impl<T: ConstZero + PartialOrd, V: Vector<2, Scalar = T>> Bounds<V, 2> for PrismBounds<T> {
+    fn in_bounds(self, position: V) -> bool {
+        let [_, y] = position.to_array();
         T::ZERO <= y && y <= self.height
     }
 }
 
-impl<T: Copy + ConstZero + Neg<Output = T> + PartialOrd> Bounds<T, 3> for PrismBounds<T> {
-    fn in_bounds(self, position: Vector<T, 3>) -> bool {
-        let Vector([_, y, z]) = position;
+impl<T: Copy + ConstZero + Neg<Output = T> + PartialOrd, V: Vector<3, Scalar = T>> Bounds<V, 3>
+    for PrismBounds<T>
+{
+    fn in_bounds(self, position: V) -> bool {
+        let [_, y, z] = position.to_array();
         T::ZERO <= y && y <= self.height && -self.half_width <= z && z <= self.half_width
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct RadialBounds<T, const N: usize> {
-    pub center: Vector<T, N>,
+pub struct RadialBounds<T, V> {
+    pub center: V,
     pub radius_squared: T,
 }
 
-impl<T: ConstZero + Float, const N: usize> Bounds<T, N> for RadialBounds<T, N> {
-    fn in_bounds(self, position: Vector<T, N>) -> bool {
+impl<T: ConstZero + Float, V: Vector<DIM, Scalar = T>, const DIM: usize> Bounds<V, DIM>
+    for RadialBounds<T, V>
+{
+    fn in_bounds(self, position: V) -> bool {
         (position - self.center).norm_squared() <= self.radius_squared
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct SandwichBounds<T, const N: usize> {
-    pub center: Vector<T, N>,
-    pub normal: UnitVector<T, N>,
+pub struct SandwichBounds<T, V> {
+    pub center: V,
+    pub normal: UnitVector<V>,
     pub height: T,
 }
 
-impl<T: FloatExt, const N: usize> Bounds<T, N> for SandwichBounds<T, N> {
-    fn in_bounds(self, position: Vector<T, N>) -> bool {
+impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> Bounds<V, DIM>
+    for SandwichBounds<T, V>
+{
+    fn in_bounds(self, position: V) -> bool {
         let dp = self.normal.dot(position - self.center);
         T::ZERO <= dp && dp <= self.height
     }
@@ -99,19 +108,23 @@ impl<T: FloatExt, const N: usize> Bounds<T, N> for SandwichBounds<T, N> {
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct HyperPlane<T, const N: usize> {
-    pub point: Vector<T, N>,
-    pub normal: UnitVector<T, N>,
+pub struct HyperPlane<V> {
+    pub point: V,
+    pub normal: UnitVector<V>,
 }
 
-impl<T: Copy + ConstZero + Neg<Output = T> + Float, B: Bounds<T, N>, const N: usize>
-    HyperSurface<T, B, N> for HyperPlane<T, N>
+impl<
+        T: Copy + ConstZero + Neg<Output = T> + Float,
+        B: Bounds<V, DIM>,
+        V: Vector<DIM, Scalar = T>,
+        const DIM: usize,
+    > HyperSurface<V, B, DIM> for HyperPlane<V>
 {
     fn intersection(
         self,
-        ray: GeometricRay<T, N>,
+        ray: GeometricRay<V, DIM>,
         bounds: B,
-    ) -> Option<GeometricRayIntersection<T, N>> {
+    ) -> Option<GeometricRayIntersection<T, V>> {
         // https://en.wikipedia.org/wiki/Line–plane_intersection
         let GeometricRay { origin, direction } = ray;
         let ci = direction.dot(*self.normal);
@@ -131,13 +144,10 @@ impl<T: Copy + ConstZero + Neg<Output = T> + Float, B: Bounds<T, N>, const N: us
     }
 }
 
-pub trait FromParametrizedHyperPlane<T, const N: usize> {
+pub trait FromParametrizedHyperPlane<V, const DIM: usize> {
     type Parametrization;
 
-    fn from_hyperplane(
-        hyperplane: HyperPlane<T, N>,
-        parametrization: Self::Parametrization,
-    ) -> Self;
+    fn from_hyperplane(hyperplane: HyperPlane<V>, parametrization: Self::Parametrization) -> Self;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,10 +157,10 @@ pub enum QuadricIntersection<T> {
     Secant(T, T),
 }
 
-fn spherical_ray_intersection<T: FloatExt, const N: usize>(
-    center: Vector<T, N>,
+fn spherical_ray_intersection<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize>(
+    center: V,
     radius_squared: T,
-    ray: GeometricRay<T, N>,
+    ray: GeometricRay<V, DIM>,
 ) -> QuadricIntersection<T> {
     // https://en.wikipedia.org/wiki/Line–sphere_intersection
     let GeometricRay { origin, direction } = ray;
@@ -170,20 +180,20 @@ fn spherical_ray_intersection<T: FloatExt, const N: usize>(
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct SphericalLikeSurface<T, P, const N: usize> {
-    pub center: Vector<T, N>,
+pub struct SphericalLikeSurface<T, V, P> {
+    pub center: V,
     pub radius: T,
     marker: core::marker::PhantomData<P>,
 }
 
-impl<T: FloatExt, P, B: Copy + Bounds<T, 2>> HyperSurface<T, B, 2>
-    for SphericalLikeSurface<T, P, 2>
+impl<T: FloatExt, P, V: Vector<2, Scalar = T>, B: Copy + Bounds<V, 2>> HyperSurface<V, B, 2>
+    for SphericalLikeSurface<T, V, P>
 {
     fn intersection(
         self,
-        ray: GeometricRay<T, 2>,
+        ray: GeometricRay<V, 2>,
         bounds: B,
-    ) -> Option<GeometricRayIntersection<T, 2>> {
+    ) -> Option<GeometricRayIntersection<T, V>> {
         let GeometricRay { origin, direction } = ray;
         let inter = spherical_ray_intersection(self.center, self.radius.sqr(), ray);
         let (distance, p) = if let QuadricIntersection::Secant(d1, d2) = inter {
@@ -211,17 +221,17 @@ pub struct PlaneParametrization<T> {
     pub width: T,
 }
 
-impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N> for Plane<T, N> {
-    type Parametrization = PlaneParametrization<T>;
+impl<V: Vector<DIM>, const DIM: usize> FromParametrizedHyperPlane<V, DIM> for Plane<V, DIM>
+where
+    <V as Vector<DIM>>::Scalar: FloatExt,
+{
+    type Parametrization = PlaneParametrization<V::Scalar>;
 
-    fn from_hyperplane(
-        hyperplane: HyperPlane<T, N>,
-        parametrization: Self::Parametrization,
-    ) -> Self {
+    fn from_hyperplane(hyperplane: HyperPlane<V>, parametrization: Self::Parametrization) -> Self {
         let PlaneParametrization { height, width } = parametrization;
         let bounds = PrismBounds {
             height,
-            half_width: width * T::lossy_from(0.5_f64),
+            half_width: width * V::Scalar::lossy_from(0.5_f64),
         };
         Self {
             surface: hyperplane,
@@ -238,15 +248,12 @@ pub struct CurvedPlaneParametrization<T> {
     pub height: T,
 }
 
-impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N>
-    for SphericalLikeSurface<T, (), N>
+impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> FromParametrizedHyperPlane<V, DIM>
+    for SphericalLikeSurface<T, V, ()>
 {
     type Parametrization = CurvedPlaneParametrization<T>;
 
-    fn from_hyperplane(
-        hyperplane: HyperPlane<T, N>,
-        parametrization: Self::Parametrization,
-    ) -> Self {
+    fn from_hyperplane(hyperplane: HyperPlane<V>, parametrization: Self::Parametrization) -> Self {
         let CurvedPlaneParametrization {
             height,
             signed_normalized_curvature,
@@ -269,13 +276,10 @@ impl<T: FloatExt, const N: usize> FromParametrizedHyperPlane<T, N>
     }
 }
 
-impl<T: FloatExt> FromParametrizedHyperPlane<T, 2> for CurvedPlane<T, 2> {
+impl<T: FloatExt, V: Vector<2, Scalar = T>> FromParametrizedHyperPlane<V, 2> for CurvedPlane<V, 2> {
     type Parametrization = CurvedPlaneParametrization<T>;
 
-    fn from_hyperplane(
-        hyperplane: HyperPlane<T, 2>,
-        parametrization: Self::Parametrization,
-    ) -> Self {
+    fn from_hyperplane(hyperplane: HyperPlane<V>, parametrization: Self::Parametrization) -> Self {
         let CurvedPlaneParametrization {
             height,
             signed_normalized_curvature,
@@ -311,13 +315,13 @@ impl<T: FloatExt> FromParametrizedHyperPlane<T, 2> for CurvedPlane<T, 2> {
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct BoundedHyperSurface<T, S, B, const N: usize> {
+pub struct BoundedHyperSurface<V, S, B, const DIM: usize> {
     pub surface: S,
     pub bounds: B,
-    pub marker: core::marker::PhantomData<Vector<T, N>>,
+    pub marker: core::marker::PhantomData<V>,
 }
 
-impl<T, S, B, const N: usize> BoundedHyperSurface<T, S, B, N> {
+impl<V, S, B, const DIM: usize> BoundedHyperSurface<V, S, B, DIM> {
     pub fn new(surface: S, bounds: B) -> Self {
         Self {
             surface,
@@ -327,20 +331,31 @@ impl<T, S, B, const N: usize> BoundedHyperSurface<T, S, B, N> {
     }
 }
 
-pub type Plane<T, const N: usize> = BoundedHyperSurface<T, HyperPlane<T, N>, PrismBounds<T>, N>;
-pub type CurvedPlane<T, const D: usize> =
-    BoundedHyperSurface<T, SphericalLikeSurface<T, (), D>, RadialBounds<T, D>, D>;
+pub type Plane<V, const DIM: usize> =
+    BoundedHyperSurface<V, HyperPlane<V>, PrismBounds<<V as Vector<DIM>>::Scalar>, DIM>;
+pub type CurvedPlane<V, const DIM: usize> = BoundedHyperSurface<
+    V,
+    SphericalLikeSurface<<V as Vector<DIM>>::Scalar, V, ()>,
+    RadialBounds<<V as Vector<DIM>>::Scalar, V>,
+    DIM,
+>;
 
-pub trait Surface<T, const N: usize>: Sized {
-    fn intersection(self, ray: GeometricRay<T, N>) -> Option<GeometricRayIntersection<T, N>>;
+pub trait Surface<V: Vector<DIM>, const DIM: usize>: Sized {
+    fn intersection(
+        self,
+        ray: GeometricRay<V, DIM>,
+    ) -> Option<GeometricRayIntersection<V::Scalar, V>>;
 }
 
-impl<T, S, B, const N: usize> Surface<T, N> for BoundedHyperSurface<T, S, B, N>
+impl<V: Vector<DIM>, S, B, const DIM: usize> Surface<V, DIM> for BoundedHyperSurface<V, S, B, DIM>
 where
-    S: HyperSurface<T, B, N>,
-    B: Bounds<T, N>,
+    S: HyperSurface<V, B, DIM>,
+    B: Bounds<V, DIM>,
 {
-    fn intersection(self, ray: GeometricRay<T, N>) -> Option<GeometricRayIntersection<T, N>> {
+    fn intersection(
+        self,
+        ray: GeometricRay<V, DIM>,
+    ) -> Option<GeometricRayIntersection<V::Scalar, V>> {
         let Self {
             surface, bounds, ..
         } = self;
@@ -348,7 +363,7 @@ where
     }
 }
 
-impl<T: FloatExt, const D: usize> Drawable<T> for Plane<T, D> {
+impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> Drawable<T> for Plane<V, DIM> {
     fn draw(&self) -> Path<T> {
         let height = self.bounds.height;
         let dx = self.surface.normal.tan_xy() * height * T::lossy_from(0.5f64);
@@ -361,7 +376,9 @@ impl<T: FloatExt, const D: usize> Drawable<T> for Plane<T, D> {
     }
 }
 
-impl<T: FloatExt, const D: usize> Drawable<T> for CurvedPlane<T, D> {
+impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> Drawable<T>
+    for CurvedPlane<V, DIM>
+{
     fn draw(&self) -> Path<T> {
         let max_dist_sq = self.bounds.radius_squared;
         let theta_2 = T::lossy_from(2u32)
@@ -409,20 +426,25 @@ impl<T: FloatExt, const D: usize> Drawable<T> for CurvedPlane<T, D> {
 }
 
 // TODO needs updating to new Vector impl
-pub(crate) fn create_joined_trapezoids<T: FloatExt, const N: usize, const D: usize>(
+pub(crate) fn create_joined_trapezoids<
+    T: FloatExt,
+    V: Vector<DIM, Scalar = T>,
+    const N: usize,
+    const DIM: usize,
+>(
     height: T,
     first_angle: T,
     angles: [T; N],
     last_angle: T,
     first_sep_length: T,
     sep_lengths: [T; N],
-) -> (HyperPlane<T, D>, [HyperPlane<T, D>; N], HyperPlane<T, D>) {
+) -> (HyperPlane<V>, [HyperPlane<V>; N], HyperPlane<V>) {
     let (sep_lengths, last_sep_length) = array_prepend(first_sep_length, sep_lengths);
     let h2 = height * T::lossy_from(0.5f64);
-    let normal = UnitVector::new(Vector::angled_xy(first_angle).rot_180_xy());
+    let normal = UnitVector::new(V::angled_xy(first_angle).rot_180_xy());
     debug_assert_eq!(
         normal,
-        UnitVector::new(Vector::from_xy(-T::one(), T::ZERO).rotate_xy(first_angle))
+        UnitVector::new(V::from_xy(-T::one(), T::ZERO).rotate_xy(first_angle))
     );
     #[cfg(debug_assertions)]
     float_eq::assert_float_eq!(
@@ -431,7 +453,7 @@ pub(crate) fn create_joined_trapezoids<T: FloatExt, const N: usize, const D: usi
         rmax <= LossyFrom::lossy_from(1e-5f64)
     );
     let first = HyperPlane {
-        point: Vector::from_xy(normal.tan_xy().abs() * h2, h2),
+        point: V::from_xy(normal.tan_xy().abs() * h2, h2),
         normal,
     };
     // let first = Plane {
@@ -443,7 +465,7 @@ pub(crate) fn create_joined_trapezoids<T: FloatExt, const N: usize, const D: usi
     let mut d1 = first.point.x();
     let mut mx = first.point.x();
     let mut next_plane = |(angle, sep_len): (T, T)| {
-        let normal = UnitVector::new(Vector::angled_xy(angle).rot_180_xy());
+        let normal = UnitVector::new(V::angled_xy(angle).rot_180_xy());
         let sign = normal.y().is_sign_positive();
         let d2 = normal.tan_xy().abs() * h2;
         let sep_dist = sep_len
@@ -456,11 +478,11 @@ pub(crate) fn create_joined_trapezoids<T: FloatExt, const N: usize, const D: usi
         d1 = d2;
         mx += sep_dist;
         HyperPlane {
-            point: Vector::from_xy(mx, h2),
+            point: V::from_xy(mx, h2),
             normal,
         }
     };
-    let inter: [HyperPlane<T, D>; N] = angles.zip(sep_lengths).map(&mut next_plane);
+    let inter: [HyperPlane<V>; N] = angles.zip(sep_lengths).map(&mut next_plane);
     let last = (&mut next_plane)((last_angle, last_sep_length));
     (first, inter, last)
 }
@@ -469,13 +491,13 @@ pub(crate) fn create_joined_trapezoids<T: FloatExt, const N: usize, const D: usi
 /// Find the position and orientation of the detector array,
 /// parameterized by the minimum and maximum wavelengths of the input beam,
 /// and its angle from the normal.
-pub fn fit_ray_difference_surface<T: FloatExt, const D: usize>(
-    lower_ray: GeometricRay<T, D>,
-    upper_ray: GeometricRay<T, D>,
+pub fn fit_ray_difference_surface<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize>(
+    lower_ray: GeometricRay<V, DIM>,
+    upper_ray: GeometricRay<V, DIM>,
     d_length: T,
     d_angle: T,
-) -> Option<(Vector<T, D>, bool)> {
-    let spec_dir = Vector::angled_xy(d_angle).rot_90_xy();
+) -> Option<(V, bool)> {
+    let spec_dir = V::angled_xy(d_angle).rot_90_xy();
     let spec = spec_dir * d_length;
 
     /// Matrix inverse if it exists

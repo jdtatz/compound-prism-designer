@@ -1,104 +1,171 @@
 use super::utils::*;
 use core::ops::*;
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, WrappedFrom, Deref, DerefMut)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct Vector<T, const N: usize>(pub [T; N]);
+pub trait Vector<const DIM: usize>:
+    'static
+    + Sized
+    + Copy
+    + core::fmt::Debug
+    + core::cmp::PartialEq
+    + ConstZero
+    + Neg<Output = Self>
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Mul<Self::Scalar, Output = Self>
+    + Div<Self::Scalar, Output = Self>
+{
+    type Scalar;
 
-impl<T, const N: usize> Vector<T, N> {
-    pub const fn new(vector: [T; N]) -> Self {
-        Self(vector)
+    fn new(vector: [Self::Scalar; DIM]) -> Self;
+    fn to_array(self) -> [Self::Scalar; DIM];
+    fn hadamard_product(self, rhs: Self) -> Self;
+    fn reduce_sum(self) -> Self::Scalar;
+    fn dot(self, rhs: Self) -> Self::Scalar {
+        self.hadamard_product(rhs).reduce_sum()
     }
-
-    pub fn map<R, F: FnMut(T) -> R>(self, f: F) -> Vector<R, N> {
-        let Vector(array) = self;
-        Vector(array.map(f))
-    }
-
-    pub fn zip<U>(self, other: Vector<U, N>) -> Vector<(T, U), N> {
-        let Vector(lhs) = self;
-        let Vector(rhs) = other;
-        Vector(lhs.zip(rhs))
-    }
-}
-
-impl<L, R, const N: usize> Vector<(L, R), N> {
-    pub fn map2<T, F: FnMut(L, R) -> T>(self, mut f: F) -> Vector<T, N> {
-        let Vector(array) = self;
-        Vector(array.map(move |(l, r)| f(l, r)))
-    }
-}
-
-impl<T: ConstZero, const N: usize> ConstZero for Vector<T, N> {
-    const ZERO: Self = Vector([T::ZERO; N]);
-}
-
-impl<T: Mul<Output = T>, const N: usize> Vector<T, N> {
-    pub fn hadamard_product(self, rhs: Self) -> Self {
-        // Self(self.0.zip(rhs.0).map(|(l, r)| l * r))
-        self.zip(rhs).map2(Mul::mul)
-    }
-}
-
-impl<T: Copy + ConstZero + Add<Output = T> + Mul<Output = T>, const N: usize> Vector<T, N> {
-    pub fn dot(self, rhs: Self) -> T {
-        // core::array::IntoIter::new(self.hadamard_product(rhs).0).fold(T::ZERO, Add::add)
-        self.hadamard_product(rhs)
-            .0
-            .iter()
-            .copied()
-            .fold(T::ZERO, Add::add)
-    }
-}
-
-impl<T: Copy + ConstZero + Add<Output = T> + Mul<Output = T>, const N: usize> Vector<T, N> {
-    pub fn norm_squared(self) -> T {
+    fn norm_squared(self) -> Self::Scalar {
         self.dot(self)
     }
-}
-
-impl<T: Copy + ConstZero + ConstOne + Float, const N: usize> Vector<T, N> {
-    pub fn norm(self) -> T {
+    fn norm(self) -> Self::Scalar
+    where
+        Self::Scalar: Float,
+    {
         self.norm_squared().sqrt()
     }
 
-    pub fn is_unit(self) -> bool
+    fn is_unit(self) -> bool
     where
-        T: Float + ApproxEq + LossyFrom<f64>,
+        Self::Scalar: Float + ConstOne + ApproxEq + LossyFrom<f64>,
     {
         float_eq::float_eq!(
             self.norm(),
-            T::ONE,
-            rmax <= T::lossy_from(1e-3f64),
+            Self::Scalar::ONE,
+            rmax <= Self::Scalar::lossy_from(1e-3f64),
             // ulps <= 10u8,
         )
     }
 
-    pub fn normalize(self) -> UnitVector<T, N> {
+    fn normalize(self) -> UnitVector<Self>
+    where
+        Self::Scalar: Float,
+    {
         UnitVector(self / self.norm())
     }
-}
 
-impl<T: Copy + Float, const N: usize> Vector<T, N> {
-    pub fn mul_add(self, b: T, c: Self) -> Self {
-        // Self(self.0.zip(c.0).map(|(a, c)| a.mul_add(b, c)))
-        self.zip(c).map(|(a, c)| a.mul_add(b, c))
+    fn mul_add(self, b: Self::Scalar, c: Self) -> Self
+    where
+        Self::Scalar: Float,
+    {
+        self * b + c
     }
+
+    fn x(self) -> Self::Scalar;
+    fn y(self) -> Self::Scalar;
+    fn from_xy(x: Self::Scalar, y: Self::Scalar) -> Self {
+        Self::ZERO.update_xy(x, y)
+    }
+    fn update_xy(self, x: Self::Scalar, y: Self::Scalar) -> Self;
+
+    /// unit vector at angle `theta` relative to the x axis in the xy plane.
+    fn angled_xy(theta: Self::Scalar) -> Self
+    where
+        Self::Scalar: Float,
+    {
+        let (sin, cos) = theta.sin_cos();
+        Self::from_xy(cos, sin)
+    }
+
+    fn rotate_xy(self, theta: Self::Scalar) -> Self
+    where
+        Self::Scalar: Float,
+    {
+        let (s, c) = theta.sin_cos();
+        let x = self.x();
+        let y = self.y();
+        self.update_xy(c * x - s * y, s * x + c * y)
+    }
+
+    fn rot_90_xy(self) -> Self
+    where
+        Self::Scalar: Neg<Output = Self::Scalar>,
+    {
+        let x = self.x();
+        let y = self.y();
+        self.update_xy(-y, x)
+    }
+
+    fn rot_180_xy(self) -> Self
+    where
+        Self::Scalar: Neg<Output = Self::Scalar>,
+    {
+        let x = self.x();
+        let y = self.y();
+        self.update_xy(-x, -y)
+    }
+
+    fn rot_90_ccw_xy(self) -> Self
+    where
+        Self::Scalar: Neg<Output = Self::Scalar>,
+    {
+        let x = self.x();
+        let y = self.y();
+        self.update_xy(y, -x)
+    }
+
+    // fn cos_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar where Self::Scalar: Div<Output=Self::Scalar> {
+    //     self.x() / hypotenuse
+    // }
+
+    fn sec_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar
+    where
+        Self::Scalar: Div<Output = Self::Scalar>,
+    {
+        hypotenuse / self.x()
+    }
+
+    fn sin_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar
+    where
+        Self::Scalar: Div<Output = Self::Scalar>,
+    {
+        self.y() / hypotenuse
+    }
+
+    // fn csc_xy(self, hypotenuse: Self::Scalar) -> Self::Scalar where Self::Scalar: Div<Output=Self::Scalar> {
+    //     hypotenuse / self.y()
+    // }
+
+    fn tan_xy(self) -> Self::Scalar
+    where
+        Self::Scalar: Div<Output = Self::Scalar>,
+    {
+        self.y() / self.x()
+    }
+
+    // fn cot_xy(self) -> Self::Scalar where Self::Scalar: Div<Output=Self::Scalar> {
+    //     self.x() / self.y()
+    // }
 }
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Deref, DerefMut, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct UnitVector<T, const N: usize>(pub Vector<T, N>);
+pub struct UnitVector<V>(pub V);
 
-impl<T: Copy + FloatExt, const N: usize> UnitVector<T, N> {
-    pub fn new(vector: Vector<T, N>) -> Self {
+impl<V> UnitVector<V> {
+    pub fn new<const DIM: usize>(vector: V) -> Self
+    where
+        V: Vector<DIM>,
+        <V as Vector<DIM>>::Scalar: Float + ConstOne + ApproxEq + LossyFrom<f64>,
+    {
         debug_assert!(vector.is_unit());
         Self(vector)
     }
 
-    pub fn try_new(vector: Vector<T, N>) -> Option<Self> {
+    pub fn try_new<const DIM: usize>(vector: V) -> Option<Self>
+    where
+        V: Vector<DIM>,
+        <V as Vector<DIM>>::Scalar: Float + ConstOne + ApproxEq + LossyFrom<f64>,
+    {
         if vector.is_unit() {
             Some(Self(vector))
         } else {
@@ -107,8 +174,90 @@ impl<T: Copy + FloatExt, const N: usize> UnitVector<T, N> {
     }
 }
 
-impl<T: Neg<Output = T>, const N: usize> Neg for Vector<T, N> {
-    type Output = Vector<T, N>;
+impl<V: Neg<Output = V>> Neg for UnitVector<V> {
+    type Output = UnitVector<V>;
+
+    fn neg(self) -> Self::Output {
+        Self(self.0.neg())
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, WrappedFrom, Deref, DerefMut)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+pub struct SimpleVector<T, const N: usize>(pub [T; N]);
+
+impl<T, const N: usize> SimpleVector<T, N> {
+    fn map<R, F: FnMut(T) -> R>(self, f: F) -> SimpleVector<R, N> {
+        let SimpleVector(array) = self;
+        SimpleVector(array.map(f))
+    }
+
+    fn zip<U>(self, other: SimpleVector<U, N>) -> SimpleVector<(T, U), N> {
+        let SimpleVector(lhs) = self;
+        let SimpleVector(rhs) = other;
+        SimpleVector(lhs.zip(rhs))
+    }
+}
+
+impl<L, R, const N: usize> SimpleVector<(L, R), N> {
+    fn map2<T, F: FnMut(L, R) -> T>(self, mut f: F) -> SimpleVector<T, N> {
+        let SimpleVector(array) = self;
+        SimpleVector(array.map(move |(l, r)| f(l, r)))
+    }
+}
+
+impl<T: ConstZero, const N: usize> ConstZero for SimpleVector<T, N> {
+    const ZERO: Self = SimpleVector([T::ZERO; N]);
+}
+
+impl<
+        T: 'static + Copy + core::fmt::Debug + core::cmp::PartialEq + Ring + Div<Output = T>,
+        const DIM: usize,
+    > Vector<DIM> for SimpleVector<T, DIM>
+{
+    type Scalar = T;
+
+    fn new(vector: [Self::Scalar; DIM]) -> Self {
+        SimpleVector(vector)
+    }
+
+    fn to_array(self) -> [Self::Scalar; DIM] {
+        self.0
+    }
+
+    fn hadamard_product(self, rhs: Self) -> Self {
+        self.zip(rhs).map2(Mul::mul)
+    }
+
+    fn reduce_sum(self) -> Self::Scalar {
+        self.0.iter().copied().fold(T::ZERO, Add::add)
+    }
+
+    fn mul_add(self, b: Self::Scalar, c: Self) -> Self
+    where
+        Self::Scalar: Float,
+    {
+        self.zip(c).map(|(a, c)| a.mul_add(b, c))
+    }
+
+    fn x(self) -> Self::Scalar {
+        self.0[0]
+    }
+
+    fn y(self) -> Self::Scalar {
+        self.0[1]
+    }
+
+    fn update_xy(mut self, x: Self::Scalar, y: Self::Scalar) -> Self {
+        self[0] = x;
+        self[1] = y;
+        self
+    }
+}
+
+impl<T: Neg<Output = T>, const N: usize> Neg for SimpleVector<T, N> {
+    type Output = SimpleVector<T, N>;
 
     fn neg(self) -> Self::Output {
         // Self(self.0.map(Neg::neg))
@@ -116,35 +265,26 @@ impl<T: Neg<Output = T>, const N: usize> Neg for Vector<T, N> {
     }
 }
 
-impl<T: Neg<Output = T>, const N: usize> Neg for UnitVector<T, N> {
-    type Output = UnitVector<T, N>;
+impl<T: Add<Output = T>, const N: usize> Add<SimpleVector<T, N>> for SimpleVector<T, N> {
+    type Output = SimpleVector<T, N>;
 
-    fn neg(self) -> Self::Output {
-        // Self(self.0.map(Neg::neg))
-        Self(self.0.map(Neg::neg))
-    }
-}
-
-impl<T: Add<Output = T>, const N: usize> Add<Vector<T, N>> for Vector<T, N> {
-    type Output = Vector<T, N>;
-
-    fn add(self, rhs: Vector<T, N>) -> Self::Output {
+    fn add(self, rhs: SimpleVector<T, N>) -> Self::Output {
         // Self(self.0.zip(rhs.0).map(|(l, r)| l + r))
         self.zip(rhs).map2(Add::add)
     }
 }
 
-impl<T: Sub<Output = T>, const N: usize> Sub<Vector<T, N>> for Vector<T, N> {
-    type Output = Vector<T, N>;
+impl<T: Sub<Output = T>, const N: usize> Sub<SimpleVector<T, N>> for SimpleVector<T, N> {
+    type Output = SimpleVector<T, N>;
 
-    fn sub(self, rhs: Vector<T, N>) -> Self::Output {
+    fn sub(self, rhs: SimpleVector<T, N>) -> Self::Output {
         // Self(self.0.zip(rhs.0).map(|(l, r)| l - r))
         self.zip(rhs).map2(Sub::sub)
     }
 }
 
-impl<T: Copy + Mul<Output = T>, const N: usize> Mul<T> for Vector<T, N> {
-    type Output = Vector<T, N>;
+impl<T: Copy + Mul<Output = T>, const N: usize> Mul<T> for SimpleVector<T, N> {
+    type Output = SimpleVector<T, N>;
 
     fn mul(self, rhs: T) -> Self::Output {
         // Self(self.0.map(|lhs| lhs * rhs))
@@ -152,8 +292,8 @@ impl<T: Copy + Mul<Output = T>, const N: usize> Mul<T> for Vector<T, N> {
     }
 }
 
-impl<T: Copy + Div<Output = T>, const N: usize> Div<T> for Vector<T, N> {
-    type Output = Vector<T, N>;
+impl<T: Copy + Div<Output = T>, const N: usize> Div<T> for SimpleVector<T, N> {
+    type Output = SimpleVector<T, N>;
 
     fn div(self, rhs: T) -> Self::Output {
         // Self(self.0.map(|lhs| lhs / rhs))
@@ -168,102 +308,22 @@ impl<T: Copy + Div<Output = T>, const N: usize> Div<T> for Vector<T, N> {
 //     b * (a.dot(b))
 // }
 
-pub fn oproj<T: Copy + Ring, const N: usize>(
-    a: Vector<T, N>,
-    UnitVector(b): UnitVector<T, N>,
-) -> Vector<T, N> {
+pub fn oproj<T: Copy + Ring, V: Vector<N, Scalar = T>, const N: usize>(
+    a: V,
+    UnitVector(b): UnitVector<V>,
+) -> V {
     a - b * (a.dot(b))
 }
 
 /// $\| a x b \|^2$
-pub fn cross_prod_magnitude_sq<T: Copy + Ring, const N: usize>(
-    a: Vector<T, N>,
-    UnitVector(b): UnitVector<T, N>,
+pub fn cross_prod_magnitude_sq<T: Copy + Ring, V: Vector<N, Scalar = T>, const N: usize>(
+    a: V,
+    UnitVector(b): UnitVector<V>,
 ) -> T {
     a.norm_squared() - T::sqr(a.dot(b))
 }
 
-// Temp for back compat
-impl<T: FloatExt, const N: usize> Vector<T, N> {
-    pub(crate) fn x(self) -> T {
-        self.0[0]
-    }
-
-    pub(crate) fn y(self) -> T {
-        self.0[1]
-    }
-
-    // fn z(self) -> T {
-    //     self.0[2]
-    // }
-
-    pub fn from_xy(x: T, y: T) -> Self {
-        let mut v = Self::ZERO;
-        v[0] = x;
-        v[1] = y;
-        v
-    }
-
-    /// unit vector at angle `theta` relative to the x axis in the xy plane.
-    pub fn angled_xy(theta: T) -> Self {
-        let (sin, cos) = theta.sin_cos();
-        Self::from_xy(cos, sin)
-    }
-
-    pub(crate) fn rotate_xy(mut self, theta: T) -> Self {
-        let (s, c) = theta.sin_cos();
-        let x = self[0];
-        let y = self[1];
-        self[0] = c * x - s * y;
-        self[1] = s * x + c * y;
-        self
-    }
-
-    pub(crate) fn rot_90_xy(mut self) -> Self {
-        let x = self[0];
-        let y = self[1];
-        self[0] = -y;
-        self[1] = x;
-        self
-    }
-
-    pub(crate) fn rot_180_xy(mut self) -> Self {
-        let x = self[0];
-        let y = self[1];
-        self[0] = -x;
-        self[1] = -y;
-        self
-    }
-
-    pub(crate) fn rot_90_ccw_xy(mut self) -> Self {
-        let x = self[0];
-        let y = self[1];
-        self[0] = y;
-        self[1] = -x;
-        self
-    }
-
-    // pub(crate) fn cos_xy(self, hypotenuse: T) -> T {
-    //     self.x() / hypotenuse
-    // }
-
-    pub(crate) fn sec_xy(self, hypotenuse: T) -> T {
-        hypotenuse / self.x()
-    }
-
-    pub(crate) fn sin_xy(self, hypotenuse: T) -> T {
-        self.y() / hypotenuse
-    }
-
-    // pub(crate) fn csc_xy(self, hypotenuse: T) -> T {
-    //     hypotenuse / self.y()
-    // }
-
-    pub(crate) fn tan_xy(self) -> T {
-        self.y() / self.x()
-    }
-
-    // pub(crate) fn cot_xy(self) -> T {
-    //     self.x() / self.y()
-    // }
+unsafe impl<T: rustacuda_core::DeviceCopy, const N: usize> rustacuda_core::DeviceCopy
+    for SimpleVector<T, N>
+{
 }

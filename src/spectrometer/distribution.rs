@@ -2,9 +2,8 @@ use core::{marker::PhantomData, ops::*};
 
 use crate::FloatExt;
 
-pub trait Distribution<T> {
-    type Output;
-    fn inverse_cdf(&self, p: T) -> Self::Output;
+pub trait Distribution<T, Output = T> {
+    fn inverse_cdf(&self, p: T) -> Output;
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
@@ -14,8 +13,7 @@ pub struct DiracDeltaDistribution<T> {
 }
 
 impl<T: Copy> Distribution<T> for DiracDeltaDistribution<T> {
-    type Output = T;
-    fn inverse_cdf(&self, _p: T) -> Self::Output {
+    fn inverse_cdf(&self, _p: T) -> T {
         self.value
     }
 }
@@ -30,9 +28,7 @@ impl<T> Distribution<T> for UniformDistribution<T>
 where
     T: Sized + Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
 {
-    type Output = T;
-
-    fn inverse_cdf(&self, p: T) -> Self::Output {
+    fn inverse_cdf(&self, p: T) -> T {
         self.bounds.0 + (self.bounds.1 - self.bounds.0) * p
     }
 }
@@ -45,9 +41,7 @@ pub struct NormalDistribution<T> {
 }
 
 impl<F: FloatExt> Distribution<F> for NormalDistribution<F> {
-    type Output = F;
-
-    fn inverse_cdf(&self, p: F) -> Self::Output {
+    fn inverse_cdf(&self, p: F) -> F {
         self.mean + self.stddev * super::erf::fast_norminv(p)
     }
 }
@@ -59,9 +53,7 @@ pub struct UniformDiscDistribution<T> {
 }
 
 impl<F: FloatExt> Distribution<[F; 2]> for UniformDiscDistribution<F> {
-    type Output = [F; 2];
-
-    fn inverse_cdf(&self, p: [F; 2]) -> Self::Output {
+    fn inverse_cdf(&self, p: [F; 2]) -> [F; 2] {
         let [p_r, p_theta] = p;
         let (s, c) = (p_theta * F::lossy_from(core::f64::consts::TAU)).sin_cos();
         let r = self.radius * p_r.sqrt();
@@ -76,9 +68,7 @@ pub struct UserDistribution<T, F: Fn(T) -> T> {
 }
 
 impl<T, F: Fn(T) -> T> Distribution<T> for UserDistribution<T, F> {
-    type Output = T;
-
-    fn inverse_cdf(&self, p: T) -> Self::Output {
+    fn inverse_cdf(&self, p: T) -> T {
         (self.quantile)(p)
     }
 }

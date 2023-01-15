@@ -1,5 +1,5 @@
 #![allow(clippy::just_underscores_and_digits)]
-use crate::{FloatExt, Vector};
+use crate::{FloatExt, SimpleVector, Vector};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Point<T> {
@@ -7,17 +7,32 @@ pub struct Point<T> {
     pub y: T,
 }
 
-impl<T> From<Vector<T, 2>> for Point<T> {
-    fn from(v: Vector<T, 2>) -> Self {
-        let Vector([x, y]) = v;
-        Self { x, y }
+// impl<V: Vector<N>, const N: usize> From<V> for Point<V::Scalar> {
+//     fn from(v: V) -> Self {
+//         Self { x: v.x(), y: v.y() }
+//     }
+// }
+
+impl<V: Vector<2>> From<V> for Point<V::Scalar> {
+    fn from(v: V) -> Self {
+        Self { x: v.x(), y: v.y() }
     }
 }
 
-impl<T> From<Point<T>> for Vector<T, 2> {
+// impl<V: Vector<2>> From<Point<V::Scalar>> for V {
+//     fn from(p: Point<V::Scalar>) -> Self {
+//         let Point { x, y } = p;
+//         V::from_xy(x, y)
+//     }
+// }
+
+impl<T, const N: usize> From<Point<T>> for SimpleVector<T, N>
+where
+    SimpleVector<T, N>: Vector<N, Scalar = T>,
+{
     fn from(p: Point<T>) -> Self {
         let Point { x, y } = p;
-        Vector([x, y])
+        Vector::from_xy(x, y)
     }
 }
 
@@ -101,7 +116,7 @@ impl<T: Copy> Path<T> {
     // }
 }
 
-pub fn arc_as_cubic_bézier<T: FloatExt>(
+pub fn arc_as_cubic_bézier<T: FloatExt, V: Vector<2, Scalar = T> + From<Point<T>>>(
     a: Point<T>,
     midpt: Point<T>,
     b: Point<T>,
@@ -113,16 +128,16 @@ pub fn arc_as_cubic_bézier<T: FloatExt>(
     let _4 = T::lossy_from(4_u32);
     let _6 = T::lossy_from(6_u32);
     let k = curvature;
-    let delta = Vector::from(b) - Vector::from(a);
+    let delta = V::from(b) - V::from(a);
     let chord_len = delta.norm();
-    let chord_midpt = delta.mul_add(frac_1_2, Vector::from(a));
-    let sagita_v = Vector::from(midpt) - chord_midpt;
+    let chord_midpt = delta.mul_add(frac_1_2, V::from(a));
+    let sagita_v = V::from(midpt) - chord_midpt;
     let sagita = sagita_v.norm();
     let sagita_v = sagita_v / sagita;
     let exsec_len = k * chord_len.sqr() / (_2 * T::sqrt(_4 - (k * chord_len).sqr())) - sagita;
     let tan_pt = sagita_v.mul_add(exsec_len, midpt.into());
-    let tan_a = (tan_pt - Vector::from(a)).normalize();
-    let tan_b = (tan_pt - Vector::from(b)).normalize();
+    let tan_a = (tan_pt - V::from(a)).normalize();
+    let tan_b = (tan_pt - V::from(b)).normalize();
     // let alpha = k * chord_len * T::sqrt(_4 - (k * chord_len).sqr()) * ( T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE ) / _6;
     let alpha = chord_len
         * T::sqrt(_4 - (k * chord_len).sqr())
@@ -133,7 +148,7 @@ pub fn arc_as_cubic_bézier<T: FloatExt>(
     [a, Point::from(c0), Point::from(c1), b]
 }
 
-pub fn arc_as_2_cubic_béziers<T: FloatExt>(
+pub fn arc_as_2_cubic_béziers<T: FloatExt, V: Vector<2, Scalar = T> + From<Point<T>>>(
     a: Point<T>,
     midpt: Point<T>,
     b: Point<T>,
@@ -146,16 +161,16 @@ pub fn arc_as_2_cubic_béziers<T: FloatExt>(
     let _6 = T::lossy_from(6_u32);
     let _12 = T::lossy_from(12_u32);
     let k = curvature;
-    let delta = Vector::from(b) - Vector::from(a);
+    let delta = V::from(b) - V::from(a);
     let chord_len = delta.norm();
-    let chord_midpt = delta.mul_add(frac_1_2, Vector::from(a));
-    let sagita_v = Vector::from(midpt) - chord_midpt;
+    let chord_midpt = delta.mul_add(frac_1_2, V::from(a));
+    let sagita_v = V::from(midpt) - chord_midpt;
     let sagita = sagita_v.norm();
     let sagita_v = sagita_v / sagita;
     let exsec_len = k * chord_len.sqr() / (_2 * T::sqrt(_4 - (k * chord_len).sqr())) - sagita;
     let tan_pt = sagita_v.mul_add(exsec_len, midpt.into());
-    let tan_a = (tan_pt - Vector::from(a)).normalize();
-    let tan_b = (tan_pt - Vector::from(b)).normalize();
+    let tan_a = (tan_pt - V::from(a)).normalize();
+    let tan_b = (tan_pt - V::from(b)).normalize();
     // let alpha = k * chord_len * T::sqrt(_4 - (k * chord_len).sqr()) * ( T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE ) / _6;
     // let alpha = chord_len * T::sqrt(_4 - (k * chord_len).sqr()) * ( T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE ) / _6;
     let alpha = chord_len

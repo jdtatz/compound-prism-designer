@@ -23,19 +23,23 @@ extern crate derive_wrapped_from;
 mod cuda_fitness;
 #[cfg(feature = "std")]
 mod fitness;
+mod kernel;
 #[cfg(feature = "pyext")]
 mod pylib;
 mod spectrometer;
-mod kernel;
 
-pub use crate::spectrometer::*;
 #[cfg(feature = "cuda")]
 pub use crate::cuda_fitness::*;
 #[cfg(feature = "std")]
 pub use crate::fitness::*;
+pub use crate::spectrometer::*;
 
 #[cfg(feature = "std")]
-pub trait SpectrometerFitness<const D: usize>: GenericSpectrometer<D> where <Self as GenericSpectrometer<D>>::Scalar: FloatExt {
+pub trait SpectrometerFitness<V: Vector<DIM, Scalar = Self::Scalar>, const DIM: usize>:
+    GenericSpectrometer<V, DIM>
+where
+    <Self as GenericSpectrometer<V, DIM>>::Scalar: FloatExt,
+{
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<Self::Scalar>;
 
     #[cfg(feature = "cuda")]
@@ -48,12 +52,22 @@ pub trait SpectrometerFitness<const D: usize>: GenericSpectrometer<D> where <Sel
     ) -> rustacuda::error::CudaResult<Option<DesignFitness<Self::Scalar>>>;
 
     fn p_dets_l_wavelength(&self, wavelength: Self::Scalar, max_n: usize) -> Vec<Self::Scalar>;
-    fn propagation_path(&self, ray: Ray<Self::Scalar, D>, wavelength: Self::Scalar) -> Vec<GeometricRay<Self::Scalar, D>>;
+    fn propagation_path(
+        &self,
+        ray: Ray<V, DIM>,
+        wavelength: Self::Scalar,
+    ) -> Vec<GeometricRay<V, DIM>>;
 }
 
 #[cfg(feature = "std")]
 #[cfg(not(feature = "cuda"))]
-impl<F: FloatExt, S: GenericSpectrometer<D, Scalar = F>, const D: usize> SpectrometerFitness<D> for S {
+impl<
+        F: FloatExt,
+        V: Vector<D, Scalar = F>,
+        S: GenericSpectrometer<V, D, Scalar = F>,
+        const D: usize,
+    > SpectrometerFitness<V, D> for S
+{
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<F> {
         crate::fitness::fitness(self, max_n, max_m)
     }
@@ -62,7 +76,7 @@ impl<F: FloatExt, S: GenericSpectrometer<D, Scalar = F>, const D: usize> Spectro
         crate::fitness::p_dets_l_wavelength(self, wavelength, max_n).collect()
     }
 
-    fn propagation_path(&self, ray: Ray<F, D>, wavelength: F) -> Vec<GeometricRay<F, D>> {
+    fn propagation_path(&self, ray: Ray<V, D>, wavelength: F) -> Vec<GeometricRay<V, D>> {
         self.propagation_path(ray, wavelength).collect()
     }
 }
@@ -71,9 +85,10 @@ impl<F: FloatExt, S: GenericSpectrometer<D, Scalar = F>, const D: usize> Spectro
 #[cfg(feature = "cuda")]
 impl<
         T: FloatExt + rustacuda::memory::DeviceCopy,
-        S: ?Sized + Kernel<D, Scalar=T>,
+        V: Vector<D, Scalar = T>,
+        S: ?Sized + Kernel<V, D, Scalar = T>,
         const D: usize,
-    > SpectrometerFitness<D> for S
+    > SpectrometerFitness<V, D> for S
 {
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<T> {
         crate::fitness::fitness(self, max_n, max_m)
@@ -93,7 +108,7 @@ impl<
         crate::fitness::p_dets_l_wavelength(self, wavelength, max_n).collect()
     }
 
-    fn propagation_path(&self, ray: Ray<T, D>, wavelength: T) -> Vec<GeometricRay<T, D>> {
+    fn propagation_path(&self, ray: Ray<V, D>, wavelength: T) -> Vec<GeometricRay<V, D>> {
         self.propagation_path(ray, wavelength).collect()
     }
 }

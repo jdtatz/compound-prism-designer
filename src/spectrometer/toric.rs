@@ -14,18 +14,21 @@ fn cube<T: Copy + core::ops::Mul<T, Output = T>>(v: T) -> T {
 /// toroidal direction is spherical
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct ToricSurface<T> {
-    center: Vector<T, 3>,
-    toroidal_normal: UnitVector<T, 3>,
-    toroidal_radius: T,
-    poloidal_radius: T,
+pub struct ToricSurface<V: Vector<3>> {
+    center: V,
+    toroidal_normal: UnitVector<V>,
+    toroidal_radius: V::Scalar,
+    poloidal_radius: V::Scalar,
 }
 
-impl<T: Copy + Ring + LossyFrom<u32>> ToricSurface<T> {
-    pub fn implicit(self, p: Vector<T, 3>) -> T {
+impl<V: Vector<3>> ToricSurface<V>
+where
+    <V as Vector<3>>::Scalar: Copy + Ring + LossyFrom<u32>,
+{
+    pub fn implicit(self, p: V) -> V::Scalar {
         let u = p - self.center;
         sqr(u.norm_squared() + self.toroidal_radius.sqr() - self.poloidal_radius.sqr())
-            - T::lossy_from(4u32)
+            - V::Scalar::lossy_from(4u32)
                 * self.toroidal_radius.sqr()
                 * super::vector::cross_prod_magnitude_sq(u, self.toroidal_normal)
     }
@@ -134,7 +137,9 @@ fn sympy_soln<F: FloatExt>(r_2: F, R_2: F, dp_magn_sq: F, dp_v: F, dp_n: F, n_v:
     [r0, r1, r2, r3]
 }
 
-impl<T: FloatExt, B: Copy + Bounds<T, 3>> HyperSurface<T, B, 3> for ToricSurface<T> {
+impl<T: FloatExt, V: Vector<3, Scalar = T>, B: Copy + Bounds<V, 3>> HyperSurface<V, B, 3>
+    for ToricSurface<V>
+{
     // $Assumptions =
     //  t \[Element] Reals && (p | c | n | v | u | dp) \[Element]
     //    Vectors[3, Reals] && n . n == 1 && v . v == 1
@@ -148,9 +153,9 @@ impl<T: FloatExt, B: Copy + Bounds<T, 3>> HyperSurface<T, B, 3> for ToricSurface
     #[inline(always)]
     fn intersection(
         self,
-        ray: GeometricRay<T, 3>,
+        ray: GeometricRay<V, 3>,
         bounds: B,
-    ) -> Option<GeometricRayIntersection<T, 3>> {
+    ) -> Option<GeometricRayIntersection<T, V>> {
         let GeometricRay { origin, direction } = ray;
         let dp = origin - self.center;
         let dp_magn_sq = dp.norm_squared();
@@ -227,8 +232,8 @@ impl<T: FloatExt, B: Copy + Bounds<T, 3>> HyperSurface<T, B, 3> for ToricSurface
     }
 }
 
-pub type ToricLens<T, const D: usize> =
-    BoundedHyperSurface<T, ToricSurface<T>, SandwichBounds<T, D>, D>;
+pub type ToricLens<V, const DIM: usize> =
+    BoundedHyperSurface<V, ToricSurface<V>, SandwichBounds<<V as Vector<DIM>>::Scalar, V>, DIM>;
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
@@ -239,13 +244,10 @@ pub struct ToricLensParametrization<T> {
     pub width: T,
 }
 
-impl<T: FloatExt> FromParametrizedHyperPlane<T, 3> for ToricLens<T, 3> {
+impl<T: FloatExt, V: Vector<3, Scalar = T>> FromParametrizedHyperPlane<V, 3> for ToricLens<V, 3> {
     type Parametrization = ToricLensParametrization<T>;
 
-    fn from_hyperplane(
-        hyperplane: HyperPlane<T, 3>,
-        parametrization: Self::Parametrization,
-    ) -> Self {
+    fn from_hyperplane(hyperplane: HyperPlane<V>, parametrization: Self::Parametrization) -> Self {
         let ToricLensParametrization {
             signed_normalized_poloidal_curvature,
             normalized_toroidal_curvature,
@@ -285,7 +287,7 @@ impl<T: FloatExt> FromParametrizedHyperPlane<T, 3> for ToricLens<T, 3> {
     }
 }
 
-impl<T: FloatExt, const D: usize> Drawable<T> for ToricLens<T, D> {
+impl<T: FloatExt, V: Vector<3, Scalar = T>> Drawable<T> for ToricLens<V, 3> {
     fn draw(&self) -> Path<T> {
         let half_height = self.bounds.center.y();
         let dx = self.bounds.normal.tan_xy() * half_height;

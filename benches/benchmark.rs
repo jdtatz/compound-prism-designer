@@ -93,7 +93,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let [first_length, lengths @ ..] = lengths;
     let height = 2.5;
     let width = 2.0;
-    let prism: CompoundPrism<_, Plane<_, 2>, _, CurvedPlane<_, 2>, _, 2> = CompoundPrism::new(
+    let prism: CompoundPrism<_, Plane<_, 2>, _, CurvedPlane<_, 2>, _> = CompoundPrism::new(
         glass0,
         glasses,
         first_angle,
@@ -144,7 +144,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         compound_prism: prism,
         detector: detarr,
     };
-    let spec: &Spectrometer<_, _, _, _, _, _, [_], 2> = &spec;
+    let spec: &Spectrometer<_, _, _, _, _, _, _, [_]> = &spec;
     let cpu_fitness = fitness(spec, 16_384, 16_384);
     #[cfg(feature = "cuda")]
     let gpu_fitness = cuda_fitness(spec, &[0.798713], 256, 2, 16_384)

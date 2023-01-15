@@ -45,7 +45,12 @@ pub struct DesignFitness<F> {
 ///
 /// # Arguments
 ///  * `wavelength` - given wavelength
-pub fn p_dets_l_wavelength<F: FloatExt, S: ?Sized + GenericSpectrometer<D, Scalar=F>, const D: usize>(
+pub fn p_dets_l_wavelength<
+    F: FloatExt,
+    V: Vector<D, Scalar = F>,
+    S: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    const D: usize,
+>(
     spectrometer: &S,
     wavelength: F,
     max_n: usize,
@@ -71,7 +76,12 @@ pub fn p_dets_l_wavelength<F: FloatExt, S: ?Sized + GenericSpectrometer<D, Scala
 /// p(Λ=λ) = 1 / (wmax - wmin) * step(wmin <= λ <= wmax)
 /// H(Λ) is ill-defined because Λ is continuous, but I(Λ; D) is still well-defined for continuous variables.
 /// https://en.wikipedia.org/wiki/Differential_entropy#Definition
-pub fn mutual_information<F: FloatExt, S: ?Sized + GenericSpectrometer<D, Scalar=F>, const D: usize>(
+pub fn mutual_information<
+    F: FloatExt,
+    V: Vector<D, Scalar = F>,
+    S: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    const D: usize,
+>(
     spectrometer: &S,
     max_n: usize,
     max_m: usize,
@@ -117,7 +127,12 @@ pub fn mutual_information<F: FloatExt, S: ?Sized + GenericSpectrometer<D, Scalar
 /// * size = the distance from the mean starting position of the beam to the center of detector array
 /// * info = I(Λ; D)
 /// * deviation = sin(abs(angle of deviation))
-pub fn fitness<F: FloatExt, S: ?Sized + GenericSpectrometer<D, Scalar=F>, const D: usize>(
+pub fn fitness<
+    F: FloatExt,
+    V: Vector<D, Scalar = F>,
+    S: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    const D: usize,
+>(
     spectrometer: &S,
     max_n: usize,
     max_m: usize,
@@ -180,7 +195,7 @@ mod tests {
         let [first_length, lengths @ ..] = lengths;
         let height = 2.5;
         let width = 2.0;
-        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_, 2>, _, 2>::new(
+        let prism = CompoundPrism::<f64, Plane<_, 2>, _, CurvedPlane<_, 2>, _>::new(
             glass0,
             glasses,
             first_angle,
@@ -210,7 +225,7 @@ mod tests {
         let pmt_length = 3.2;
         let spec_max_accepted_angle = (60_f64).to_radians();
         let det_angle = 0.0;
-        let (det_pos, det_flipped) =
+        let (det_pos, det_flipped): (SimpleVector<_, 2>, bool) =
             detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
                 .expect("This is a valid spectrometer design.");
         let detarr = LinearDetectorArray::new(

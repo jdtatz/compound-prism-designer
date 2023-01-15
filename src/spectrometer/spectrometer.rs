@@ -6,10 +6,10 @@ use super::{distribution::Distribution, UnitVector, Vector};
 use super::{distribution::UniformDiscDistribution, erf::norminv};
 use crate::{CompoundPrism, DetectorArray, Ray, RayTraceError};
 
-pub trait Beam<T, const D: usize>: Distribution<Self::Quasi, Output = Ray<T, D>> {
-    type Quasi: QuasiRandom<Scalar = T>;
+pub trait Beam<V: Vector<DIM>, const DIM: usize>: Distribution<Self::Quasi, Ray<V, DIM>> {
+    type Quasi: QuasiRandom<Scalar = V::Scalar>;
 
-    fn median_y(&self) -> T;
+    fn median_y(&self) -> V::Scalar;
 }
 
 /// Collimated Polychromatic Gaussian Beam
@@ -22,26 +22,22 @@ pub struct GaussianBeam<F> {
     pub y_mean: F,
 }
 
-impl<T: FloatExt> Distribution<T> for GaussianBeam<T> {
-    type Output = Ray<T, 2>;
-
-    fn inverse_cdf(&self, p: T) -> Self::Output {
+impl<T: FloatExt, V: Vector<2, Scalar = T>> Distribution<T, Ray<V, 2>> for GaussianBeam<T> {
+    fn inverse_cdf(&self, p: T) -> Ray<V, 2> {
         Ray::new_from_start(self.y_mean - self.width * norminv(p))
     }
 }
 
-impl<T: FloatExt> Distribution<[T; 2]> for GaussianBeam<T> {
-    type Output = Ray<T, 3>;
-
-    fn inverse_cdf(&self, p: [T; 2]) -> Self::Output {
+impl<T: FloatExt, V: Vector<3, Scalar = T>> Distribution<[T; 2], Ray<V, 3>> for GaussianBeam<T> {
+    fn inverse_cdf(&self, p: [T; 2]) -> Ray<V, 3> {
         let [pr, pth] = p;
         let r = self.width * norminv(pr);
         let theta = pth * T::lossy_from(core::f64::consts::TAU);
         let (s, c) = theta.sin_cos();
         let y = self.y_mean + r * s;
         let z = r * c;
-        let origin = Vector([T::ZERO, y, z]);
-        let direction = UnitVector(Vector([T::ONE, T::ZERO, T::ZERO]));
+        let origin = V::new([T::ZERO, y, z]);
+        let direction = UnitVector(V::new([T::ONE, T::ZERO, T::ZERO]));
         Ray::new_unpolarized(origin, direction)
     }
 }
@@ -54,7 +50,7 @@ impl<T: FloatExt> Distribution<[T; 2]> for GaussianBeam<T> {
 //     }
 // }
 
-impl<T: FloatExt> Beam<T, 2> for GaussianBeam<T> {
+impl<T: FloatExt, V: Vector<2, Scalar = T>> Beam<V, 2> for GaussianBeam<T> {
     type Quasi = T;
 
     fn median_y(&self) -> T {
@@ -62,7 +58,7 @@ impl<T: FloatExt> Beam<T, 2> for GaussianBeam<T> {
     }
 }
 
-impl<T: FloatExt> Beam<T, 3> for GaussianBeam<T> {
+impl<T: FloatExt, V: Vector<3, Scalar = T>> Beam<V, 3> for GaussianBeam<T> {
     type Quasi = [T; 2];
 
     fn median_y(&self) -> T {
@@ -97,10 +93,8 @@ impl<T: FloatExt> FiberBeam<T> {
     }
 }
 
-impl<T: FloatExt> Distribution<[T; 3]> for FiberBeam<T> {
-    type Output = Ray<T, 2>;
-
-    fn inverse_cdf(&self, p: [T; 3]) -> Ray<T, 2> {
+impl<T: FloatExt, V: Vector<2, Scalar = T>> Distribution<[T; 3], Ray<V, 2>> for FiberBeam<T> {
+    fn inverse_cdf(&self, p: [T; 3]) -> Ray<V, 2> {
         // let [p_y, p_defl, p_rot] = p;
         // let u_y = T::lossy_from(2u32) * p_y - T::ONE;
         unimplemented!(
@@ -110,23 +104,21 @@ impl<T: FloatExt> Distribution<[T; 3]> for FiberBeam<T> {
     }
 }
 
-impl<T: FloatExt> Distribution<[T; 4]> for FiberBeam<T> {
-    type Output = Ray<T, 3>;
-
-    fn inverse_cdf(&self, p: [T; 4]) -> Ray<T, 3> {
+impl<T: FloatExt, V: Vector<3, Scalar = T>> Distribution<[T; 4], Ray<V, 3>> for FiberBeam<T> {
+    fn inverse_cdf(&self, p: [T; 4]) -> Ray<V, 3> {
         let [p_rho, p_theta, p_defl, p_rot] = p;
         let [y, z] = UniformDiscDistribution {
             radius: self.radius,
         }
         .inverse_cdf([p_rho, p_theta]);
-        let origin = Vector([T::ZERO, y + self.center_y, z]);
+        let origin = V::new([T::ZERO, y + self.center_y, z]);
         // let ux = UniformDistribution { bounds: (self.min_cos, T::ONE) }.inverse_cdf(p_defl);
         let ux = self.min_cos + p_defl * (T::ONE - self.min_cos);
         let s_ux = (T::ONE - ux.sqr()).sqrt();
         let (s, c) = (p_rot * T::lossy_from(core::f64::consts::TAU)).sin_cos();
         let uy = s_ux * c;
         let uz = s_ux * s;
-        let direction = UnitVector::new(Vector([ux, uy, uz]));
+        let direction = UnitVector::new(V::new([ux, uy, uz]));
         Ray::new_unpolarized(origin, direction)
     }
 }
@@ -139,7 +131,7 @@ impl<T: FloatExt> Distribution<[T; 4]> for FiberBeam<T> {
 //     }
 // }
 
-impl<T: FloatExt> Beam<T, 2> for FiberBeam<T> {
+impl<T: FloatExt, V: Vector<2, Scalar = T>> Beam<V, 2> for FiberBeam<T> {
     type Quasi = [T; 3];
 
     fn median_y(&self) -> T {
@@ -147,7 +139,7 @@ impl<T: FloatExt> Beam<T, 2> for FiberBeam<T> {
     }
 }
 
-impl<T: FloatExt> Beam<T, 3> for FiberBeam<T> {
+impl<T: FloatExt, V: Vector<3, Scalar = T>> Beam<V, 3> for FiberBeam<T> {
     type Quasi = [T; 4];
 
     fn median_y(&self) -> T {
@@ -162,7 +154,7 @@ impl<T: FloatExt> Beam<T, 3> for FiberBeam<T> {
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct LinearDetectorArray<T, const D: usize> {
+pub struct LinearDetectorArray<T, V> {
     /// The number of bins in the array
     #[wrapped_from(skip)]
     bin_count: u32,
@@ -177,17 +169,17 @@ pub struct LinearDetectorArray<T, const D: usize> {
     /// CCW angle of the array from normal = Rot(θ) @ (0, 1)
     angle: T,
     /// The normal of the array's surface, normal = Rot(θ) @ (-1, 0)
-    normal: UnitVector<T, D>,
+    normal: UnitVector<V>,
     /// Length of the array
     length: T,
     /// Position vector of array
-    pub position: Vector<T, D>,
+    pub position: V,
     /// Unit direction vector of array
-    pub direction: UnitVector<T, D>,
+    pub direction: UnitVector<V>,
 }
 
-impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
-    pub fn new(
+impl<T: FloatExt, V> LinearDetectorArray<T, V> {
+    pub fn new<const DIM: usize>(
         bin_count: u32,
         bin_size: T,
         linear_slope: T,
@@ -195,14 +187,17 @@ impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
         min_ci: T,
         angle: T,
         length: T,
-        position: Vector<T, D>,
+        position: V,
         flipped: bool,
-    ) -> Self {
+    ) -> Self
+    where
+        V: Vector<DIM, Scalar = T>,
+    {
         debug_assert!(bin_count > 0);
         debug_assert!(bin_size > T::zero());
         debug_assert!(linear_slope > T::zero());
         debug_assert!(linear_intercept >= T::zero());
-        let normal = UnitVector::new(Vector::angled_xy(angle).rot_180_xy());
+        let normal = UnitVector::new(V::angled_xy(angle).rot_180_xy());
         let direction = if flipped {
             UnitVector::new(normal.rot_90_xy())
         } else {
@@ -242,7 +237,10 @@ impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
     }
 
     #[cfg(not(target_arch = "nvptx64"))]
-    pub fn end_points(&self) -> (Vector<T, D>, Vector<T, D>) {
+    pub fn end_points<const DIM: usize>(&self) -> (V, V)
+    where
+        V: Vector<DIM, Scalar = T>,
+    {
         (
             self.position,
             self.direction.mul_add(self.length, self.position),
@@ -255,13 +253,15 @@ impl<T: FloatExt, const D: usize> LinearDetectorArray<T, D> {
 // #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
 // pub struct DetectorArrayPositioning<T, const D: usize> {
 //     /// Position vector of array
-//     pub position: Vector<T, D>,
+//     pub position: V,
 //     /// Unit direction vector of array
-//     pub direction: UnitVector<T, D>,
+//     pub direction: UnitV,
 // }
 
-impl<T: FloatExt, const D: usize> Surface<T, D> for LinearDetectorArray<T, D> {
-    fn intersection(self, ray: GeometricRay<T, D>) -> Option<GeometricRayIntersection<T, D>> {
+impl<T: FloatExt, V: Vector<D, Scalar = T>, const D: usize> Surface<V, D>
+    for LinearDetectorArray<T, V>
+{
+    fn intersection(self, ray: GeometricRay<V, D>) -> Option<GeometricRayIntersection<T, V>> {
         let ci = -ray.direction.dot(*self.normal);
         if ci <= self.min_ci {
             // RayTraceError::SpectrometerAngularResponseTooWeak
@@ -276,7 +276,9 @@ impl<T: FloatExt, const D: usize> Surface<T, D> for LinearDetectorArray<T, D> {
     }
 }
 
-impl<T: FloatExt, const D: usize> DetectorArray<T, D> for LinearDetectorArray<T, D> {
+impl<T: FloatExt, V: Vector<D, Scalar = T>, const D: usize> DetectorArray<V, D>
+    for LinearDetectorArray<T, V>
+{
     fn bin_count(&self) -> u32 {
         self.bin_count
     }
@@ -285,7 +287,7 @@ impl<T: FloatExt, const D: usize> DetectorArray<T, D> for LinearDetectorArray<T,
         self.length
     }
 
-    fn bin_index(&self, intersection: Vector<T, D>) -> Option<u32> {
+    fn bin_index(&self, intersection: V) -> Option<u32> {
         let pos = (intersection - self.position).dot(*self.direction);
         if pos < T::zero() || self.length < pos {
             return None;
@@ -299,7 +301,7 @@ impl<T: FloatExt, const D: usize> DetectorArray<T, D> for LinearDetectorArray<T,
         }
     }
 
-    fn mid_pt(&self) -> Vector<T, D> {
+    fn mid_pt(&self) -> V {
         self.direction
             .mul_add(self.length * T::lossy_from(0.5_f64), self.position)
     }
@@ -318,21 +320,22 @@ impl<T: FloatExt, const D: usize> DetectorArray<T, D> for LinearDetectorArray<T,
 ///  * `beam` - input gaussian beam specification
 pub fn detector_array_positioning<
     T: FloatExt,
-    W: Distribution<T, Output = T>,
-    B: Beam<T, D>,
-    S0: Copy + Surface<T, D>,
-    SI: Copy + Surface<T, D>,
-    SN: Copy + Surface<T, D>,
+    V: Vector<D, Scalar = T>,
+    W: Distribution<T>,
+    B: Beam<V, D>,
+    S0: Copy + Surface<V, D>,
+    SI: Copy + Surface<V, D>,
+    SN: Copy + Surface<V, D>,
     L: Array<Item = PrismSurface<T, SI>>,
     const D: usize,
 >(
-    cmpnd: CompoundPrism<T, S0, SI, SN, L, D>,
+    cmpnd: CompoundPrism<T, S0, SI, SN, L>,
     detector_array_length: T,
     detector_array_angle: T,
     wavelengths: W,
     beam: &B,
     acceptance: T,
-) -> Result<(Vector<T, D>, bool), RayTraceError> {
+) -> Result<(V, bool), RayTraceError> {
     let ray = Ray::new_from_start(beam.median_y());
     debug_assert!(acceptance > T::zero());
     debug_assert!(acceptance <= T::one());
@@ -362,62 +365,58 @@ pub fn detector_array_positioning<
     .ok_or(RayTraceError::NoSurfaceIntersection)
 }
 
-pub trait GenericSpectrometer<const D: usize> {
+pub trait GenericSpectrometer<V: Vector<DIM, Scalar = Self::Scalar>, const DIM: usize> {
     type Scalar;
     type Q: QuasiRandom<Scalar = Self::Scalar>;
-    type PropagationPathIter<'p>: 'p + Iterator<Item = GeometricRay<Self::Scalar, D>>
+    type PropagationPathIter<'p>: 'p + Iterator<Item = GeometricRay<V, DIM>>
     where
         Self: 'p;
     fn sample_wavelength(&self, p: Self::Scalar) -> Self::Scalar;
-    fn sample_ray(&self, q: Self::Q) -> Ray<Self::Scalar, D>;
+    fn sample_ray(&self, q: Self::Q) -> Ray<V, DIM>;
     fn detector_bin_count(&self) -> u32;
-    fn propagate(&self, ray: Ray<Self::Scalar, D>, wavelength: Self::Scalar) -> Result<(u32, Self::Scalar), RayTraceError>;
+    fn propagate(
+        &self,
+        ray: Ray<V, DIM>,
+        wavelength: Self::Scalar,
+    ) -> Result<(u32, Self::Scalar), RayTraceError>;
     fn size_and_deviation(&self) -> (Self::Scalar, Self::Scalar);
     fn propagation_path<'s>(
         &'s self,
-        ray: Ray<Self::Scalar, D>,
+        ray: Ray<V, DIM>,
         wavelength: Self::Scalar,
     ) -> Self::PropagationPathIter<'s>;
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct Spectrometer<
-    T,
-    W,
-    B,
-    S0,
-    SI,
-    SN,
-    L: ?Sized + Array<Item = PrismSurface<T, SI>>,
-    const D: usize,
-> {
+pub struct Spectrometer<T, V, W, B, S0, SI, SN, L: ?Sized + Array<Item = PrismSurface<T, SI>>> {
     pub wavelengths: W,
     pub beam: B,
-    pub detector: LinearDetectorArray<T, D>,
-    pub compound_prism: CompoundPrism<T, S0, SI, SN, L, D>,
+    pub detector: LinearDetectorArray<T, V>,
+    pub compound_prism: CompoundPrism<T, S0, SI, SN, L>,
 }
 
 impl<
         T: FloatExt,
-        W: Copy + Distribution<T, Output = T>,
-        B: Copy + Beam<T, D>,
-        S0: Copy + Surface<T, D>,
-        SI: Copy + Surface<T, D>,
-        SN: Copy + Surface<T, D>,
+        V: Vector<D, Scalar = T>,
+        W: Copy + Distribution<T>,
+        B: Copy + Beam<V, D>,
+        S0: Copy + Surface<V, D>,
+        SI: Copy + Surface<V, D>,
+        SN: Copy + Surface<V, D>,
         L: ?Sized + Array<Item = PrismSurface<T, SI>>,
         const D: usize,
-    > GenericSpectrometer<D> for Spectrometer<T, W, B, S0, SI, SN, L, D>
+    > GenericSpectrometer<V, D> for Spectrometer<T, V, W, B, S0, SI, SN, L>
 {
     type Scalar = T;
     type Q = B::Quasi;
-    type PropagationPathIter<'p> = impl 'p + Iterator<Item = GeometricRay<T, D>> where Self: 'p;
+    type PropagationPathIter<'p> = impl 'p + Iterator<Item = GeometricRay<V, D>> where Self: 'p;
 
     fn sample_wavelength(&self, p: T) -> T {
         self.wavelengths.inverse_cdf(p)
     }
 
-    fn sample_ray(&self, q: Self::Q) -> Ray<T, D> {
+    fn sample_ray(&self, q: Self::Q) -> Ray<V, D> {
         self.beam.inverse_cdf(q)
     }
 
@@ -425,7 +424,7 @@ impl<
         self.detector.bin_count()
     }
 
-    fn propagate(&self, ray: Ray<T, D>, wavelength: T) -> Result<(u32, T), RayTraceError> {
+    fn propagate(&self, ray: Ray<V, D>, wavelength: T) -> Result<(u32, T), RayTraceError> {
         ray.propagate(wavelength, &self.compound_prism, &self.detector)
             .map(|(idx, t)| (idx, t))
     }
@@ -434,7 +433,7 @@ impl<
         let det_mid_pt = self.detector.mid_pt();
         let dx = det_mid_pt.x();
         let dy = det_mid_pt.y() - self.beam.median_y();
-        let deviation_vector = Vector([dx, dy]);
+        let deviation_vector = V::from_xy(dx, dy);
         let size = deviation_vector.norm();
         let deviation = deviation_vector.sin_xy(size).abs();
         (size, deviation)
@@ -442,7 +441,7 @@ impl<
 
     fn propagation_path<'s>(
         &'s self,
-        ray: Ray<T, D>,
+        ray: Ray<V, D>,
         wavelength: T,
     ) -> Self::PropagationPathIter<'s> {
         ray.trace(wavelength, &self.compound_prism, self.detector)
@@ -453,9 +452,9 @@ impl<
 //         T: FloatExt,
 //         W: Copy + Distribution<T, Output = T>,
 //         B: Copy + Beam<T, D>,
-//         S0: Copy + Surface<T, D>,
-//         SI: Copy + Surface<T, D>,
-//         SN: Copy + Surface<T, D>,
+//         S0: Copy + Surface<V, D>,
+//         SI: Copy + Surface<V, D>,
+//         SN: Copy + Surface<V, D>,
 //         const N: usize,
 //         const D: usize,
 //     > Spectrometer<T, W, B, S0, SI, SN, N, D>
@@ -465,7 +464,7 @@ impl<
 //     //     wavelengths: W,
 //     //     beam: B,
 //     //     compound_prism: CompoundPrism<T, S0, SI, SN, N, D>,
-//     //     detector_array: LinearDetectorArray<T, D>,
+//     //     detector_array: LinearDetectorArray<T, V>,
 //     // ) -> Result<Self, RayTraceError>
 //     // where
 //     //     B: Distribution<Q, Output = Ray<T, D>>,
@@ -507,7 +506,7 @@ impl<
 //         &self,
 //         wavelength: T,
 //         initial_y: T,
-//     ) -> impl Iterator<Item = Result<Vector<T, D>, RayTraceError>> {
+//     ) -> impl Iterator<Item = Result<V, RayTraceError>> {
 //         Ray::new_from_start(initial_y).trace(wavelength, self.compound_prism, self.detector)
 //     }
 
@@ -525,13 +524,13 @@ impl<
 
 unsafe impl<
         T: rustacuda_core::DeviceCopy,
+        V: rustacuda_core::DeviceCopy,
         W,
         B,
-        S0: Surface<T, D>,
-        SI: Surface<T, D>,
-        SN: Surface<T, D>,
+        S0,
+        SI,
+        SN,
         L: ?Sized + Array<Item = PrismSurface<T, SI>>,
-        const D: usize,
-    > rustacuda_core::DeviceCopy for Spectrometer<T, W, B, S0, SI, SN, L, D>
+    > rustacuda_core::DeviceCopy for Spectrometer<T, V, W, B, S0, SI, SN, L>
 {
 }
