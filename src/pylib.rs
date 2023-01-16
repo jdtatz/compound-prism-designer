@@ -1,5 +1,8 @@
 use crate::spectrometer::*;
-use core::convert::TryInto;
+use core::{
+    convert::TryInto,
+    simd::{Simd, SimdElement, SimdFloat},
+};
 use ndarray::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
 use pyo3::{create_exception, gc::PyVisit, prelude::*, wrap_pyfunction, PyTraverseError};
@@ -169,30 +172,15 @@ impl PyVector2D {
     }
 }
 
-// impl<V: Vector<D>, const D: usize> LossyFrom<V> for PyVector2D where <V as Vector<D>>::Scalar: FloatExt {
-//     fn lossy_from(v: V) -> Self {
-//         Self {
-//             x: v.x().lossy_into(),
-//             y: v.y().lossy_into(),
-//         }
-//     }
-// }
-
-impl<T: FloatExt, const N: usize> LossyFrom<SimpleVector<T, N>> for PyVector2D
-where
-    SimpleVector<T, N>: Vector<N, Scalar = T>,
-{
-    fn lossy_from(v: SimpleVector<T, N>) -> Self {
+impl PyVector2D {
+    fn lossy_from_vector<V: Vector<D>, const D: usize>(v: V) -> Self
+    where
+        f64: LossyFrom<V::Scalar>,
+    {
         Self {
             x: v.x().lossy_into(),
             y: v.y().lossy_into(),
         }
-    }
-}
-
-impl<F: FloatExt, const D: usize> LossyFrom<PyVector2D> for SimpleVector<F, D> {
-    fn lossy_from(PyVector2D { x, y }: PyVector2D) -> Self {
-        SimpleVector::from_xy(F::lossy_from(x), F::lossy_from(y))
     }
 }
 
@@ -219,13 +207,9 @@ struct PyUnitVector2D {
 impl PyUnitVector2D {
     #[new]
     fn create(x: f64, y: f64) -> PyResult<Self> {
-        if let Some(UnitVector(SimpleVector([x, y]))) =
-            UnitVector::try_new(SimpleVector::new([x, y]))
-        {
-            Ok(Self { x, y })
-        } else {
-            Err(pyo3::exceptions::PyValueError::new_err("x^2 + y^2 != 1"))
-        }
+        UnitVector::try_new::<2>(SimpleVector::from_xy(x, y))
+            .map(PyUnitVector2D::lossy_from_vector)
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("x^2 + y^2 != 1"))
     }
 
     fn __getnewargs__(&self) -> impl IntoPy<PyObject> {
@@ -237,30 +221,15 @@ impl PyUnitVector2D {
     }
 }
 
-// impl<V: Vector<D>, const D: usize> LossyFrom<UnitVector<V>> for PyUnitVector2D where V::Scalar: FloatExt {
-//     fn lossy_from(UnitVector(v): UnitVector<V>) -> Self {
-//         Self {
-//             x: v.x().lossy_into(),
-//             y: v.y().lossy_into(),
-//         }
-//     }
-// }
-
-impl<T: FloatExt, const N: usize> LossyFrom<UnitVector<SimpleVector<T, N>>> for PyUnitVector2D
-where
-    SimpleVector<T, N>: Vector<N, Scalar = T>,
-{
-    fn lossy_from(UnitVector(v): UnitVector<SimpleVector<T, N>>) -> Self {
+impl PyUnitVector2D {
+    fn lossy_from_vector<V: Vector<D>, const D: usize>(UnitVector(v): UnitVector<V>) -> Self
+    where
+        f64: LossyFrom<V::Scalar>,
+    {
         Self {
             x: v.x().lossy_into(),
             y: v.y().lossy_into(),
         }
-    }
-}
-
-impl<F: FloatExt, const D: usize> LossyFrom<PyUnitVector2D> for UnitVector<SimpleVector<F, D>> {
-    fn lossy_from(PyUnitVector2D { x, y }: PyUnitVector2D) -> Self {
-        UnitVector::new(SimpleVector::from_xy(F::lossy_from(x), F::lossy_from(y)))
     }
 }
 
@@ -585,14 +554,13 @@ where
         )
     }
 
-    fn exit_ray(&self, y: f64, wavelength: f64) -> PyResult<(PyVector2D, PyUnitVector2D)>
-    where
-        PyVector2D: LossyFrom<V>,
-        PyUnitVector2D: LossyFrom<UnitVector<V>>,
-    {
+    fn exit_ray(&self, y: f64, wavelength: f64) -> PyResult<(PyVector2D, PyUnitVector2D)> {
         let ray = Ray::new_from_start(y);
         match map_sized_compound_prism!(self => |c| ray.propagate_internal(c, wavelength)) {
-            Ok(r) => Ok((r.origin.lossy_into(), r.direction.lossy_into())),
+            Ok(r) => Ok((
+                PyVector2D::lossy_from_vector(r.origin),
+                PyUnitVector2D::lossy_from_vector(r.direction),
+            )),
             Err(e) => Err(map_ray_trace_err(e)),
         }
     }
@@ -656,25 +624,13 @@ where
 
 #[derive(Debug, Clone, Copy, From, WrappedFrom)]
 #[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
-enum DimensionedSizedCompoundPrism<F: FloatExt> {
-    Dim2(
-        SizedCompoundPrism<
-            F,
-            Plane<SimpleVector<F, 2>, 2>,
-            Plane<SimpleVector<F, 2>, 2>,
-            CurvedPlane<SimpleVector<F, 2>, 2>,
-            2,
-        >,
-    ),
-    Dim3(
-        SizedCompoundPrism<
-            F,
-            ToricLens<SimpleVector<F, 3>, 3>,
-            Plane<SimpleVector<F, 3>, 3>,
-            ToricLens<SimpleVector<F, 3>, 3>,
-            3,
-        >,
-    ),
+enum DimensionedSizedCompoundPrism<
+    F: FloatExt,
+    V2: Vector<2, Scalar = F>,
+    V3: Vector<3, Scalar = F>,
+> {
+    Dim2(SizedCompoundPrism<F, Plane<V2, 2>, Plane<V2, 2>, CurvedPlane<V2, 2>, 2>),
+    Dim3(SizedCompoundPrism<F, ToricLens<V3, 3>, Plane<V3, 3>, ToricLens<V3, 3>, 3>),
 }
 
 macro_rules! map_dimensioned_sized_compound_prism {
@@ -705,7 +661,7 @@ impl IntoPy<PyObject> for DimensionedCurvature {
 #[pyo3(text_signature = "(glasses, angles, lengths, curvature, height, width, ar_coated)")]
 #[derive(Debug, Clone)]
 struct PyCompoundPrism {
-    compound_prism: DimensionedSizedCompoundPrism<f64>,
+    compound_prism: DimensionedSizedCompoundPrism<f64, SimdVector<f64, 2>, SimdVector<f64, 4>>,
     #[pyo3(get)]
     glasses: Vec<PyGlass>,
     #[pyo3(get)]
@@ -823,10 +779,9 @@ impl PyCompoundPrism {
         };
         (
             midpt,
-            UnitVector(SimpleVector::<f64, 2>::angled_xy(
+            PyUnitVector2D::lossy_from_vector(UnitVector(SimdVector::<f64, 2>::angled_xy(
                 *self.angles.last().unwrap(),
-            ))
-            .lossy_into(),
+            ))),
         )
     }
 
@@ -868,7 +823,7 @@ fn position_detector_array(
                     ws,
                     &beam,
                     acceptance,
-                ).map(|(v, f)| ([v[0], v[1]], f)).map_err(map_ray_trace_err)?
+                ).map(|(v, f)| ([v.x(), v.y()], f)).map_err(map_ray_trace_err)?
             )
         )
     );
@@ -881,7 +836,7 @@ fn position_detector_array(
 )]
 #[derive(Debug, Clone, Copy)]
 struct PyDetectorArray {
-    detector_array: LinearDetectorArray<f64, SimpleVector<f64, 3>>,
+    detector_array: LinearDetectorArray<f64, SimdVector<f64, 4>>,
     #[pyo3(get)]
     bin_count: u32,
     #[pyo3(get)]
@@ -924,7 +879,7 @@ impl PyDetectorArray {
             max_incident_angle.cos(),
             angle,
             length,
-            SimpleVector::from_xy(position.0, position.1),
+            Vector::from_xy(position.0, position.1),
             flipped,
         );
         Ok(PyDetectorArray {
@@ -960,9 +915,23 @@ impl PyDetectorArray {
     }
 }
 
-impl<'p, const D: usize> From<&'p PyDetectorArray>
-    for LinearDetectorArray<f64, SimpleVector<f64, D>>
-{
+impl<'p> From<&'p PyDetectorArray> for LinearDetectorArray<f64, SimdVector<f64, 2>> {
+    fn from(pda: &'p PyDetectorArray) -> Self {
+        LinearDetectorArray::new(
+            pda.bin_count,
+            pda.bin_size,
+            pda.linear_slope,
+            pda.linear_intercept,
+            pda.max_incident_angle.cos(),
+            pda.angle,
+            pda.length,
+            Vector::from_xy(pda.position.0, pda.position.1),
+            pda.flipped,
+        )
+    }
+}
+
+impl<'p> From<&'p PyDetectorArray> for LinearDetectorArray<f64, SimdVector<f64, 4>> {
     fn from(pda: &'p PyDetectorArray) -> Self {
         LinearDetectorArray::new(
             pda.bin_count,
@@ -1097,7 +1066,7 @@ impl PySpectrometer {
                     let detector = LinearDetectorArray::<f64, _>::from(&py_detarr);
                     let spec = Spectrometer { wavelengths, beam, detector, compound_prism,};
                     Ok(Array2::from(
-                        GenericSpectrometer::propagation_path(&spec, Ray::new_from_start(inital_y), wavelength).map(|GeometricRay { origin: SimpleVector([x, y, ..]), direction: UnitVector(SimpleVector([ux, uy, ..])) } | [x, y, ux, uy])
+                        GenericSpectrometer::propagation_path(&spec, Ray::new_from_start(inital_y), wavelength).map(|GeometricRay { origin, direction: UnitVector(u) } | [origin.x(), origin.y(), u.x(), u.y()])
                             .collect::<Vec<_>>()
                         )
                         .to_pyarray(py)
@@ -1120,7 +1089,7 @@ impl PySpectrometer {
         max_eval: u32,
     ) -> PyResult<Option<PyDesignFitness>> {
         let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
-        let compound_prism: DimensionedSizedCompoundPrism<f32> = compound_prism.lossy_into();
+        let compound_prism: DimensionedSizedCompoundPrism<f32, _, _> = compound_prism.lossy_into();
         let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
         let seeds = seeds.readonly();
         let seeds = seeds.as_slice().unwrap();
@@ -1131,7 +1100,7 @@ impl PySpectrometer {
                     if let BeamDistributions::Gaussian(PyGaussianBeam { gaussian_beam: b, .. }) = self.beam {
                         type B<T> = GaussianBeam<T>;
 
-                        let detector: LinearDetectorArray<f32, _> = LinearDetectorArray::<f64, _>::from(&py_detarr).lossy_into();
+                        let detector: LinearDetectorArray<f32, _> = LinearDetectorArray::<f64, SimdVector<f64, 2>>::from(&py_detarr).lossy_into();
                         let beam: B<f32> = LossyFrom::lossy_from(b);
                         let spec = Spectrometer { wavelengths: w.lossy_into(), beam, detector, compound_prism };
                         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval)).map_err(map_cuda_err)?;
@@ -1145,7 +1114,7 @@ impl PySpectrometer {
                     if let BeamDistributions::Fiber(PyFiberBeam { fiber_beam: b, .. }) = self.beam {
                         type B<T> = FiberBeam<T>;
 
-                        let detector: LinearDetectorArray<f32, _> = LinearDetectorArray::<f64, _>::from(&py_detarr).lossy_into();
+                        let detector: LinearDetectorArray<f32, _> = LinearDetectorArray::<f64, SimdVector<f64, 4>>::from(&py_detarr).lossy_into();
                         let beam: B<f32> = LossyFrom::lossy_from(b);
                         let spec = Spectrometer { wavelengths: w.lossy_into(), beam, detector, compound_prism };
                         let fit = py.allow_threads(|| crate::cuda_fitness(&spec, seeds, max_n, nwarp, max_eval)).map_err(map_cuda_err)?;

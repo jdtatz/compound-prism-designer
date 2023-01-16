@@ -158,10 +158,10 @@ macro_rules! kernel_impl {
         }
     };
     ([$($n:literal),*]) => {
-        kernel_impl!(@inner f32; SimpleVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
-        $( kernel_impl!(@inner f32; SimpleVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        kernel_impl!(@inner f32; SimpleVector<f32, 3> ; f32 FiberBeam    ToricLens ToricLens 3 );
-        $( kernel_impl!(@inner f32; SimpleVector<f32, 3> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
+        kernel_impl!(@inner f32; SimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
+        $( kernel_impl!(@inner f32; SimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
+        kernel_impl!(@inner f32; SimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens 3 );
+        $( kernel_impl!(@inner f32; SimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }
 kernel_impl!([0, 1, 2, 3, 4, 5, 6]);

@@ -1,5 +1,5 @@
 #![allow(clippy::just_underscores_and_digits)]
-use crate::{FloatExt, SimpleVector, Vector};
+use crate::{FloatExt, Vector};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Point<T> {
@@ -7,11 +7,12 @@ pub struct Point<T> {
     pub y: T,
 }
 
-// impl<V: Vector<N>, const N: usize> From<V> for Point<V::Scalar> {
-//     fn from(v: V) -> Self {
-//         Self { x: v.x(), y: v.y() }
-//     }
-// }
+impl<T> Point<T> {
+    fn as_vector<V: Vector<2, Scalar = T>>(self) -> V {
+        let Point { x, y } = self;
+        V::from_xy(x, y)
+    }
+}
 
 impl<V: Vector<2>> From<V> for Point<V::Scalar> {
     fn from(v: V) -> Self {
@@ -25,16 +26,6 @@ impl<V: Vector<2>> From<V> for Point<V::Scalar> {
 //         V::from_xy(x, y)
 //     }
 // }
-
-impl<T, const N: usize> From<Point<T>> for SimpleVector<T, N>
-where
-    SimpleVector<T, N>: Vector<N, Scalar = T>,
-{
-    fn from(p: Point<T>) -> Self {
-        let Point { x, y } = p;
-        Vector::from_xy(x, y)
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Path<T> {
@@ -116,7 +107,7 @@ impl<T: Copy> Path<T> {
     // }
 }
 
-pub fn arc_as_cubic_bézier<T: FloatExt, V: Vector<2, Scalar = T> + From<Point<T>>>(
+pub fn arc_as_cubic_bézier<T: FloatExt, V: Vector<2, Scalar = T>>(
     a: Point<T>,
     midpt: Point<T>,
     b: Point<T>,
@@ -128,27 +119,27 @@ pub fn arc_as_cubic_bézier<T: FloatExt, V: Vector<2, Scalar = T> + From<Point<T
     let _4 = T::lossy_from(4_u32);
     let _6 = T::lossy_from(6_u32);
     let k = curvature;
-    let delta = V::from(b) - V::from(a);
+    let delta = Point::as_vector::<V>(b) - Point::as_vector::<V>(a);
     let chord_len = delta.norm();
-    let chord_midpt = delta.mul_add(frac_1_2, V::from(a));
-    let sagita_v = V::from(midpt) - chord_midpt;
+    let chord_midpt = delta.mul_add(frac_1_2, Point::as_vector::<V>(a));
+    let sagita_v = Point::as_vector::<V>(midpt) - chord_midpt;
     let sagita = sagita_v.norm();
     let sagita_v = sagita_v / sagita;
     let exsec_len = k * chord_len.sqr() / (_2 * T::sqrt(_4 - (k * chord_len).sqr())) - sagita;
-    let tan_pt = sagita_v.mul_add(exsec_len, midpt.into());
-    let tan_a = (tan_pt - V::from(a)).normalize();
-    let tan_b = (tan_pt - V::from(b)).normalize();
+    let tan_pt = sagita_v.mul_add(exsec_len, midpt.as_vector());
+    let tan_a = (tan_pt - Point::as_vector::<V>(a)).normalize();
+    let tan_b = (tan_pt - Point::as_vector::<V>(b)).normalize();
     // let alpha = k * chord_len * T::sqrt(_4 - (k * chord_len).sqr()) * ( T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE ) / _6;
     let alpha = chord_len
         * T::sqrt(_4 - (k * chord_len).sqr())
         * (T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE)
         / _6;
-    let c0 = tan_a.mul_add(alpha, a.into());
-    let c1 = tan_b.mul_add(alpha, b.into());
+    let c0 = tan_a.mul_add(alpha, a.as_vector());
+    let c1 = tan_b.mul_add(alpha, b.as_vector());
     [a, Point::from(c0), Point::from(c1), b]
 }
 
-pub fn arc_as_2_cubic_béziers<T: FloatExt, V: Vector<2, Scalar = T> + From<Point<T>>>(
+pub fn arc_as_2_cubic_béziers<T: FloatExt, V: Vector<2, Scalar = T>>(
     a: Point<T>,
     midpt: Point<T>,
     b: Point<T>,
@@ -161,26 +152,26 @@ pub fn arc_as_2_cubic_béziers<T: FloatExt, V: Vector<2, Scalar = T> + From<Poin
     let _6 = T::lossy_from(6_u32);
     let _12 = T::lossy_from(12_u32);
     let k = curvature;
-    let delta = V::from(b) - V::from(a);
+    let delta = Point::as_vector::<V>(b) - Point::as_vector::<V>(a);
     let chord_len = delta.norm();
-    let chord_midpt = delta.mul_add(frac_1_2, V::from(a));
-    let sagita_v = V::from(midpt) - chord_midpt;
+    let chord_midpt = delta.mul_add(frac_1_2, Point::as_vector::<V>(a));
+    let sagita_v = Point::as_vector::<V>(midpt) - chord_midpt;
     let sagita = sagita_v.norm();
     let sagita_v = sagita_v / sagita;
     let exsec_len = k * chord_len.sqr() / (_2 * T::sqrt(_4 - (k * chord_len).sqr())) - sagita;
-    let tan_pt = sagita_v.mul_add(exsec_len, midpt.into());
-    let tan_a = (tan_pt - V::from(a)).normalize();
-    let tan_b = (tan_pt - V::from(b)).normalize();
+    let tan_pt = sagita_v.mul_add(exsec_len, midpt.as_vector());
+    let tan_a = (tan_pt - Point::as_vector::<V>(a)).normalize();
+    let tan_b = (tan_pt - Point::as_vector::<V>(b)).normalize();
     // let alpha = k * chord_len * T::sqrt(_4 - (k * chord_len).sqr()) * ( T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE ) / _6;
     // let alpha = chord_len * T::sqrt(_4 - (k * chord_len).sqr()) * ( T::sqrt(T::ONE + _3 / (_2 + k * chord_len) - _3 / (-_2 + k * chord_len)) - T::ONE ) / _6;
     let alpha = chord_len
         * (T::sqrt(T::ONE + _12 / (_2 + T::sqrt(_4 - (k * chord_len).sqr()))) - T::ONE)
         / _6;
     let tan_mid = delta / chord_len;
-    let c0 = tan_a.mul_add(alpha, a.into());
-    let c1 = tan_mid.mul_add(-alpha, midpt.into());
-    let c2 = tan_mid.mul_add(alpha, midpt.into());
-    let c3 = tan_b.mul_add(alpha, b.into());
+    let c0 = tan_a.mul_add(alpha, a.as_vector());
+    let c1 = tan_mid.mul_add(-alpha, midpt.as_vector());
+    let c2 = tan_mid.mul_add(alpha, midpt.as_vector());
+    let c3 = tan_b.mul_add(alpha, b.as_vector());
     [
         [a, Point::from(c0), Point::from(c1), midpt],
         [midpt, Point::from(c2), Point::from(c3), b],

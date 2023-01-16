@@ -1,6 +1,6 @@
 use crate::spectrometer::{
-    kernel::*, Beam, CurvedPlane, FiberBeam, GaussianBeam, GenericSpectrometer, Plane,
-    PrismSurface, SimpleVector, Spectrometer, ToricLens, UniformDistribution, Welford,
+    kernel::*, Beam, CurvedPlane, FastSimdVector, FiberBeam, GaussianBeam, GenericSpectrometer,
+    Plane, PrismSurface, SimpleVector, Spectrometer, ToricLens, UniformDistribution, Welford,
 };
 use core::{arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
 use nvptx_sys::{
@@ -134,10 +134,14 @@ macro_rules! gen_kernel {
         }
     };
     ([$($n:literal),*]) => {
-        gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
-        $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    ToricLens ToricLens   3);
-        $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
+        gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
+        $( gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
+        gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens   3);
+        $( gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
+        // gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
+        // $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
+        // gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    ToricLens ToricLens   3);
+        // $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
     };
 }
 

@@ -64,6 +64,16 @@ impl<T, U: LossyFrom<T>, const N: usize> LossyFrom<[T; N]> for [U; N] {
     }
 }
 
+impl<T: core::simd::SimdElement, U: LossyFrom<T> + core::simd::SimdElement, const N: usize>
+    LossyFrom<core::simd::Simd<T, N>> for core::simd::Simd<U, N>
+where
+    core::simd::LaneCount<N>: core::simd::SupportedLaneCount,
+{
+    fn lossy_from(t: core::simd::Simd<T, N>) -> Self {
+        core::simd::Simd::from_array(t.to_array().lossy_into())
+    }
+}
+
 wrapped_from_tuples! { LossyFrom::lossy_from for 0..12 }
 
 pub trait ConstZero {

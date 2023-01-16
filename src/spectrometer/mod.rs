@@ -29,5 +29,7 @@ pub use self::spectrometer::{
 };
 pub use self::toric::{ToricLens, ToricLensParametrization, ToricSurface};
 pub use self::utils::{Float, FloatExt, LossyFrom, LossyInto, NumAssign, One, Zero};
-pub use self::vector::{SimpleVector, UnitVector, Vector};
+#[cfg(target_arch = "nvptx64")]
+pub use self::vector::FastSimdVector;
+pub use self::vector::{SimdVector, SimpleVector, UnitVector, Vector};
 pub use self::welford::Welford;

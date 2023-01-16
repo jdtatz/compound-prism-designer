@@ -123,7 +123,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let pmt_length = 3.2;
     let spec_max_accepted_angle = (60_f32).to_radians();
     let det_angle = 0.0;
-    let (det_pos, det_flipped) =
+    let (det_pos, det_flipped): (SimdVector<_, 2>, bool) =
         detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
             .expect("This is a valid spectrometer design.");
     let detarr = LinearDetectorArray::new(

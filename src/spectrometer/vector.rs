@@ -1,5 +1,270 @@
 use super::utils::*;
 use core::ops::*;
+use core::simd::*;
+
+impl<T: ConstZero + SimdElement, const N: usize> ConstZero for Simd<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
+    const ZERO: Self = Simd::from_array([T::ZERO; N]);
+}
+
+impl<T: ConstOne + SimdElement, const N: usize> ConstOne for Simd<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
+    const ONE: Self = Simd::from_array([T::ONE; N]);
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
+#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+pub struct SimdVector<T: SimdElement, const N: usize>(Simd<T, N>)
+where
+    LaneCount<N>: SupportedLaneCount;
+
+impl<T: ConstZero + SimdElement, const N: usize> ConstZero for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
+    const ZERO: Self = SimdVector(Simd::from_array([T::ZERO; N]));
+}
+
+impl<T: SimdElement, const N: usize> Neg for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+    Simd<T, N>: SimdFloat<Scalar = T> + Neg<Output = Simd<T, N>>,
+{
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self(-self.0)
+    }
+}
+
+impl<T: SimdElement, const N: usize> Add for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+    Simd<T, N>: SimdFloat<Scalar = T> + Add<Output = Simd<T, N>>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl<T: SimdElement, const N: usize> Sub for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+    Simd<T, N>: SimdFloat<Scalar = T> + Sub<Output = Simd<T, N>>,
+{
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl<T: SimdElement, const N: usize> Mul<T> for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+    Simd<T, N>: SimdFloat<Scalar = T> + Mul<Output = Simd<T, N>>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Self(self.0 * Simd::splat(rhs))
+    }
+}
+
+impl<T: SimdElement, const N: usize> Div<T> for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+    Simd<T, N>: SimdFloat<Scalar = T> + Div<Output = Simd<T, N>>,
+{
+    type Output = Self;
+
+    fn div(self, rhs: T) -> Self::Output {
+        Self(self.0 / Simd::splat(rhs))
+    }
+}
+
+#[cfg(target_arch = "nvptx64")]
+mod fast_nvptx {
+    use super::*;
+    use nvptx_sys::{FastFloat, FastNum};
+
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct FastSimdVector<T: FastNum + SimdElement, const N: usize>(Simd<T, N>)
+    where
+        LaneCount<N>: SupportedLaneCount;
+
+    impl<T: ConstZero + FastNum + SimdElement, const N: usize> ConstZero for FastSimdVector<T, N>
+    where
+        LaneCount<N>: SupportedLaneCount,
+    {
+        const ZERO: Self = FastSimdVector(Simd::from_array([T::ZERO; N]));
+    }
+
+    impl<T: FastNum + SimdElement, const N: usize> Neg for FastSimdVector<T, N>
+    where
+        LaneCount<N>: SupportedLaneCount,
+        Simd<T, N>: SimdFloat<Scalar = T> + Neg<Output = Simd<T, N>>,
+    {
+        type Output = Self;
+
+        fn neg(self) -> Self::Output {
+            Self(-self.0)
+        }
+    }
+
+    impl<T: FastNum + SimdElement, const N: usize> Add for FastSimdVector<T, N>
+    where
+        LaneCount<N>: SupportedLaneCount,
+        Simd<T, N>: SimdFloat<Scalar = T> + Add<Output = Simd<T, N>>,
+    {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            Self(self.0 + rhs.0)
+        }
+    }
+
+    impl<T: FastNum + SimdElement, const N: usize> Sub for FastSimdVector<T, N>
+    where
+        LaneCount<N>: SupportedLaneCount,
+        Simd<T, N>: SimdFloat<Scalar = T> + Sub<Output = Simd<T, N>>,
+    {
+        type Output = Self;
+
+        fn sub(self, rhs: Self) -> Self::Output {
+            Self(self.0 - rhs.0)
+        }
+    }
+
+    impl<T: FastNum + SimdElement, const N: usize> Mul<FastFloat<T>> for FastSimdVector<T, N>
+    where
+        LaneCount<N>: SupportedLaneCount,
+        Simd<T, N>: SimdFloat<Scalar = T> + Mul<Output = Simd<T, N>>,
+    {
+        type Output = Self;
+
+        fn mul(self, rhs: FastFloat<T>) -> Self::Output {
+            Self(self.0 * Simd::splat(rhs.0))
+        }
+    }
+
+    impl<T: FastNum + SimdElement, const N: usize> Div<FastFloat<T>> for FastSimdVector<T, N>
+    where
+        LaneCount<N>: SupportedLaneCount,
+        Simd<T, N>: SimdFloat<Scalar = T> + Div<Output = Simd<T, N>>,
+    {
+        type Output = Self;
+
+        fn div(self, rhs: FastFloat<T>) -> Self::Output {
+            Self(self.0 / Simd::splat(rhs.0))
+        }
+    }
+
+    extern "platform-intrinsic" {
+        // fma
+        fn simd_fma<T>(x: T, y: T, z: T) -> T;
+    }
+
+    impl<T: 'static + FastNum + SimdElement + Float + ConstZero + core::fmt::Debug> Vector<2>
+        for FastSimdVector<T, 2>
+    where
+        Simd<T, 2>: SimdFloat<Scalar = T> + Ring + Div<Output = Simd<T, 2>>,
+    {
+        type Scalar = FastFloat<T>;
+
+        fn new(vector: [Self::Scalar; 2]) -> Self {
+            Self(Simd::from_array(vector.map(|v| v.0)))
+        }
+
+        fn to_array(self) -> [Self::Scalar; 2] {
+            Simd::to_array(self.0).map(FastFloat)
+        }
+
+        fn hadamard_product(self, rhs: Self) -> Self {
+            Self(self.0 * rhs.0)
+        }
+
+        fn reduce_sum(self) -> Self::Scalar {
+            FastFloat(<Simd<T, 2> as SimdFloat>::reduce_sum(self.0))
+        }
+
+        fn mul_add(self, b: Self::Scalar, c: Self) -> Self
+        where
+            Self::Scalar: Float,
+        {
+            // FastSimdVector(self.0.mul_add(Simd::splat(b.0), c.0))
+            FastSimdVector(unsafe { simd_fma(self.0, Simd::splat(b.0), c.0) })
+        }
+
+        fn x(self) -> Self::Scalar {
+            self.to_array()[0]
+        }
+
+        fn y(self) -> Self::Scalar {
+            self.to_array()[1]
+        }
+
+        fn update_xy(self, x: Self::Scalar, y: Self::Scalar) -> Self {
+            Self::new([x, y])
+        }
+    }
+
+    impl<T: 'static + FastNum + SimdElement + Float + ConstZero + core::fmt::Debug> Vector<3>
+        for FastSimdVector<T, 4>
+    where
+        Simd<T, 4>: SimdFloat<Scalar = T> + Ring + Div<Output = Simd<T, 4>>,
+    {
+        type Scalar = FastFloat<T>;
+
+        fn new([x, y, z]: [Self::Scalar; 3]) -> Self {
+            Self(Simd::from_array([x.0, y.0, z.0, T::ZERO]))
+        }
+
+        fn to_array(self) -> [Self::Scalar; 3] {
+            let [x, y, z, _] = Simd::to_array(self.0);
+            [FastFloat(x), FastFloat(y), FastFloat(z)]
+        }
+
+        fn hadamard_product(self, rhs: Self) -> Self {
+            Self(self.0 * rhs.0)
+        }
+
+        fn reduce_sum(self) -> Self::Scalar {
+            FastFloat(<Simd<T, 4> as SimdFloat>::reduce_sum(self.0))
+        }
+
+        fn mul_add(self, b: Self::Scalar, c: Self) -> Self
+        where
+            Self::Scalar: Float,
+        {
+            // FastSimdVector(self.0.mul_add(Simd::splat(b.0), c.0))
+            FastSimdVector(unsafe { simd_fma(self.0, Simd::splat(b.0), c.0) })
+        }
+
+        fn x(self) -> Self::Scalar {
+            self.to_array()[0]
+        }
+
+        fn y(self) -> Self::Scalar {
+            self.to_array()[1]
+        }
+
+        fn update_xy(self, x: Self::Scalar, y: Self::Scalar) -> Self {
+            let [_, _, z, _] = Simd::to_array(self.0);
+            Self::new([x, y, FastFloat(z)])
+        }
+    }
+}
+#[cfg(target_arch = "nvptx64")]
+pub use fast_nvptx::*;
 
 pub trait Vector<const DIM: usize>:
     'static
@@ -182,6 +447,101 @@ impl<V: Neg<Output = V>> Neg for UnitVector<V> {
     }
 }
 
+#[cfg(feature = "std")]
+use std::simd::StdFloat;
+#[cfg(not(feature = "std"))]
+pub trait StdFloat {}
+#[cfg(not(feature = "std"))]
+impl<T> StdFloat for T {}
+
+impl<T: 'static + SimdElement + Float + ConstZero + core::fmt::Debug> Vector<2> for SimdVector<T, 2>
+where
+    Simd<T, 2>: SimdFloat<Scalar = T> + StdFloat + Ring + Div<Output = Simd<T, 2>>,
+{
+    type Scalar = T;
+
+    fn new(vector: [Self::Scalar; 2]) -> Self {
+        Self(Simd::from_array(vector))
+    }
+
+    fn to_array(self) -> [Self::Scalar; 2] {
+        Simd::to_array(self.0)
+    }
+
+    fn hadamard_product(self, rhs: Self) -> Self {
+        Self(self.0 * rhs.0)
+    }
+
+    fn reduce_sum(self) -> Self::Scalar {
+        <Simd<T, 2> as SimdFloat>::reduce_sum(self.0)
+    }
+
+    #[cfg(feature = "std")]
+    fn mul_add(self, b: Self::Scalar, c: Self) -> Self
+    where
+        Self::Scalar: Float,
+    {
+        SimdVector(Simd::mul_add(self.0, Simd::splat(b), c.0))
+    }
+
+    fn x(self) -> Self::Scalar {
+        self.to_array()[0]
+    }
+
+    fn y(self) -> Self::Scalar {
+        self.to_array()[1]
+    }
+
+    fn update_xy(self, x: Self::Scalar, y: Self::Scalar) -> Self {
+        Self::new([x, y])
+    }
+}
+
+impl<T: 'static + SimdElement + Float + ConstZero + core::fmt::Debug> Vector<3> for SimdVector<T, 4>
+where
+    Simd<T, 4>: SimdFloat<Scalar = T> + StdFloat + Ring + Div<Output = Simd<T, 4>>,
+{
+    type Scalar = T;
+
+    fn new([x, y, z]: [Self::Scalar; 3]) -> Self {
+        Self(Simd::from_array([x, y, z, T::ZERO]))
+    }
+
+    fn to_array(self) -> [Self::Scalar; 3] {
+        let [x, y, z, _] = Simd::to_array(self.0);
+        [x, y, z]
+    }
+
+    fn hadamard_product(self, rhs: Self) -> Self {
+        Self(self.0 * rhs.0)
+    }
+
+    fn reduce_sum(self) -> Self::Scalar {
+        <Simd<T, 4> as SimdFloat>::reduce_sum(self.0)
+    }
+
+    #[cfg(feature = "std")]
+    fn mul_add(self, b: Self::Scalar, c: Self) -> Self
+    where
+        Self::Scalar: Float,
+    {
+        SimdVector(Simd::mul_add(self.0, Simd::splat(b), c.0))
+    }
+
+    fn x(self) -> Self::Scalar {
+        self.to_array()[0]
+    }
+
+    fn y(self) -> Self::Scalar {
+        self.to_array()[1]
+    }
+
+    fn update_xy(self, x: Self::Scalar, y: Self::Scalar) -> Self {
+        let [_, _, z, _] = Simd::to_array(self.0);
+        Self::new([x, y, z])
+    }
+}
+
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom, Deref, DerefMut)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
@@ -321,6 +681,13 @@ pub fn cross_prod_magnitude_sq<T: Copy + Ring, V: Vector<N, Scalar = T>, const N
     UnitVector(b): UnitVector<V>,
 ) -> T {
     a.norm_squared() - T::sqr(a.dot(b))
+}
+
+unsafe impl<T: rustacuda_core::DeviceCopy + SimdElement, const N: usize> rustacuda_core::DeviceCopy
+    for SimdVector<T, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
 }
 
 unsafe impl<T: rustacuda_core::DeviceCopy, const N: usize> rustacuda_core::DeviceCopy
