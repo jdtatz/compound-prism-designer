@@ -1,4 +1,4 @@
-From c320516757ea50e941a28d161e3508d787536ae4 Mon Sep 17 00:00:00 2001
+From 76022b970238c8ebf59bb1ae3a175f9557f7550c Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Sun, 3 Jul 2022 13:48:14 -0400
 Subject: [PATCH 1/5] Can't bitcast pointers in diffrent address spaces Use
@@ -111,10 +111,10 @@ index 680d810f78e..a1c6f9a7712 100644
          let catch_ty = bx.type_func(&[bx.type_i8p(), bx.type_i8p()], bx.type_void());
          bx.call(catch_ty, None, catch_func, &[data, catch_data], None);
 diff --git a/compiler/rustc_codegen_ssa/src/base.rs b/compiler/rustc_codegen_ssa/src/base.rs
-index d318c15d342..6005fd0bffc 100644
+index f7312f6fcda..10b3651d9f6 100644
 --- a/compiler/rustc_codegen_ssa/src/base.rs
 +++ b/compiler/rustc_codegen_ssa/src/base.rs
-@@ -256,7 +256,13 @@ pub fn unsize_ptr<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+@@ -254,7 +254,13 @@ pub fn unsize_ptr<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
              let lldata_ty = bx.cx().scalar_pair_element_backend_type(dst_layout, 0, true);
              let llextra_ty = bx.cx().scalar_pair_element_backend_type(dst_layout, 1, true);
              // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
@@ -171,7 +171,7 @@ index 34a5b638d7e..02b0b452dc2 100644
 2.39.0
 
 
-From 93b4be96b674fa36809043665179a7ad114f1a89 Mon Sep 17 00:00:00 2001
+From 0ee93c8b2b210911261f0c62aa857ac5a93f2d00 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Sun, 3 Jul 2022 22:32:56 -0400
 Subject: [PATCH 2/5] nvptx fixes
@@ -179,7 +179,7 @@ Subject: [PATCH 2/5] nvptx fixes
 ---
  compiler/rustc_target/src/abi/call/nvptx64.rs | 59 ++-----------------
  .../src/spec/nvptx64_nvidia_cuda.rs           |  6 +-
- src/test/assembly/asm/nvptx-types.rs          | 12 ++--
+ tests/assembly/asm/nvptx-types.rs             | 12 ++--
  3 files changed, 16 insertions(+), 61 deletions(-)
 
 diff --git a/compiler/rustc_target/src/abi/call/nvptx64.rs b/compiler/rustc_target/src/abi/call/nvptx64.rs
@@ -281,10 +281,10 @@ index b0582b235b9..007753fb5a7 100644
  
              // Let the `ptx-linker` to handle LLVM lowering into MC / assembly.
              obj_is_bitcode: true,
-diff --git a/src/test/assembly/asm/nvptx-types.rs b/src/test/assembly/asm/nvptx-types.rs
+diff --git a/tests/assembly/asm/nvptx-types.rs b/tests/assembly/asm/nvptx-types.rs
 index c319946b5f5..6282ee7ba88 100644
---- a/src/test/assembly/asm/nvptx-types.rs
-+++ b/src/test/assembly/asm/nvptx-types.rs
+--- a/tests/assembly/asm/nvptx-types.rs
++++ b/tests/assembly/asm/nvptx-types.rs
 @@ -1,9 +1,10 @@
  // assembly-output: emit-asm
 +// no-prefer-dynamic
@@ -316,7 +316,7 @@ index c319946b5f5..6282ee7ba88 100644
 2.39.0
 
 
-From f5fd5082e8f3e9ddddf3ba5592506f0051c35276 Mon Sep 17 00:00:00 2001
+From 9a6d5a5dc593b20e9d1f5d9bc08bd91139156c51 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Mon, 12 Sep 2022 17:45:02 -0400
 Subject: [PATCH 3/5] Fix const ptr casts too
@@ -403,7 +403,7 @@ index 3626aa901c0..f984bb1c73e 100644
 2.39.0
 
 
-From 22910f73b7e09ac00e0769c3156c1309fd2f4fb8 Mon Sep 17 00:00:00 2001
+From 2c204b3f3be828fd5e7e7b3561bad850c7a7e92e Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Mon, 9 Jan 2023 20:51:01 -0500
 Subject: [PATCH 4/5] Add new experimental #[address_space] built-in
@@ -418,8 +418,8 @@ Only the skeleton for now, no codegen yet
  .../feature-gate-address_space.rs             | 13 ++++++
  .../feature-gate-address_space.stderr         | 38 +++++++++++++++++
  7 files changed, 102 insertions(+)
- create mode 100644 src/test/ui/feature-gates/feature-gate-address_space.rs
- create mode 100644 src/test/ui/feature-gates/feature-gate-address_space.stderr
+ create mode 100644 tests/ui/feature-gates/feature-gate-address_space.rs
+ create mode 100644 tests/ui/feature-gates/feature-gate-address_space.stderr
 
 diff --git a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
 index b0fa7745667..4ba9fa930b8 100644
@@ -482,10 +482,10 @@ index b0fa7745667..4ba9fa930b8 100644
      *providers = Providers { codegen_fn_attrs, should_inherit_track_caller, ..*providers };
  }
 diff --git a/compiler/rustc_feature/src/active.rs b/compiler/rustc_feature/src/active.rs
-index beade4d44da..4ca5ce75c44 100644
+index 196c31302a0..26f3aa0936b 100644
 --- a/compiler/rustc_feature/src/active.rs
 +++ b/compiler/rustc_feature/src/active.rs
-@@ -290,6 +290,8 @@ pub fn set(&self, features: &mut Features, span: Span) {
+@@ -287,6 +287,8 @@ pub fn set(&self, features: &mut Features, span: Span) {
      (active, abi_ptx, "1.15.0", Some(38788), None),
      /// Allows `extern "x86-interrupt" fn()`.
      (active, abi_x86_interrupt, "1.17.0", Some(40180), None),
@@ -495,7 +495,7 @@ index beade4d44da..4ca5ce75c44 100644
      (incomplete, adt_const_params, "1.56.0", Some(95174), None),
      /// Allows defining an `#[alloc_error_handler]`.
 diff --git a/compiler/rustc_feature/src/builtin_attrs.rs b/compiler/rustc_feature/src/builtin_attrs.rs
-index ad85231860d..cf6156eeee4 100644
+index af56a0b2459..406f226b2f1 100644
 --- a/compiler/rustc_feature/src/builtin_attrs.rs
 +++ b/compiler/rustc_feature/src/builtin_attrs.rs
 @@ -403,6 +403,8 @@ pub struct BuiltinAttribute {
@@ -530,7 +530,7 @@ index bea884c856a..2920a4eaed3 100644
      }
  
 diff --git a/compiler/rustc_span/src/symbol.rs b/compiler/rustc_span/src/symbol.rs
-index 5d5f8d6d654..68179af6be2 100644
+index 706002f79b1..3ae48059676 100644
 --- a/compiler/rustc_span/src/symbol.rs
 +++ b/compiler/rustc_span/src/symbol.rs
 @@ -331,6 +331,7 @@
@@ -541,11 +541,11 @@ index 5d5f8d6d654..68179af6be2 100644
          adt_const_params,
          advanced_slice_patterns,
          adx_target_feature,
-diff --git a/src/test/ui/feature-gates/feature-gate-address_space.rs b/src/test/ui/feature-gates/feature-gate-address_space.rs
+diff --git a/tests/ui/feature-gates/feature-gate-address_space.rs b/tests/ui/feature-gates/feature-gate-address_space.rs
 new file mode 100644
 index 00000000000..886c5b564a6
 --- /dev/null
-+++ b/src/test/ui/feature-gates/feature-gate-address_space.rs
++++ b/tests/ui/feature-gates/feature-gate-address_space.rs
 @@ -0,0 +1,13 @@
 +#[address_space(0)] //~ ERROR the `#[address_space]` attribute is an experimental feature
 +static FOO: usize = 42;
@@ -560,11 +560,11 @@ index 00000000000..886c5b564a6
 +static TOO_BIG: usize = 7;
 +
 +fn main() {}
-diff --git a/src/test/ui/feature-gates/feature-gate-address_space.stderr b/src/test/ui/feature-gates/feature-gate-address_space.stderr
+diff --git a/tests/ui/feature-gates/feature-gate-address_space.stderr b/tests/ui/feature-gates/feature-gate-address_space.stderr
 new file mode 100644
 index 00000000000..91eedd877ff
 --- /dev/null
-+++ b/src/test/ui/feature-gates/feature-gate-address_space.stderr
++++ b/tests/ui/feature-gates/feature-gate-address_space.stderr
 @@ -0,0 +1,38 @@
 +error[E0658]: the `#[address_space]` attribute is an experimental feature
 +  --> $DIR/feature-gate-address_space.rs:1:1
@@ -608,7 +608,7 @@ index 00000000000..91eedd877ff
 2.39.0
 
 
-From 70fbf06e4babcd9d5564ed4abb6e1021a7b38c42 Mon Sep 17 00:00:00 2001
+From b77bcb719e5dfee942689c0fe49253c2a121b903 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Mon, 9 Jan 2023 21:01:37 -0500
 Subject: [PATCH 5/5] Initial codegen for #[address_space], without tests yet
@@ -941,7 +941,7 @@ index 76f692b2016..b9bafd180d6 100644
                  .emit_fatal(SymbolAlreadyDefined { span: self.tcx.def_span(def_id), symbol_name })
          });
 diff --git a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
-index 279b6991854..6c5bd125ea5 100644
+index 8f94e8a4ab2..db21ca135e3 100644
 --- a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
 +++ b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
 @@ -131,8 +131,27 @@ extern "C" LLVMValueRef LLVMRustGetOrInsertFunction(LLVMModuleRef M,
