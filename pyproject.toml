@@ -1,5 +1,6 @@
 [project]
 name = "compound_prism_designer"
+license = {file = "LICENSE.md"}
 requires-python = ">=3.7"
 dependencies = [
   "numpy~=1.20",

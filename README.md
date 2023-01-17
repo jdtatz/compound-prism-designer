@@ -44,3 +44,6 @@ Optimization II](https://cs.adelaide.edu.au/users/markus/pub/2013gecco-age2.pdf)
   * Need rust version >= 1.52.0-nightly
 3. Install Cargo-make ``cargo install cargo-make``
 4. Build with ``cargo make verify-kernel``
+
+#### Copyright Notice and Disclaimer
+© NORTHEASTERN UNIVERSITY Compound Prism Designer Software used with permission. All Rights Reserved.

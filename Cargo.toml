@@ -2,6 +2,7 @@
 name = "compound_prism_designer"
 version = "0.2.0"
 authors = ["Julia Tatz <tatz.j@husky.neu.edu>"]
+license-file = "LICENSE.md"
 edition = "2021"
 include = ["/src/**/*", "/benches/**/*", "/Cargo.toml", "/pyproject.toml", "/compound_prism_designer/*.py", "/make.toml", "/README.md", "/requirements.txt", "nvptx64-nvidia-cuda.json"]
 
