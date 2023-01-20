@@ -261,7 +261,7 @@ impl<T: FloatExt, V> LinearDetectorArray<T, V> {
 impl<T: FloatExt, V: Vector<D, Scalar = T>, const D: usize> Surface<V, D>
     for LinearDetectorArray<T, V>
 {
-    fn intersection(self, ray: GeometricRay<V, D>) -> Option<GeometricRayIntersection<T, V>> {
+    fn intersection(&self, ray: GeometricRay<V, D>) -> Option<GeometricRayIntersection<T, V>> {
         let ci = -ray.direction.dot(*self.normal);
         if ci <= self.min_ci {
             // RayTraceError::SpectrometerAngularResponseTooWeak

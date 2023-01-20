@@ -152,9 +152,9 @@ impl<T: FloatExt, V: Vector<3, Scalar = T>, B: Copy + Bounds<V, 3>> HyperSurface
 
     #[inline(always)]
     fn intersection(
-        self,
+        &self,
         ray: GeometricRay<V, 3>,
-        bounds: B,
+        bounds: &B,
     ) -> Option<GeometricRayIntersection<T, V>> {
         let GeometricRay { origin, direction } = ray;
         let dp = origin - self.center;

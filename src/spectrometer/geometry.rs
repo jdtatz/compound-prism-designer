@@ -30,15 +30,15 @@ pub struct GeometricRayIntersection<T, V> {
 }
 
 pub trait Bounds<V, const DIM: usize>: Sized {
-    fn in_bounds(self, position: V) -> bool;
+    fn in_bounds(&self, position: V) -> bool;
 }
 
 pub trait HyperSurface<V: Vector<DIM>, B: Bounds<V, DIM>, const DIM: usize>: Sized {
     /// If there are multiple intersections, the closest one is returned
     fn intersection(
-        self,
+        &self,
         ray: GeometricRay<V, DIM>,
-        bounds: B,
+        bounds: &B,
     ) -> Option<GeometricRayIntersection<V::Scalar, V>>;
 }
 
@@ -46,7 +46,7 @@ pub trait HyperSurface<V: Vector<DIM>, B: Bounds<V, DIM>, const DIM: usize>: Siz
 pub struct NoBounds;
 
 impl<V: Vector<DIM>, const DIM: usize> Bounds<V, DIM> for NoBounds {
-    fn in_bounds(self, _: V) -> bool {
+    fn in_bounds(&self, _: V) -> bool {
         true
     }
 }
@@ -59,7 +59,7 @@ pub struct PrismBounds<T> {
 }
 
 impl<T: ConstZero + PartialOrd, V: Vector<2, Scalar = T>> Bounds<V, 2> for PrismBounds<T> {
-    fn in_bounds(self, position: V) -> bool {
+    fn in_bounds(&self, position: V) -> bool {
         let [_, y] = position.to_array();
         T::ZERO <= y && y <= self.height
     }
@@ -68,7 +68,7 @@ impl<T: ConstZero + PartialOrd, V: Vector<2, Scalar = T>> Bounds<V, 2> for Prism
 impl<T: Copy + ConstZero + Neg<Output = T> + PartialOrd, V: Vector<3, Scalar = T>> Bounds<V, 3>
     for PrismBounds<T>
 {
-    fn in_bounds(self, position: V) -> bool {
+    fn in_bounds(&self, position: V) -> bool {
         let [_, y, z] = position.to_array();
         T::ZERO <= y && y <= self.height && -self.half_width <= z && z <= self.half_width
     }
@@ -84,7 +84,7 @@ pub struct RadialBounds<T, V> {
 impl<T: ConstZero + Float, V: Vector<DIM, Scalar = T>, const DIM: usize> Bounds<V, DIM>
     for RadialBounds<T, V>
 {
-    fn in_bounds(self, position: V) -> bool {
+    fn in_bounds(&self, position: V) -> bool {
         (position - self.center).norm_squared() <= self.radius_squared
     }
 }
@@ -100,7 +100,7 @@ pub struct SandwichBounds<T, V> {
 impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> Bounds<V, DIM>
     for SandwichBounds<T, V>
 {
-    fn in_bounds(self, position: V) -> bool {
+    fn in_bounds(&self, position: V) -> bool {
         let dp = self.normal.dot(position - self.center);
         T::ZERO <= dp && dp <= self.height
     }
@@ -121,9 +121,9 @@ impl<
     > HyperSurface<V, B, DIM> for HyperPlane<V>
 {
     fn intersection(
-        self,
+        &self,
         ray: GeometricRay<V, DIM>,
-        bounds: B,
+        bounds: &B,
     ) -> Option<GeometricRayIntersection<T, V>> {
         // https://en.wikipedia.org/wiki/Line–plane_intersection
         let GeometricRay { origin, direction } = ray;
@@ -190,9 +190,9 @@ impl<T: FloatExt, P, V: Vector<2, Scalar = T>, B: Copy + Bounds<V, 2>> HyperSurf
     for SphericalLikeSurface<T, V, P>
 {
     fn intersection(
-        self,
+        &self,
         ray: GeometricRay<V, 2>,
-        bounds: B,
+        bounds: &B,
     ) -> Option<GeometricRayIntersection<T, V>> {
         let GeometricRay { origin, direction } = ray;
         let inter = spherical_ray_intersection(self.center, self.radius.sqr(), ray);
@@ -342,7 +342,7 @@ pub type CurvedPlane<V, const DIM: usize> = BoundedHyperSurface<
 
 pub trait Surface<V: Vector<DIM>, const DIM: usize>: Sized {
     fn intersection(
-        self,
+        &self,
         ray: GeometricRay<V, DIM>,
     ) -> Option<GeometricRayIntersection<V::Scalar, V>>;
 }
@@ -353,7 +353,7 @@ where
     B: Bounds<V, DIM>,
 {
     fn intersection(
-        self,
+        &self,
         ray: GeometricRay<V, DIM>,
     ) -> Option<GeometricRayIntersection<V::Scalar, V>> {
         let Self {
