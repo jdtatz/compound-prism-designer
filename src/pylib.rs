@@ -1,8 +1,5 @@
 use crate::spectrometer::*;
-use core::{
-    convert::TryInto,
-    simd::{Simd, SimdElement, SimdFloat},
-};
+use core::convert::TryInto;
 use ndarray::Array2;
 use numpy::{PyArray1, PyArray2, ToPyArray};
 use pyo3::{create_exception, gc::PyVisit, prelude::*, wrap_pyfunction, PyTraverseError};
@@ -463,7 +460,7 @@ macro_rules! define_sized_compound_prism {
             #[derive(Debug, Clone, Copy, From, WrappedFrom)]
             #[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
             enum SizedCompoundPrism<F: FloatExt, S0, SI, SN, const D: usize> {
-                $( [<CompoundPrism $n>](CompoundPrism<F, S0, SI, SN, [PrismSurface<F, SI> ;$n]>) ),*
+                $( [<CompoundPrism $n>](CompoundPrismTypeHelper<F, S0, SI, SN, ArrayFamily<$n>>) ),*
             }
         }
     };
@@ -556,7 +553,7 @@ where
 
     fn exit_ray(&self, y: f64, wavelength: f64) -> PyResult<(PyVector2D, PyUnitVector2D)> {
         let ray = Ray::new_from_start(y);
-        match map_sized_compound_prism!(self => |c| ray.propagate_internal(c, wavelength)) {
+        match map_sized_compound_prism!(self => |c| c.propagate(ray, wavelength)) {
             Ok(r) => Ok((
                 PyVector2D::lossy_from_vector(r.origin),
                 PyUnitVector2D::lossy_from_vector(r.direction),
@@ -813,7 +810,7 @@ fn position_detector_array(
     beam: BeamDistributions,
     acceptance: f64,
 ) -> PyResult<((f64, f64), bool)> {
-    let (pos, flipped) = map_dimensioned_sized_compound_prism!(compound_prism.compound_prism => |prism|
+    let (pos, flipped) = map_dimensioned_sized_compound_prism!(&compound_prism.compound_prism => |prism|
         map_beam_distributions!(beam => |beam|
             map_wavelength_distributions!(wavelengths => |ws|
                 detector_array_positioning(

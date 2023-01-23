@@ -93,7 +93,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let [first_length, lengths @ ..] = lengths;
     let height = 2.5;
     let width = 2.0;
-    let prism: CompoundPrism<_, Plane<_, 2>, _, CurvedPlane<_, 2>, _> = CompoundPrism::new(
+    let prism = CompoundPrism::new(
         glass0,
         glasses,
         first_angle,
@@ -124,7 +124,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let spec_max_accepted_angle = (60_f32).to_radians();
     let det_angle = 0.0;
     let (det_pos, det_flipped): (SimdVector<_, 2>, bool) =
-        detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
+        detector_array_positioning(&prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
             .expect("This is a valid spectrometer design.");
     let detarr = LinearDetectorArray::new(
         NBIN as u32,
@@ -144,7 +144,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         compound_prism: prism,
         detector: detarr,
     };
-    let spec: &Spectrometer<_, _, _, _, _, _, _, [_]> = &spec;
+    let spec: &Spectrometer<_, _, _, _, FocusingPlanerCompoundPrism<_, SliceFamily>> = &spec;
     let cpu_fitness = fitness(spec, 16_384, 16_384);
     #[cfg(feature = "cuda")]
     let gpu_fitness = cuda_fitness(spec, &[0.798713], 256, 2, 16_384)

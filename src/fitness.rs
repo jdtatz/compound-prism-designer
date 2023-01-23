@@ -226,7 +226,7 @@ mod tests {
         let spec_max_accepted_angle = (60_f64).to_radians();
         let det_angle = 0.0;
         let (det_pos, det_flipped): (SimdVector<_, 2>, bool) =
-            detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
+            detector_array_positioning(&prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
                 .expect("This is a valid spectrometer design.");
         let detarr = LinearDetectorArray::new(
             NBIN as u32,

@@ -71,10 +71,10 @@ pub trait PropagationKernel<V: Vector<DIM>, const DIM: usize>:
 }
 
 macro_rules! kernel_impl {
-    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $d:literal) => {
+    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $cmpnd:ident $d:literal) => {
         paste::paste! {
-            impl Kernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>]> {
-                const NAME: &'static CStr = cstr!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>]));
+            impl Kernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, SliceFamily>> {
+                const NAME: &'static CStr = cstr!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $cmpnd:snake>]));
 
                 unsafe fn launch(function: Function, grid: u32, block: u32, shared_memory_size: u32, stream: &Stream, seed: $fty, max_eval: u32, dev_spec: DevicePointer<u8>, meta: <Self as Pointee>::Metadata, dev_probs: DevicePointer<$fty>) -> rustacuda::error::CudaResult<()> {
                     launch!(function<<<grid, block, shared_memory_size, stream>>>(
@@ -87,8 +87,8 @@ macro_rules! kernel_impl {
                 }
 
             }
-            impl PropagationKernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>]> {
-                const NAME: &'static CStr = cstr!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>]));
+            impl PropagationKernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, SliceFamily>> {
+                const NAME: &'static CStr = cstr!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $cmpnd:snake>]));
 
                 unsafe fn launch(
                     function: Function,
@@ -115,10 +115,10 @@ macro_rules! kernel_impl {
             }
         }
     };
-    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
+    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $cmpnd:ident $n:literal $d:literal) => {
         paste::paste! {
-            impl Kernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>; $n]> {
-                const NAME: &'static CStr = cstr!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]));
+            impl Kernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, ArrayFamily<$n>>> {
+                const NAME: &'static CStr = cstr!(stringify!([<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $cmpnd:snake _ $n>]));
 
                 unsafe fn launch(function: Function, grid: u32, block: u32, shared_memory_size: u32, stream: &Stream, seed: $fty, max_eval: u32, dev_spec: DevicePointer<u8>, _meta: <Self as Pointee>::Metadata, dev_probs: DevicePointer<$fty>) -> rustacuda::error::CudaResult<()> {
                     launch!(function<<<grid, block, shared_memory_size, stream>>>(
@@ -129,8 +129,8 @@ macro_rules! kernel_impl {
                     ))
                 }
             }
-            impl PropagationKernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>; $n]> {
-                const NAME: &'static CStr = cstr!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>]));
+            impl PropagationKernel<$v, $d> for Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, ArrayFamily<$n>>> {
+                const NAME: &'static CStr = cstr!(stringify!([<propagation_test_kernel_ $fname _ $beam:snake _ $cmpnd:snake _ $n>]));
 
                 unsafe fn launch(
                     function: Function,
@@ -158,10 +158,10 @@ macro_rules! kernel_impl {
         }
     };
     ([$($n:literal),*]) => {
-        kernel_impl!(@inner f32; SimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
-        $( kernel_impl!(@inner f32; SimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        kernel_impl!(@inner f32; SimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens 3 );
-        $( kernel_impl!(@inner f32; SimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
+        kernel_impl!(@inner f32; SimdVector<f32, 2> ; f32 GaussianBeam FocusingPlanerCompoundPrism 2);
+        $( kernel_impl!(@inner f32; SimdVector<f32, 2> ; f32 GaussianBeam FocusingPlanerCompoundPrism $n 2); )*
+        kernel_impl!(@inner f32; SimdVector<f32, 4> ; f32 FiberBeam  CulminatingToricCompoundPrism 3);
+        $( kernel_impl!(@inner f32; SimdVector<f32, 4> ; f32 FiberBeam   CulminatingToricCompoundPrism  $n 3); )*
     };
 }
 kernel_impl!([0, 1, 2, 3, 4, 5, 6]);
@@ -505,7 +505,7 @@ mod tests {
         let spec_max_accepted_angle = (60_f32).to_radians();
         let det_angle = 0.0;
         let (det_pos, det_flipped) =
-            detector_array_positioning(prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
+            detector_array_positioning(&prism, pmt_length, det_angle, wavelengths, &beam, 1.0)
                 .expect("This is a valid spectrometer design.");
         let detarr = LinearDetectorArray::new(
             NBIN as u32,

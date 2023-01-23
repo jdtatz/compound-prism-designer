@@ -1,6 +1,7 @@
 use crate::spectrometer::{
-    kernel::*, Beam, CurvedPlane, FastSimdVector, FiberBeam, GaussianBeam, GenericSpectrometer,
-    Plane, PrismSurface, SimpleVector, Spectrometer, ToricLens, UniformDistribution, Welford,
+    kernel::*, ArrayFamily, Beam, CulminatingToricCompoundPrism, CurvedPlane, FastSimdVector,
+    FiberBeam, FocusingPlanerCompoundPrism, GaussianBeam, GenericSpectrometer, Plane, SimpleVector,
+    SliceFamily, Spectrometer, ToricLens, UniformDistribution, Welford,
 };
 use core::{arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
 use nvptx_sys::{
@@ -77,13 +78,13 @@ extern "C" {
 }
 
 macro_rules! gen_kernel {
-    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $d:literal) => {
+    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $cmpnd:ident $d:literal) => {
         paste::paste! {
             #[no_mangle]
-            pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>] (
+            pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $cmpnd:snake>] (
                 seed: $fty,
                 max_evals: u32,
-                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>]>,
+                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, SliceFamily>>,
                 prob: *mut $fty,
             ) {
                 // let (ptr, _dyn_mem) = dynamic_shared_memory();
@@ -94,8 +95,8 @@ macro_rules! gen_kernel {
             }
 
             #[no_mangle]
-            pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $d d>] (
-                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>]>,
+            pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $cmpnd:snake>] (
+                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, SliceFamily>>,
                 wavelength_cdf_ptr: *const $fty,
                 ray_cdf_ptr: *const <$beam<$fty> as Beam<$v, $d>>::Quasi,
                 bin_index_ptr: *mut u32,
@@ -105,13 +106,13 @@ macro_rules! gen_kernel {
             }
         }
     };
-    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $s0:ident $sn:ident $n:literal $d:literal) => {
+    (@inner $fty:ty ; $v:ty ; $fname:ident $beam:ident $cmpnd:ident $n:literal $d:literal) => {
         paste::paste! {
             #[no_mangle]
-            pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
+            pub unsafe extern "ptx-kernel" fn [<prob_dets_given_wavelengths_ $fname _ $beam:snake _ $cmpnd:snake _ $n>] (
                 seed: $fty,
                 max_evals: u32,
-                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>; $n]>,
+                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, ArrayFamily<$n>>>,
                 prob: *mut $fty,
             ) {
                 // let (ptr, _dyn_mem) = dynamic_shared_memory();
@@ -122,8 +123,8 @@ macro_rules! gen_kernel {
             }
 
             #[no_mangle]
-            pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $s0:snake _ $sn:snake _ $n _ $d d>] (
-                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $s0<$v, $d>, Plane<$v, $d>, $sn<$v, $d>, [PrismSurface<$fty, Plane<$v, $d>>; $n]>,
+            pub unsafe extern "ptx-kernel" fn [<propagation_test_kernel_ $fname _ $beam:snake _ $cmpnd:snake _ $n>] (
+                spectrometer: &Spectrometer<$fty, $v, UniformDistribution<$fty>, $beam<$fty>, $cmpnd<$v, ArrayFamily<$n>>>,
                 wavelength_cdf_ptr: *const $fty,
                 ray_cdf_ptr: *const <$beam<$fty> as Beam<$v, $d>>::Quasi,
                 bin_index_ptr: *mut u32,
@@ -134,14 +135,14 @@ macro_rules! gen_kernel {
         }
     };
     ([$($n:literal),*]) => {
-        gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
-        $( gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens   3);
-        $( gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 4> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
-        // gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam Plane     CurvedPlane 2);
-        // $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam Plane     CurvedPlane $n 2); )*
-        // gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    ToricLens ToricLens   3);
-        // $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    ToricLens ToricLens   $n 3); )*
+        gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 2> ; f32 GaussianBeam FocusingPlanerCompoundPrism 2);
+        $( gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 2> ; f32 GaussianBeam FocusingPlanerCompoundPrism $n 2); )*
+        gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 4> ; f32 FiberBeam    CulminatingToricCompoundPrism   3);
+        $( gen_kernel!(@inner FastFloat<f32>; FastSimdVector<f32, 4> ; f32 FiberBeam    CulminatingToricCompoundPrism   $n 3); )*
+        // gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam FocusingPlanerCompoundPrism 2);
+        // $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 2> ; f32 GaussianBeam FocusingPlanerCompoundPrism $n 2); )*
+        // gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    CulminatingToricCompoundPrism   3);
+        // $( gen_kernel!(@inner FastFloat<f32>; SimpleVector<FastFloat<f32>, 3> ; f32 FiberBeam    CulminatingToricCompoundPrism   $n 3); )*
     };
 }
 

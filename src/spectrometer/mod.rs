@@ -22,7 +22,11 @@ pub use self::erf::norminv;
 pub use self::geometry::*;
 pub use self::glasscat::Glass;
 pub use self::qrng::{Qrng, QuasiRandom};
-pub use self::ray::{CompoundPrism, DetectorArray, PrismSurface, Ray, RayTraceError};
+pub use self::ray::{
+    ArrayFamily, ArrayLikeFamily, CompoundPrism, CompoundPrismTypeHelper,
+    CulminatingToricCompoundPrism, DetectorArray, FocusingPlanerCompoundPrism,
+    GenericCompoundPrism, Ray, RayTraceError, SliceFamily,
+};
 pub use self::spectrometer::{
     detector_array_positioning, Beam, FiberBeam, GaussianBeam, GenericSpectrometer,
     LinearDetectorArray, Spectrometer,

@@ -1,10 +1,10 @@
 use super::geometry::*;
 use super::qrng::QuasiRandom;
-use super::ray::{Array, PrismSurface};
+use super::ray::GenericCompoundPrism;
 use super::utils::*;
 use super::{distribution::Distribution, UnitVector, Vector};
 use super::{distribution::UniformDiscDistribution, erf::norminv};
-use crate::{CompoundPrism, DetectorArray, Ray, RayTraceError};
+use crate::{DetectorArray, Ray, RayTraceError};
 
 pub trait Beam<V: Vector<DIM>, const DIM: usize>: Distribution<Self::Quasi, Ray<V, DIM>> {
     type Quasi: QuasiRandom<Scalar = V::Scalar>;
@@ -323,13 +323,10 @@ pub fn detector_array_positioning<
     V: Vector<D, Scalar = T>,
     W: Distribution<T>,
     B: Beam<V, D>,
-    S0: Copy + Surface<V, D>,
-    SI: Copy + Surface<V, D>,
-    SN: Copy + Surface<V, D>,
-    L: Array<Item = PrismSurface<T, SI>>,
+    C: ?Sized + GenericCompoundPrism<V, D>,
     const D: usize,
 >(
-    cmpnd: CompoundPrism<T, S0, SI, SN, L>,
+    cmpnd: &C,
     detector_array_length: T,
     detector_array_angle: T,
     wavelengths: W,
@@ -346,8 +343,8 @@ pub fn detector_array_positioning<
     debug_assert!(wmax.is_finite());
     debug_assert!(wmin > T::zero());
     debug_assert!(wmax > wmin);
-    let lower_ray = ray.propagate_internal(&cmpnd, wmin)?;
-    let upper_ray = ray.propagate_internal(&cmpnd, wmax)?;
+    let lower_ray = cmpnd.propagate(ray, wmin)?;
+    let upper_ray = cmpnd.propagate(ray, wmax)?;
     if lower_ray.average_transmittance() <= T::lossy_from(1e-3f64)
         || upper_ray.average_transmittance() <= T::lossy_from(1e-3f64)
     {
@@ -389,11 +386,11 @@ pub trait GenericSpectrometer<V: Vector<DIM, Scalar = Self::Scalar>, const DIM: 
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
 #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
-pub struct Spectrometer<T, V, W, B, S0, SI, SN, L: ?Sized + Array<Item = PrismSurface<T, SI>>> {
+pub struct Spectrometer<T, V, W, B, C: ?Sized> {
     pub wavelengths: W,
     pub beam: B,
     pub detector: LinearDetectorArray<T, V>,
-    pub compound_prism: CompoundPrism<T, S0, SI, SN, L>,
+    pub compound_prism: C,
 }
 
 impl<
@@ -401,12 +398,9 @@ impl<
         V: Vector<D, Scalar = T>,
         W: Copy + Distribution<T>,
         B: Copy + Beam<V, D>,
-        S0: Copy + Surface<V, D>,
-        SI: Copy + Surface<V, D>,
-        SN: Copy + Surface<V, D>,
-        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
+        C: ?Sized + GenericCompoundPrism<V, D>,
         const D: usize,
-    > GenericSpectrometer<V, D> for Spectrometer<T, V, W, B, S0, SI, SN, L>
+    > GenericSpectrometer<V, D> for Spectrometer<T, V, W, B, C>
 {
     type Scalar = T;
     type Q = B::Quasi;
@@ -425,8 +419,11 @@ impl<
     }
 
     fn propagate(&self, ray: Ray<V, D>, wavelength: T) -> Result<(u32, T), RayTraceError> {
-        ray.propagate(wavelength, &self.compound_prism, &self.detector)
-            .map(|(idx, t)| (idx, t))
+        let (_, idx, t) = self
+            .compound_prism
+            .propagate(ray, wavelength)?
+            .intersect_detector_array(&self.detector)?;
+        Ok((idx, t))
     }
 
     fn size_and_deviation(&self) -> (T, T) {
@@ -444,7 +441,26 @@ impl<
         ray: Ray<V, D>,
         wavelength: T,
     ) -> Self::PropagationPathIter<'s> {
-        ray.trace(wavelength, &self.compound_prism, self.detector)
+        let mut ray = ray;
+        let mut done = false;
+        let mut inner_trace = self.compound_prism.propagate_trace(ray, wavelength);
+        core::iter::from_fn(move || -> Option<_> {
+            match inner_trace.next() {
+                Some(r) => {
+                    ray = r;
+                    Some(GeometricRay::from(r))
+                }
+                None if !done => {
+                    done = true;
+                    let (pos, _, _) = ray.intersect_detector_array(&self.detector).ok()?;
+                    Some(GeometricRay {
+                        origin: pos,
+                        direction: ray.direction,
+                    })
+                }
+                None => None,
+            }
+        })
     }
 }
 
@@ -522,15 +538,7 @@ impl<
 //     // }
 // }
 
-unsafe impl<
-        T: rustacuda_core::DeviceCopy,
-        V: rustacuda_core::DeviceCopy,
-        W,
-        B,
-        S0,
-        SI,
-        SN,
-        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
-    > rustacuda_core::DeviceCopy for Spectrometer<T, V, W, B, S0, SI, SN, L>
+unsafe impl<T: rustacuda_core::DeviceCopy, V: rustacuda_core::DeviceCopy, W, B, C: ?Sized>
+    rustacuda_core::DeviceCopy for Spectrometer<T, V, W, B, C>
 {
 }

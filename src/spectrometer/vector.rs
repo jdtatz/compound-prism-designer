@@ -437,6 +437,22 @@ impl<V> UnitVector<V> {
             None
         }
     }
+
+    pub fn unit_x<const DIM: usize>() -> Self
+    where
+        V: Vector<DIM>,
+        <V as Vector<DIM>>::Scalar: ConstZero + ConstOne,
+    {
+        Self(V::from_xy(V::Scalar::ONE, V::Scalar::ZERO))
+    }
+
+    pub fn unit_y<const DIM: usize>() -> Self
+    where
+        V: Vector<DIM>,
+        <V as Vector<DIM>>::Scalar: ConstZero + ConstOne,
+    {
+        Self(V::from_xy(V::Scalar::ZERO, V::Scalar::ONE))
+    }
 }
 
 impl<V: Neg<Output = V>> Neg for UnitVector<V> {
