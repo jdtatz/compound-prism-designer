@@ -5,8 +5,8 @@ use crate::spectrometer::{
 };
 use core::{arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
 use nvptx_sys::{
-    blockDim, blockIdx, gridDim, syncthreads, threadIdx, vote_any,
-    vote_ballot, warp_sync, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
+    blockDim, blockIdx, gridDim, laneid, syncthreads, threadIdx, vote_any, vote_ballot, warp_sync,
+    warpsize, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
 };
 
 unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
@@ -24,10 +24,17 @@ unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
     &*(dest as *const T)
 }
 
+const fn ilog2_u32(v: u32) -> u32 {
+    (u32::BITS - 1) - v.leading_zeros()
+}
+const WARP_SIZE: u32 = 32;
+const WARP_SIZE_LG2: u32 = ilog2_u32(WARP_SIZE);
+
 struct CUDAGPU;
 impl GPU for CUDAGPU {
-    fn warp_size() -> u32 {
-        32
+    fn warp_size_log2() -> u32 {
+        // ilog2_u32(warpsize())
+        WARP_SIZE_LG2
     }
     fn thread_id() -> u32 {
         threadIdx::x()
@@ -40,6 +47,10 @@ impl GPU for CUDAGPU {
     }
     fn grid_dim() -> u32 {
         gridDim::x()
+    }
+
+    fn lane_id() -> u32 {
+        laneid()
     }
 
     fn sync_warp() {

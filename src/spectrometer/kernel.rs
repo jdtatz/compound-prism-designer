@@ -3,55 +3,85 @@ use core::ptr::NonNull;
 use core::slice::from_raw_parts_mut;
 
 pub trait GPU {
-    fn warp_size() -> u32;
+    /// Must be in the range `[0, 7]` as derived from the [GPU::warp_size] requirements
+    fn warp_size_log2() -> u32;
+    /// It must be a power-of-two & in the range `[1, 128]` [see the vulkan spec](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/SubgroupSize.html)
+    /// * `WARP_SZ` in CUDA
+    /// * `SubgroupSize` in SPIR-V
+    fn warp_size() -> u32 {
+        1 << Self::warp_size_log2()
+    }
+    /// * `threadIdx.x` in CUDA
+    /// * `LocalInvocationId.x` or `LocalInvocationIndex` in SPIR-V
     fn thread_id() -> u32;
+    /// * `blockDim.x` in CUDA
+    /// * `WorkgroupSize.x`(deprecated) or `LocalSizeId.x` in SPIR-V
     fn block_dim() -> u32;
+    /// * `blockIdx.x` in CUDA
+    /// * `WorkgroupId.x` in SPIR-V
     fn block_id() -> u32;
+    /// * `gridDim.x` in CUDA
+    /// * `NumWorkgroups.x` in SPIR-V
     fn grid_dim() -> u32;
 
+    /// `SubgroupLocalInvocationId` in SPIR-V
     fn lane_id() -> u32 {
         Self::thread_id() % Self::warp_size()
     }
+    /// `SubgroupId` in SPIR-V
     fn warp_id() -> u32 {
-        Self::thread_id() / Self::warp_size()
+        Self::thread_id() >> Self::warp_size_log2()
     }
+    /// `SubgroupsPerWorkgroup` or `NumSubgroups` in SPIR-V
     fn nwarps() -> u32 {
-        Self::block_dim() / Self::warp_size()
+        Self::block_dim() >> Self::warp_size_log2()
     }
     fn global_warp_id() -> u32 {
         Self::block_id() * Self::nwarps() + Self::warp_id()
     }
+    /// `GlobalInvocationId.x` in SPIR-V
+    fn global_thread_id() -> u32 {
+        Self::block_id() * Self::block_dim() + Self::thread_id()
+    }
 
+    /// * `__syncwarp()` in CUDA
+    /// * `OpControlBarrier` in SPIR-V
     fn sync_warp();
+    /// * `__any_sync()` in CUDA
+    /// * `OpGroupAny` or `OpGroupNonUniformAny` in SPIR-V
     fn warp_any(pred: bool) -> bool;
+    /// * `__ballot_sync($pred).count_ones()`
+    /// * `OpGroupNonUniformBallotBitCount(OpGroupNonUniformBallot())` in SPIR-V
     fn warp_ballot(pred: bool) -> u32;
 }
 
 pub trait GPUShuffle<T: Copy>: GPU {
+    /// * `__shfl_xor_sync` in CUDA
+    /// * `OpGroupNonUniformShuffleXor` in SPIR-V
     fn shfl_bfly_sync(val: T, lane_mask: u32) -> T;
     fn warp_fold<Op: Fn(T, T) -> T>(mut val: T, fold: Op) -> T {
-        let mut xor = Self::warp_size();
-        while xor > 1 {
-            xor >>= 1;
-            val = fold(val, Self::shfl_bfly_sync(val, xor));
+        let mut xor = Self::warp_size_log2();
+        while xor > 0 {
+            xor -= 1;
+            val = fold(val, Self::shfl_bfly_sync(val, 1 << xor));
         }
         val
     }
+    /// * `__reduce_min_sync` in CUDA (compute capability >=8.x)
+    /// * `OpGroupUMin` or `OpGroupNonUniformUMin` in SPIR-V
     fn warp_min(val: T) -> T
     where
         T: core::cmp::Ord,
     {
         Self::warp_fold(val, core::cmp::min)
     }
-}
-
-impl<F: Copy, G: GPUShuffle<F>> GPUShuffle<Welford<F>> for G {
-    fn shfl_bfly_sync(val: Welford<F>, lane_mask: u32) -> Welford<F> {
-        Welford {
-            count: G::shfl_bfly_sync(val.count, lane_mask),
-            mean: G::shfl_bfly_sync(val.mean, lane_mask),
-            m2: G::shfl_bfly_sync(val.m2, lane_mask),
-        }
+    /// * `__reduce_add_sync` in CUDA (compute capability >=8.x & `u32` only)
+    /// * `OpGroupIAdd` / `OpGroupFAdd` or `OpGroupNonUniformIAdd` / `OpGroupNonUniformFAdd` in SPIR-V
+    fn warp_sum(val: T) -> T
+    where
+        T: core::ops::Add<Output = T>,
+    {
+        Self::warp_fold(val, core::ops::Add::add)
     }
 }
 
@@ -119,19 +149,23 @@ pub unsafe fn kernel<
                 core::hint::unreachable_unchecked()
             }
             det_count -= G::warp_ballot(bin_index == min_index);
-            let bin_t = if bin_index == min_index { t } else { F::zero() };
-            let mut welford = if laneid == 0 {
-                shared[min_index as usize]
-            } else {
-                Welford::NEW
+            let welford = {
+                let bin_t = if bin_index == min_index { t } else { F::zero() };
+
+                let warp_mean = G::warp_sum(bin_t) / F::lossy_from(G::warp_size());
+                let warp_m2 = G::warp_sum((bin_t - warp_mean).sqr());
+                let warp_welford = Welford {
+                    count: F::lossy_from(G::warp_size()),
+                    mean: warp_mean,
+                    m2: warp_m2,
+                };
+                let shared_welford = shared[min_index as usize];
+                shared_welford + warp_welford
             };
-            welford.next_sample(bin_t);
-            welford = G::warp_fold(welford, |w1, w2| w1 + w2);
-            welford.skip(count);
+            G::sync_warp();
             if laneid == 0 {
                 shared[min_index as usize] = welford;
             }
-            G::sync_warp();
             finished = finished && welford.sem_le_error_threshold(F::lossy_from(MAX_ERR_SQR));
             if bin_index == min_index {
                 bin_index = nbin;
@@ -172,7 +206,7 @@ pub unsafe fn propagation_test_kernel<
 ) {
     let nbin = spectrometer.detector_bin_count();
 
-    let id = G::global_warp_id() * G::warp_size() + G::lane_id();
+    let id = G::global_thread_id();
 
     let u = wavelength_cdf_ptr.as_ptr().add(id as _).read();
     let wavelength = spectrometer.sample_wavelength(u);

@@ -545,8 +545,8 @@ mod tests {
         struct MockGpu;
 
         impl crate::spectrometer::kernel::GPU for MockGpu {
-            fn warp_size() -> u32 {
-                1
+            fn warp_size_log2() -> u32 {
+                0
             }
 
             fn global_warp_id() -> u32 {
