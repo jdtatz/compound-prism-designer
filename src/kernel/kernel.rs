@@ -5,7 +5,7 @@ use crate::spectrometer::{
 };
 use core::{arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
 use nvptx_sys::{
-    blockDim, blockIdx, dynamic_shared_memory, gridDim, syncthreads, threadIdx, vote_any,
+    blockDim, blockIdx, gridDim, syncthreads, threadIdx, vote_any,
     vote_ballot, warp_sync, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
 };
 

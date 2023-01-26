@@ -6,10 +6,6 @@
 .target sm_32
 .address_size 64
 
-
-.extern .shared .align 16 .b8 dynamic_shared_memory[];
-
-
 	// .globl	prob_dets_given_wavelengths_f32_gaussian_beam_focusing_planer_compound_prism
 .extern .shared .align 8 .b8 DYN_SHARED[];
 

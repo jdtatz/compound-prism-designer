@@ -20,7 +20,7 @@ args = [
     "--lib",
     "--no-default-features",
     "--release",
-    "--target=nvptx64-nvidia-cuda.json",
+    "--target=nvptx64-nvidia-cuda",
     "--crate-type=cdylib",
     "-Z", "build-std=core",
     "-Z", "build-std-features=panic_immediate_abort",

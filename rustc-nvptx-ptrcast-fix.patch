@@ -1,7 +1,7 @@
-From 76022b970238c8ebf59bb1ae3a175f9557f7550c Mon Sep 17 00:00:00 2001
+From 7524e634ae1d1276f73dc1947641f3f84a5fce05 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Sun, 3 Jul 2022 13:48:14 -0400
-Subject: [PATCH 1/5] Can't bitcast pointers in diffrent address spaces Use
+Subject: [PATCH 1/6] Can't bitcast pointers in diffrent address spaces Use
  pointercast instead After llvm transitions to opaque pointers, this will not
  always be necessary Keeping asserts for now, but need to be removed
 
@@ -13,7 +13,7 @@ Subject: [PATCH 1/5] Can't bitcast pointers in diffrent address spaces Use
  4 files changed, 49 insertions(+), 13 deletions(-)
 
 diff --git a/compiler/rustc_codegen_llvm/src/builder.rs b/compiler/rustc_codegen_llvm/src/builder.rs
-index 5bf45a81e43..25470226672 100644
+index 5e98deae48a..3e49ff099b3 100644
 --- a/compiler/rustc_codegen_llvm/src/builder.rs
 +++ b/compiler/rustc_codegen_llvm/src/builder.rs
 @@ -837,6 +837,14 @@ fn inttoptr(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
@@ -69,7 +69,7 @@ index 5bf45a81e43..25470226672 100644
                      actual_val
                  }
 diff --git a/compiler/rustc_codegen_llvm/src/intrinsic.rs b/compiler/rustc_codegen_llvm/src/intrinsic.rs
-index 680d810f78e..a1c6f9a7712 100644
+index a6a75eff9a3..9bbaa1afdd2 100644
 --- a/compiler/rustc_codegen_llvm/src/intrinsic.rs
 +++ b/compiler/rustc_codegen_llvm/src/intrinsic.rs
 @@ -316,15 +316,15 @@ fn codegen_intrinsic_call(
@@ -111,7 +111,7 @@ index 680d810f78e..a1c6f9a7712 100644
          let catch_ty = bx.type_func(&[bx.type_i8p(), bx.type_i8p()], bx.type_void());
          bx.call(catch_ty, None, catch_func, &[data, catch_data], None);
 diff --git a/compiler/rustc_codegen_ssa/src/base.rs b/compiler/rustc_codegen_ssa/src/base.rs
-index f7312f6fcda..10b3651d9f6 100644
+index 32d3cfe6fc6..7c08b8ed08a 100644
 --- a/compiler/rustc_codegen_ssa/src/base.rs
 +++ b/compiler/rustc_codegen_ssa/src/base.rs
 @@ -254,7 +254,13 @@ pub fn unsize_ptr<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
@@ -168,13 +168,13 @@ index 34a5b638d7e..02b0b452dc2 100644
              (OperandValue::Pair(..), _) => bug!(),
              (OperandValue::Ref(..), _) => bug!(),
 -- 
-2.39.0
+2.39.1
 
 
-From 0ee93c8b2b210911261f0c62aa857ac5a93f2d00 Mon Sep 17 00:00:00 2001
+From 612d419fa0a4447d966996e3a809fd71ba044baa Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Sun, 3 Jul 2022 22:32:56 -0400
-Subject: [PATCH 2/5] nvptx fixes
+Subject: [PATCH 2/6] nvptx fixes
 
 ---
  compiler/rustc_target/src/abi/call/nvptx64.rs | 59 ++-----------------
@@ -313,13 +313,13 @@ index c319946b5f5..6282ee7ba88 100644
  // CHECK-LABEL: .visible .func sym_fn()
  // CHECK: // begin inline asm
 -- 
-2.39.0
+2.39.1
 
 
-From 9a6d5a5dc593b20e9d1f5d9bc08bd91139156c51 Mon Sep 17 00:00:00 2001
+From 366e123f3e6e215bda68d913880c9776455acad4 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Mon, 12 Sep 2022 17:45:02 -0400
-Subject: [PATCH 3/5] Fix const ptr casts too
+Subject: [PATCH 3/6] Fix const ptr casts too
 
 ---
  compiler/rustc_codegen_llvm/src/common.rs |  8 ++++----
@@ -364,7 +364,7 @@ index acee9134fb9..c80d36f1f29 100644
          PlaceRef::new_sized(llval, layout)
      }
 diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
-index 3626aa901c0..f984bb1c73e 100644
+index 16467b614fe..5aab4efea9d 100644
 --- a/compiler/rustc_codegen_llvm/src/consts.rs
 +++ b/compiler/rustc_codegen_llvm/src/consts.rs
 @@ -200,11 +200,31 @@ fn check_and_apply_linkage<'ll, 'tcx>(
@@ -400,13 +400,13 @@ index 3626aa901c0..f984bb1c73e 100644
      }
  
 -- 
-2.39.0
+2.39.1
 
 
-From 2c204b3f3be828fd5e7e7b3561bad850c7a7e92e Mon Sep 17 00:00:00 2001
+From f53723943a929dadb8cc0d2e3df43b47dd9fc5a3 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Mon, 9 Jan 2023 20:51:01 -0500
-Subject: [PATCH 4/5] Add new experimental #[address_space] built-in
+Subject: [PATCH 4/6] Add new experimental #[address_space] built-in
 
 Only the skeleton for now, no codegen yet
 ---
@@ -422,7 +422,7 @@ Only the skeleton for now, no codegen yet
  create mode 100644 tests/ui/feature-gates/feature-gate-address_space.stderr
 
 diff --git a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
-index b0fa7745667..4ba9fa930b8 100644
+index 8808ad2dcd1..14c4183ae0c 100644
 --- a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
 +++ b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
 @@ -334,6 +334,10 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, did: DefId) -> CodegenFnAttrs {
@@ -530,10 +530,10 @@ index bea884c856a..2920a4eaed3 100644
      }
  
 diff --git a/compiler/rustc_span/src/symbol.rs b/compiler/rustc_span/src/symbol.rs
-index 706002f79b1..3ae48059676 100644
+index 7597b8d126a..53fa888e20f 100644
 --- a/compiler/rustc_span/src/symbol.rs
 +++ b/compiler/rustc_span/src/symbol.rs
-@@ -331,6 +331,7 @@
+@@ -332,6 +332,7 @@
          add_assign,
          add_with_overflow,
          address,
@@ -605,13 +605,13 @@ index 00000000000..91eedd877ff
 +
 +For more information about this error, try `rustc --explain E0658`.
 -- 
-2.39.0
+2.39.1
 
 
-From b77bcb719e5dfee942689c0fe49253c2a121b903 Mon Sep 17 00:00:00 2001
+From 7e1d6e201603236d3fb75ae0915df9861c35a1a4 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Mon, 9 Jan 2023 21:01:37 -0500
-Subject: [PATCH 5/5] Initial codegen for #[address_space], without tests yet
+Subject: [PATCH 5/6] Initial codegen for #[address_space], without tests yet
 
 ---
  compiler/rustc_codegen_llvm/src/allocator.rs  |  9 +++-
@@ -662,7 +662,7 @@ index c80d36f1f29..53d94dcb0e6 100644
                  });
                  unsafe {
 diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
-index f984bb1c73e..2a54a21b17a 100644
+index 5aab4efea9d..5f9106d0141 100644
 --- a/compiler/rustc_codegen_llvm/src/consts.rs
 +++ b/compiler/rustc_codegen_llvm/src/consts.rs
 @@ -167,7 +167,7 @@ fn check_and_apply_linkage<'ll, 'tcx>(
@@ -850,7 +850,7 @@ index 6a575095f7e..c3f0b766f70 100644
  
      /// Gets declared value by name.
 diff --git a/compiler/rustc_codegen_llvm/src/intrinsic.rs b/compiler/rustc_codegen_llvm/src/intrinsic.rs
-index a1c6f9a7712..c0bcdc95519 100644
+index 9bbaa1afdd2..72c55fddd51 100644
 --- a/compiler/rustc_codegen_llvm/src/intrinsic.rs
 +++ b/compiler/rustc_codegen_llvm/src/intrinsic.rs
 @@ -564,11 +564,11 @@ fn codegen_msvc_try<'ll>(
@@ -941,7 +941,7 @@ index 76f692b2016..b9bafd180d6 100644
                  .emit_fatal(SymbolAlreadyDefined { span: self.tcx.def_span(def_id), symbol_name })
          });
 diff --git a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
-index 8f94e8a4ab2..db21ca135e3 100644
+index 87b0e1273eb..589eaafaae7 100644
 --- a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
 +++ b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
 @@ -131,8 +131,27 @@ extern "C" LLVMValueRef LLVMRustGetOrInsertFunction(LLVMModuleRef M,
@@ -1009,5 +1009,94 @@ index 8f94e8a4ab2..db21ca135e3 100644
  
  extern "C" LLVMTypeRef LLVMRustMetadataTypeInContext(LLVMContextRef C) {
 -- 
-2.39.0
+2.39.1
+
+
+From 75c460fc27885cac796fd469e80d80b5d31fba44 Mon Sep 17 00:00:00 2001
+From: Julia Tatz <julia.tatz@childrens.harvard.edu>
+Date: Wed, 25 Jan 2023 20:05:28 -0500
+Subject: [PATCH 6/6] Fix eh_catch_typeinfo, debug_gdb_scripts, & va-arg
+ bitcasts -> pointercasts
+
+---
+ compiler/rustc_codegen_llvm/src/context.rs       |  2 +-
+ compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs |  2 +-
+ compiler/rustc_codegen_llvm/src/va_arg.rs        | 12 ++++++------
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
+index 73012d6fd6f..c7aac98f4fc 100644
+--- a/compiler/rustc_codegen_llvm/src/context.rs
++++ b/compiler/rustc_codegen_llvm/src/context.rs
+@@ -917,7 +917,7 @@ pub(crate) fn eh_catch_typeinfo(&self) -> &'ll Value {
+                 self.declare_global("rust_eh_catch_typeinfo", ty, None)
+             }
+         };
+-        let eh_catch_typeinfo = self.const_bitcast(eh_catch_typeinfo, self.type_i8p());
++        let eh_catch_typeinfo = self.const_ptrcast(eh_catch_typeinfo, self.type_i8p());
+         self.eh_catch_typeinfo.set(Some(eh_catch_typeinfo));
+         eh_catch_typeinfo
+     }
+diff --git a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
+index 1be6c3a6c97..9acd35f61d6 100644
+--- a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
++++ b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
+@@ -19,7 +19,7 @@
+ pub fn insert_reference_to_gdb_debug_scripts_section_global(bx: &mut Builder<'_, '_, '_>) {
+     if needs_gdb_debug_scripts_section(bx) {
+         let gdb_debug_scripts_section =
+-            bx.const_bitcast(get_or_insert_gdb_debug_scripts_section_global(bx), bx.type_i8p());
++            bx.const_ptrcast(get_or_insert_gdb_debug_scripts_section_global(bx), bx.type_i8p());
+         // Load just the first byte as that's all that's necessary to force
+         // LLVM to keep around the reference to the global.
+         let volative_load_instruction = bx.volatile_load(bx.type_i8(), gdb_debug_scripts_section);
+diff --git a/compiler/rustc_codegen_llvm/src/va_arg.rs b/compiler/rustc_codegen_llvm/src/va_arg.rs
+index b19398e68c2..f261b0b5193 100644
+--- a/compiler/rustc_codegen_llvm/src/va_arg.rs
++++ b/compiler/rustc_codegen_llvm/src/va_arg.rs
+@@ -35,7 +35,7 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
+     let va_list_ty = bx.type_i8p();
+     let va_list_ptr_ty = bx.type_ptr_to(va_list_ty);
+     let va_list_addr = if list.layout.llvm_type(bx.cx) != va_list_ptr_ty {
+-        bx.bitcast(list.immediate(), va_list_ptr_ty)
++        bx.pointercast(list.immediate(), va_list_ptr_ty)
+     } else {
+         list.immediate()
+     };
+@@ -56,9 +56,9 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
+     if size.bytes() < slot_size.bytes() && bx.tcx().sess.target.endian == Endian::Big {
+         let adjusted_size = bx.cx().const_i32((slot_size.bytes() - size.bytes()) as i32);
+         let adjusted = bx.inbounds_gep(bx.type_i8(), addr, &[adjusted_size]);
+-        (bx.bitcast(adjusted, bx.cx().type_ptr_to(llty)), addr_align)
++        (bx.pointercast(adjusted, bx.cx().type_ptr_to(llty)), addr_align)
+     } else {
+-        (bx.bitcast(addr, bx.cx().type_ptr_to(llty)), addr_align)
++        (bx.pointercast(addr, bx.cx().type_ptr_to(llty)), addr_align)
+     }
+ }
+ 
+@@ -158,7 +158,7 @@ fn emit_aapcs_va_arg<'ll, 'tcx>(
+         reg_addr = bx.gep(bx.type_i8(), reg_addr, &[offset]);
+     }
+     let reg_type = layout.llvm_type(bx);
+-    let reg_addr = bx.bitcast(reg_addr, bx.cx.type_ptr_to(reg_type));
++    let reg_addr = bx.pointercast(reg_addr, bx.cx.type_ptr_to(reg_type));
+     let reg_value = bx.load(reg_type, reg_addr, layout.align.abi);
+     bx.br(end);
+ 
+@@ -250,10 +250,10 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
+     let val_type = layout.llvm_type(bx);
+     let val_addr = if indirect {
+         let ptr_type = bx.cx.type_ptr_to(val_type);
+-        let ptr_addr = bx.bitcast(val_addr, bx.cx.type_ptr_to(ptr_type));
++        let ptr_addr = bx.pointercast(val_addr, bx.cx.type_ptr_to(ptr_type));
+         bx.load(ptr_type, ptr_addr, bx.tcx().data_layout.pointer_align.abi)
+     } else {
+-        bx.bitcast(val_addr, bx.cx.type_ptr_to(val_type))
++        bx.pointercast(val_addr, bx.cx.type_ptr_to(val_type))
+     };
+     bx.load(val_type, val_addr, layout.align.abi)
+ }
+-- 
+2.39.1
 
