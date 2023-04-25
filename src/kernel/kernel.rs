@@ -9,19 +9,9 @@ use nvptx_sys::{
     warpsize, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
 };
 
-unsafe fn cuda_memcpy_1d<T>(dest: *mut u8, src: &T) -> &T {
-    #[allow(clippy::cast_ptr_alignment)]
-    let dest = dest as *mut u32;
-    let src = src as *const T as *const u32;
-    let count = (core::mem::size_of::<T>() / core::mem::size_of::<u32>()) as u32;
-    let mut id = threadIdx::x();
-    while id < count {
-        dest.add(id as usize)
-            .write_volatile(src.add(id as usize).read_volatile());
-        id += blockDim::x();
-    }
-    syncthreads();
-    &*(dest as *const T)
+extern "C" {
+    #[link_name = "llvm.nvvm.redux.sync.umin"]
+    fn redux_sync_min_u32(src: u32, membermask: u32) -> u32;
 }
 
 const fn ilog2_u32(v: u32) -> u32 {
@@ -64,8 +54,24 @@ impl GPU for CUDAGPU {
     }
 }
 
-impl<T: Copy + Shuffle> GPUShuffle<T> for CUDAGPU {
-    fn shfl_bfly_sync(val: T, lane_mask: u32) -> T {
+impl GPUShuffle<u32> for CUDAGPU {
+    fn shfl_bfly_sync(val: u32, lane_mask: u32) -> u32 {
+        Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
+    }
+
+    fn warp_min(val: u32) -> u32 {
+        unsafe { redux_sync_min_u32(val, ALL_MEMBER_MASK) }
+    }
+}
+
+impl GPUShuffle<f32> for CUDAGPU {
+    fn shfl_bfly_sync(val: f32, lane_mask: u32) -> f32 {
+        Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
+    }
+}
+
+impl<F: Copy + Shuffle + FastNum> GPUShuffle<FastFloat<F>> for CUDAGPU {
+    fn shfl_bfly_sync(val: FastFloat<F>, lane_mask: u32) -> FastFloat<F> {
         Shuffle::shfl_bfly(val, ALL_MEMBER_MASK, lane_mask)
     }
 }

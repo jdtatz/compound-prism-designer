@@ -33,8 +33,9 @@ args = [
     "--emit=asm=src/kernel.ptx,llvm-ir=kernel.ll",
     "-Copt-level=3",
     # "-Cdebuginfo=2",
-    "-Ctarget-cpu=sm_32",
-    "-Ctarget-feature=+ptx60",
+    "-Ctarget-cpu=sm_80",
+    "-Ctarget-feature=+ptx75",
+    # "-Z", "trait-solver=next",
     "-Z", "no-link",
     "-Z", "mir-opt-level=4",
     "-Z", "inline-mir=yes",
@@ -42,21 +43,23 @@ args = [
 ]
 
 [tasks.shader]
-toolchain = "nightly"
+# toolchain = "nightly"
+toolchain = "stage1"
 command = "cargo"
 args = [
     "rustc",
     "--lib",
-    "--manifest-path=compound_prism_designer_kernel/Cargo.toml",
     "--release",
     "--target=spirv64-unknown-unknown.json",
+    "--crate-type=cdylib",
     "-Z", "build-std=core",
+    "-Z", "build-std-features=panic_immediate_abort",
 ]
 
 [tasks.verify-kernel]
 dependencies = ["kernel"]
 command = "ptxas"
-args = ["-v", "-arch=sm_52", "src/kernel.ptx"]
+args = ["-v", "-arch=sm_80", "src/kernel.ptx"]
 
 [tasks.bench]
 env = {RUSTFLAGS = "-Ctarget-feature=+fma -Ctarget-cpu=native" }
