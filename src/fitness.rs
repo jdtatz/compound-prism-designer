@@ -91,8 +91,8 @@ pub fn mutual_information<
     let mut p_dets = vec![Welford::new(); nbin];
     // -H(D|Λ)
     let mut h_det_l_w = Welford::new();
-    let qrng = Qrng::new(F::lossy_from(0.5f64));
-    for u in qrng.take(max_n) {
+    let qrng = Qrng::new([F::lossy_from(0.5f64); 1]);
+    for [u] in qrng.take(max_n) {
         // Inverse transform sampling-method: U[0, 1) => U[wmin, wmax)
         let w = spectrometer.sample_wavelength(u);
         // p(d=D|λ=Λ)

@@ -532,7 +532,7 @@ mod tests {
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let wavelength_cdf: Vec<f32> = Standard.sample_iter(&mut rng).take(nthread).collect();
-        let ray_cdf: Vec<f32> = Standard.sample_iter(&mut rng).take(nthread).collect();
+        let ray_cdf: Vec<[f32; 1]> = Standard.sample_iter(&mut rng).take(nthread).collect();
 
         let mut lock = CACHED_CUDA_FITNESS_CONTEXT.lock();
         let state =

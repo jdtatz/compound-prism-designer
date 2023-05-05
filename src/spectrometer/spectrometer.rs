@@ -22,8 +22,8 @@ pub struct GaussianBeam<F> {
     pub y_mean: F,
 }
 
-impl<T: FloatExt, V: Vector<2, Scalar = T>> Distribution<T, Ray<V, 2>> for GaussianBeam<T> {
-    fn inverse_cdf(&self, p: T) -> Ray<V, 2> {
+impl<T: FloatExt, V: Vector<2, Scalar = T>> Distribution<[T; 1], Ray<V, 2>> for GaussianBeam<T> {
+    fn inverse_cdf(&self, [p]: [T; 1]) -> Ray<V, 2> {
         Ray::new_from_start(self.y_mean - self.width * norminv(p))
     }
 }
@@ -51,7 +51,7 @@ impl<T: FloatExt, V: Vector<3, Scalar = T>> Distribution<[T; 2], Ray<V, 3>> for 
 // }
 
 impl<T: FloatExt, V: Vector<2, Scalar = T>> Beam<V, 2> for GaussianBeam<T> {
-    type Quasi = T;
+    type Quasi = [T; 1];
 
     fn median_y(&self) -> T {
         self.y_mean
