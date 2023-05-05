@@ -18,7 +18,7 @@ where
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct SimdVector<T: SimdElement, const N: usize>(Simd<T, N>)
 where
     LaneCount<N>: SupportedLaneCount;
@@ -413,7 +413,7 @@ pub trait Vector<const DIM: usize>:
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Deref, DerefMut, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct UnitVector<V>(pub V);
 
 impl<V> UnitVector<V> {
@@ -560,7 +560,7 @@ where
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom, Deref, DerefMut)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct SimpleVector<T, const N: usize>(pub [T; N]);
 
 impl<T, const N: usize> SimpleVector<T, N> {

@@ -14,7 +14,7 @@ pub trait Beam<V: Vector<DIM>, const DIM: usize>: Distribution<Self::Quasi, Ray<
 
 /// Collimated Polychromatic Gaussian Beam
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct GaussianBeam<F> {
     /// 1/e^2 beam width
     pub width: F,
@@ -70,7 +70,7 @@ impl<T: FloatExt, V: Vector<3, Scalar = T>> Beam<V, 3> for GaussianBeam<T> {
 /// The exit position distribution is simplified from a 'Top Hat' profile to a Uniform Disc.
 /// The exit direction distribution is uniform over the acceptance cone.
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct FiberBeam<F> {
     /// Radius of fiber core
     pub radius: F,
@@ -153,7 +153,7 @@ impl<T: FloatExt, V: Vector<3, Scalar = T>> Beam<V, 3> for FiberBeam<T> {
 /// lower_bound = linear_slope * i + linear_intercept
 /// upper_bound = linear_slope * i + linear_intercept + bin_size
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct LinearDetectorArray<T, V> {
     /// The number of bins in the array
     #[wrapped_from(skip)]
@@ -250,7 +250,7 @@ impl<T: FloatExt, V> LinearDetectorArray<T, V> {
 
 // /// Positioning of detector array
 // #[derive(Debug, PartialEq, Clone, Copy, WrappedFrom)]
-// #[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+// #[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 // pub struct DetectorArrayPositioning<T, const D: usize> {
 //     /// Position vector of array
 //     pub position: V,
@@ -384,7 +384,7 @@ pub trait GenericSpectrometer<V: Vector<DIM>, const DIM: usize> {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct Spectrometer<T, V, W, B, C: ?Sized> {
     pub wavelengths: W,
     pub beam: B,

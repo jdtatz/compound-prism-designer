@@ -457,7 +457,7 @@ macro_rules! define_sized_compound_prism {
     ([$($n:literal),+]) => {
         paste::paste! {
             #[derive(Debug, Clone, Copy, From, WrappedFrom)]
-            #[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
+            #[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
             enum SizedCompoundPrism<F: FloatExt, S0, SI, SN, const D: usize> {
                 $( [<CompoundPrism $n>](CompoundPrismTypeHelper<F, S0, SI, SN, ArrayFamily<$n>>) ),*
             }
@@ -619,7 +619,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, From, WrappedFrom)]
-#[wrapped_from(trait = "LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 enum DimensionedSizedCompoundPrism<
     F: FloatExt,
     V2: Vector<2, Scalar = F>,

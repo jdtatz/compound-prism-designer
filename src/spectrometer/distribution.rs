@@ -7,7 +7,7 @@ pub trait Distribution<T, Output = T> {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct DiracDeltaDistribution<T> {
     pub value: T,
 }
@@ -19,7 +19,7 @@ impl<T: Copy> Distribution<T> for DiracDeltaDistribution<T> {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct UniformDistribution<T> {
     pub bounds: (T, T),
 }
@@ -34,7 +34,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct NormalDistribution<T> {
     pub mean: T,
     pub stddev: T,
@@ -47,7 +47,7 @@ impl<F: FloatExt> Distribution<F> for NormalDistribution<F> {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct UniformDiscDistribution<T> {
     pub radius: T,
 }

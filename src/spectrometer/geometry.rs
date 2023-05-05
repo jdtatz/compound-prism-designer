@@ -52,7 +52,7 @@ impl<V: Vector<DIM>, const DIM: usize> Bounds<V, DIM> for NoBounds {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct PrismBounds<T> {
     pub height: T,
     pub half_width: T,
@@ -75,7 +75,7 @@ impl<T: Copy + ConstZero + Neg<Output = T> + PartialOrd, V: Vector<3, Scalar = T
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct RadialBounds<T, V> {
     pub center: V,
     pub radius_squared: T,
@@ -90,7 +90,7 @@ impl<T: ConstZero + Float, V: Vector<DIM, Scalar = T>, const DIM: usize> Bounds<
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct SandwichBounds<T, V> {
     pub center: V,
     pub normal: UnitVector<V>,
@@ -107,7 +107,7 @@ impl<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM: usize> Bounds<V, DIM>
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct HyperPlane<V> {
     pub point: V,
     pub normal: UnitVector<V>,
@@ -179,7 +179,7 @@ fn spherical_ray_intersection<T: FloatExt, V: Vector<DIM, Scalar = T>, const DIM
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct SphericalLikeSurface<T, V, P> {
     pub center: V,
     pub radius: T,
@@ -215,7 +215,7 @@ impl<T: FloatExt, P, V: Vector<2, Scalar = T>, B: Copy + Bounds<V, 2>> HyperSurf
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct PlaneParametrization<T> {
     pub height: T,
     pub width: T,
@@ -242,7 +242,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct CurvedPlaneParametrization<T> {
     pub signed_normalized_curvature: T,
     pub height: T,
@@ -314,7 +314,7 @@ impl<T: FloatExt, V: Vector<2, Scalar = T>> FromParametrizedHyperPlane<V, 2> for
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct BoundedHyperSurface<V, S, B, const DIM: usize> {
     pub surface: S,
     pub bounds: B,

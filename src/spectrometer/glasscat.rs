@@ -3,7 +3,7 @@ use core::fmt::{Display, Formatter, Result, Write};
 use super::utils::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct Glass<F, const N: usize> {
     pub coefficents: [F; N],
 }

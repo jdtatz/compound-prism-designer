@@ -89,8 +89,7 @@ fn deconstruct_fields(fields: darling::ast::Fields<&WrappedFromDeriveField>) -> 
 
 fn construct_fields(
     fields: darling::ast::Fields<&WrappedFromDeriveField>,
-    impl_trait: &Path,
-    function: &Ident,
+    call: &Path,
 ) -> TokenStream {
     let mut i = 0;
     let ff = fields.map(|f| {
@@ -99,7 +98,7 @@ fn construct_fields(
         if f.skip.is_present() {
             quote!(#field)
         } else {
-            let value = quote!(#impl_trait :: #function ( #field ));
+            let value = quote!(#call ( #field ));
             if let Some(ref id) = f.ident {
                 quote!( #id : #value )
             } else {
@@ -125,9 +124,7 @@ pub struct WrappedFromDerive {
     ident: Ident,
     generics: syn::Generics,
     data: ast::Data<WrappedFromDeriveVariant, WrappedFromDeriveField>,
-    #[darling(rename = "trait")]
-    impl_trait: Path,
-    function: Ident,
+    wrapped: Path,
     #[darling(default)]
     bound: Option<darling::util::SpannedValue<String>>,
 }
@@ -190,16 +187,38 @@ impl syn::fold::Fold for EnsureSizedTypeParams {
     }
 }
 
+fn split_trait_fn_path(mut path: Path) -> syn::Result<(Path, syn::Ident)> {
+    let syn::PathSegment {
+        ident: function,
+        arguments,
+    } = path
+        .segments
+        .pop()
+        .map(syn::punctuated::Pair::into_value)
+        .ok_or_else(|| syn::Error::new(path.span(), "Empty trait::function path"))?;
+    assert!(
+        arguments.is_empty(),
+        "This shouldn't be raised, the path was parsed mod-style"
+    );
+    Ok((path, function))
+}
+
 impl ToTokens for WrappedFromDerive {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let WrappedFromDerive {
             ref ident,
             ref generics,
             ref data,
-            ref impl_trait,
-            ref function,
+            ref wrapped,
             ref bound,
         } = *self;
+
+        let (impl_trait, function) = match split_trait_fn_path(wrapped.clone()) {
+            Ok(v) => v,
+            Err(e) => {
+                return e.into_compile_error().to_tokens(tokens);
+            }
+        };
 
         let generics = syn::fold::fold_generics(&mut EnsureSizedTypeParams, generics.clone());
 
@@ -305,7 +324,7 @@ impl ToTokens for WrappedFromDerive {
                     if v.skip.is_present() {
                         quote! { #vpath #decon => #vpath #decon }
                     } else {
-                        let wcon = construct_fields(vfs.clone(), &impl_trait, &function);
+                        let wcon = construct_fields(vfs.clone(), wrapped);
                         quote! { #vpath #decon => #vpath #wcon }
                     }
                 });
@@ -317,7 +336,7 @@ impl ToTokens for WrappedFromDerive {
             }
             ast::Data::Struct(fields) => {
                 let decon = deconstruct_fields(fields.clone());
-                let wcon = construct_fields(fields.clone(), &impl_trait, &function);
+                let wcon = construct_fields(fields.clone(), wrapped);
                 quote! {
                     let #ident #decon = #wf_arg ;
                     #ident #wcon
@@ -339,7 +358,10 @@ impl ToTokens for WrappedFromDerive {
 
 fn resolve_expr_range(expr_range: syn::ExprRange) -> syn::Result<Range<usize>> {
     let syn::ExprRange {
-        from, limits, to, ..
+        start: from,
+        limits,
+        end: to,
+        ..
     } = expr_range;
     let lower = match from.as_deref() {
         Some(syn::Expr::Lit(syn::ExprLit {
@@ -381,20 +403,8 @@ pub struct WrappedFromTupleImplFn {
 
 impl syn::parse::Parse for WrappedFromTupleImplFn {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut path = input.call(Path::parse_mod_style)?;
-        let syn::PathSegment {
-            ident: function,
-            arguments,
-        } = path
-            .segments
-            .pop()
-            .map(syn::punctuated::Pair::into_value)
-            .ok_or_else(|| syn::Error::new(path.span(), "Empty trait::function path"))?;
-        assert!(
-            arguments.is_empty(),
-            "This shouldn't be raised, the path was parsed mod-style"
-        );
-        let impl_trait = path;
+        let path = input.call(Path::parse_mod_style)?;
+        let (impl_trait, function) = split_trait_fn_path(path)?;
         input.parse::<Token![for]>()?;
         let range = resolve_expr_range(input.parse()?)?;
         Ok(WrappedFromTupleImplFn {
@@ -464,7 +474,7 @@ mod tests {
     fn test1() {
         let test_input = syn::parse_str(r###"
         #[derive(WrappedFrom)]
-        #[wrapped_from(trait="crate::LossyFrom", function="lossy_from", bound="T::Item: LossyFrom<$T::Item>")]
+        #[wrapped_from(wrapped="crate::LossyFrom::lossy_from", bound="T::Item: LossyFrom<$T::Item>")]
         struct Test<T: Copy> {
             x: T,
             #[wrapped_from(skip)]

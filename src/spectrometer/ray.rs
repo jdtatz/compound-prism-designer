@@ -1,8 +1,8 @@
-use core::borrow::Borrow;
 use super::glasscat::Glass;
 use super::utils::*;
 use super::vector::{UnitVector, Vector};
 use super::{drawable::Polygon, geometry::*, Drawable};
+use core::borrow::Borrow;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -33,7 +33,7 @@ pub trait DetectorArray<V: Vector<DIM>, const DIM: usize>: Surface<V, DIM> {
 }
 
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct PrismSurface<T, S> {
     /// glass
     pub glass: Glass<T, 6>,
@@ -78,7 +78,7 @@ impl<T, const N: usize> Array for [T; N] {
 
 /// Compound Prism Specification
 #[derive(Debug, Clone, Copy, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct CompoundPrism<T, S0, SI, SN, L: ?Sized + Array<Item = PrismSurface<T, SI>>> {
     /// initial prism surface
     initial_prism: PrismSurface<T, S0>,
@@ -505,7 +505,7 @@ impl<
         let mut done = false;
         let mut propagation_fn = move || -> Result<Option<_>, P::Error> {
             if let Some(PrismSurface {
-                glass,
+                glass: _,
                 surface: surf,
             }) = prism0.take()
             {

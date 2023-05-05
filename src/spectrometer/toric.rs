@@ -13,7 +13,7 @@ fn cube<T: Copy + core::ops::Mul<T, Output = T>>(v: T) -> T {
 /// poloidal direction is cylindrical
 /// toroidal direction is spherical
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct ToricSurface<V: Vector<3>> {
     center: V,
     toroidal_normal: UnitVector<V>,
@@ -236,7 +236,7 @@ pub type ToricLens<V, const DIM: usize> =
     BoundedHyperSurface<V, ToricSurface<V>, SandwichBounds<<V as Vector<DIM>>::Scalar, V>, DIM>;
 
 #[derive(Debug, Clone, Copy, PartialEq, WrappedFrom)]
-#[wrapped_from(trait = "crate::LossyFrom", function = "lossy_from")]
+#[wrapped_from(wrapped = "crate::LossyFrom::lossy_from")]
 pub struct ToricLensParametrization<T> {
     pub signed_normalized_poloidal_curvature: T,
     pub normalized_toroidal_curvature: T,
