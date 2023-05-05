@@ -16,9 +16,8 @@ num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 rustacuda_core = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update" }
 rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update", optional = true }
 parking_lot = { version = "0.12", optional = true }
-pyo3 = { version="0.17", features = ["extension-module", "abi3-py37"], optional = true }
-numpy = { version="0.17", optional = true }
-ndarray = { version="0.15", optional = true }
+pyo3 = { version="0.18", features = ["extension-module", "abi3-py37"], optional = true }
+numpy = { version="0.18", optional = true }
 paste = "1.0"
 derive-wrapped-from = { path = "./derive-wrapped-from" }
 float_eq = { version = "1.0", default-features = false }
@@ -40,7 +39,7 @@ pprof = { version = "0.11", features = ["flamegraph", "prost-codec"] }
 default = []
 std = ["num-traits/std", "float_eq/std"]
 cuda = ["std", "rustacuda", "parking_lot"]
-pyext = ["std", "pyo3", "numpy", "ndarray"]
+pyext = ["std", "pyo3", "numpy"]
 
 [[bench]]
 name = "benchmark"

@@ -1,7 +1,6 @@
 use crate::spectrometer::*;
 use core::convert::TryInto;
-use ndarray::Array2;
-use numpy::{PyArray1, PyArray2, ToPyArray};
+use numpy::{ndarray::Array2, PyArray1, PyArray2, ToPyArray};
 use pyo3::{create_exception, gc::PyVisit, prelude::*, wrap_pyfunction, PyTraverseError};
 
 create_exception!(
@@ -996,8 +995,7 @@ impl PySpectrometer {
     }
 
     /// Computes the spectrometer fitness using on the cpu
-    #[pyo3(text_signature = "($self, /, *, max_n = 16_384, max_m = 16_384)")]
-    #[args("*", max_n = 16_384, max_m = 16_384)]
+    #[pyo3(signature = (/, *, max_n = 16_384, max_m = 16_384), text_signature = "($self, /, *, max_n = 16_384, max_m = 16_384)")]
     fn cpu_fitness(&self, py: Python, max_n: usize, max_m: usize) -> PyResult<PyDesignFitness> {
         let compound_prism = self.compound_prism.as_ref(py).try_borrow()?.compound_prism;
         let py_detarr = *self.detector_array.as_ref(py).try_borrow()?;
@@ -1015,8 +1013,7 @@ impl PySpectrometer {
         }))
     }
 
-    #[pyo3(text_signature = "($self, /, wavelengths, *, max_m = 16_384)")]
-    #[args(wavelengths, "*", max_m = 16_384)]
+    #[pyo3(signature = (/, wavelengths, *, max_m = 16_384), text_signature = "($self, /, wavelengths, *, max_m = 16_384)")]
     pub fn transmission_probability<'p>(
         &self,
         wavelengths: &PyArray1<f64>,
@@ -1075,8 +1072,7 @@ impl PySpectrometer {
 
     /// Computes the spectrometer fitness using on the gpu with float32
     #[cfg(feature = "cuda")]
-    #[pyo3(text_signature = "($self, /, seeds, *, max_n = 256, nwarp = 2, max_eval = 16_384)")]
-    #[args("*", max_n = 256, nwarp = 2, max_eval = 16_384)]
+    #[pyo3(signature = (/, seeds, *, max_n = 256, nwarp = 2, max_eval = 16_384), text_signature = "($self, /, seeds, *, max_n = 256, nwarp = 2, max_eval = 16_384)")]
     fn gpu_fitness(
         &self,
         py: Python,
