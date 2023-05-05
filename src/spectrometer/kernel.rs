@@ -89,7 +89,7 @@ pub unsafe fn kernel<
     G: GPUShuffle<F> + GPUShuffle<u32>,
     F: FloatExt,
     V: Vector<D, Scalar = F>,
-    GS: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    GS: ?Sized + GenericSpectrometer<V, D>,
     const D: usize,
 >(
     seed: F,
@@ -195,7 +195,7 @@ pub unsafe fn propagation_test_kernel<
     G: GPU,
     F: FloatExt,
     V: Vector<D, Scalar = F>,
-    GS: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    GS: ?Sized + GenericSpectrometer<V, D>,
     const D: usize,
 >(
     spectrometer: &GS,

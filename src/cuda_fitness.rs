@@ -32,7 +32,7 @@ const PTX: &CStr = include_cstr!("kernel.ptx");
 // const NWARP: u32 = 2;
 
 pub trait Kernel<V: Vector<DIM>, const DIM: usize>:
-    DeviceCopy + GenericSpectrometer<V, DIM, Scalar = V::Scalar>
+    DeviceCopy + GenericSpectrometer<V, DIM>
 {
     const NAME: &'static CStr;
 
@@ -42,16 +42,16 @@ pub trait Kernel<V: Vector<DIM>, const DIM: usize>:
         block: u32,
         shared_memory_size: u32,
         stream: &Stream,
-        seed: Self::Scalar,
+        seed: V::Scalar,
         max_eval: u32,
         dev_spec: DevicePointer<u8>,
         meta: <Self as Pointee>::Metadata,
-        dev_probs: DevicePointer<Self::Scalar>,
+        dev_probs: DevicePointer<V::Scalar>,
     ) -> rustacuda::error::CudaResult<()>;
 }
 
 pub trait PropagationKernel<V: Vector<DIM>, const DIM: usize>:
-    DeviceCopy + GenericSpectrometer<V, DIM, Scalar = V::Scalar>
+    DeviceCopy + GenericSpectrometer<V, DIM>
 {
     const NAME: &'static CStr;
 
@@ -63,10 +63,10 @@ pub trait PropagationKernel<V: Vector<DIM>, const DIM: usize>:
         stream: &Stream,
         dev_spec: DevicePointer<u8>,
         meta: <Self as Pointee>::Metadata,
-        dev_wavelength_cdf: DevicePointer<Self::Scalar>,
+        dev_wavelength_cdf: DevicePointer<V::Scalar>,
         dev_ray_cdf: DevicePointer<Self::Q>,
         dev_bin_index: DevicePointer<u32>,
-        dev_probability: DevicePointer<Self::Scalar>,
+        dev_probability: DevicePointer<V::Scalar>,
     ) -> rustacuda::error::CudaResult<()>;
 }
 
@@ -197,7 +197,7 @@ impl CudaFitnessContext {
     fn launch_p_dets_l_ws<
         F: FloatExt + DeviceCopy,
         V: Vector<D, Scalar = F>,
-        S: ?Sized + Kernel<V, D, Scalar = F>,
+        S: ?Sized + Kernel<V, D>,
         const D: usize,
     >(
         &mut self,
@@ -245,7 +245,7 @@ impl CudaFitnessContext {
     fn launch_propagation_test<
         F: FloatExt + DeviceCopy,
         V: Vector<D, Scalar = F>,
-        S: ?Sized + PropagationKernel<V, D, Scalar = F>,
+        S: ?Sized + PropagationKernel<V, D>,
         const D: usize,
     >(
         &mut self,
@@ -345,7 +345,7 @@ where
 pub fn cuda_fitness<
     F: FloatExt + DeviceCopy,
     V: Vector<D, Scalar = F>,
-    S: ?Sized + Kernel<V, D, Scalar = F>,
+    S: ?Sized + Kernel<V, D>,
     const D: usize,
 >(
     spectrometer: &S,

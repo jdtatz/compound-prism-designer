@@ -36,12 +36,10 @@ pub use crate::fitness::*;
 pub use crate::spectrometer::*;
 
 #[cfg(feature = "std")]
-pub trait SpectrometerFitness<V: Vector<DIM, Scalar = Self::Scalar>, const DIM: usize>:
+pub trait SpectrometerFitness<V: Vector<DIM>, const DIM: usize>:
     GenericSpectrometer<V, DIM>
-where
-    <Self as GenericSpectrometer<V, DIM>>::Scalar: FloatExt,
 {
-    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<Self::Scalar>;
+    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<V::Scalar>;
 
     #[cfg(feature = "cuda")]
     fn cuda_fitness(
@@ -50,44 +48,23 @@ where
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
-    ) -> rustacuda::error::CudaResult<Option<DesignFitness<Self::Scalar>>>;
+    ) -> rustacuda::error::CudaResult<Option<DesignFitness<V::Scalar>>>
+    where
+        Self: Kernel<V, DIM>;
 
-    fn p_dets_l_wavelength(&self, wavelength: Self::Scalar, max_n: usize) -> Vec<Self::Scalar>;
+    fn p_dets_l_wavelength(&self, wavelength: V::Scalar, max_n: usize) -> Vec<V::Scalar>;
     fn propagation_path(
         &self,
         ray: Ray<V, DIM>,
-        wavelength: Self::Scalar,
+        wavelength: V::Scalar,
     ) -> Vec<GeometricRay<V, DIM>>;
 }
 
 #[cfg(feature = "std")]
-#[cfg(not(feature = "cuda"))]
-impl<
-        F: FloatExt,
-        V: Vector<D, Scalar = F>,
-        S: GenericSpectrometer<V, D, Scalar = F>,
-        const D: usize,
-    > SpectrometerFitness<V, D> for S
-{
-    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<F> {
-        crate::fitness::fitness(self, max_n, max_m)
-    }
-
-    fn p_dets_l_wavelength(&self, wavelength: F, max_n: usize) -> Vec<F> {
-        crate::fitness::p_dets_l_wavelength(self, wavelength, max_n).collect()
-    }
-
-    fn propagation_path(&self, ray: Ray<V, D>, wavelength: F) -> Vec<GeometricRay<V, D>> {
-        self.propagation_path(ray, wavelength).collect()
-    }
-}
-
-#[cfg(feature = "std")]
-#[cfg(feature = "cuda")]
 impl<
         T: FloatExt + rustacuda::memory::DeviceCopy,
         V: Vector<D, Scalar = T>,
-        S: ?Sized + Kernel<V, D, Scalar = T>,
+        S: ?Sized + GenericSpectrometer<V, D>,
         const D: usize,
     > SpectrometerFitness<V, D> for S
 {
@@ -95,13 +72,17 @@ impl<
         crate::fitness::fitness(self, max_n, max_m)
     }
 
+    #[cfg(feature = "cuda")]
     fn cuda_fitness(
         &self,
         seeds: &[f64],
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
-    ) -> rustacuda::error::CudaResult<Option<DesignFitness<T>>> {
+    ) -> rustacuda::error::CudaResult<Option<DesignFitness<T>>>
+    where
+        Self: Kernel<V, D>,
+    {
         crate::cuda_fitness::cuda_fitness(self, seeds, max_n, nwarp, max_eval)
     }
 

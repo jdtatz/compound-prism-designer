@@ -48,7 +48,7 @@ pub struct DesignFitness<F> {
 pub fn p_dets_l_wavelength<
     F: FloatExt,
     V: Vector<D, Scalar = F>,
-    S: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    S: ?Sized + GenericSpectrometer<V, D>,
     const D: usize,
 >(
     spectrometer: &S,
@@ -79,7 +79,7 @@ pub fn p_dets_l_wavelength<
 pub fn mutual_information<
     F: FloatExt,
     V: Vector<D, Scalar = F>,
-    S: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    S: ?Sized + GenericSpectrometer<V, D>,
     const D: usize,
 >(
     spectrometer: &S,
@@ -130,7 +130,7 @@ pub fn mutual_information<
 pub fn fitness<
     F: FloatExt,
     V: Vector<D, Scalar = F>,
-    S: ?Sized + GenericSpectrometer<V, D, Scalar = F>,
+    S: ?Sized + GenericSpectrometer<V, D>,
     const D: usize,
 >(
     spectrometer: &S,

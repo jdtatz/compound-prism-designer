@@ -362,25 +362,24 @@ pub fn detector_array_positioning<
     .ok_or(RayTraceError::NoSurfaceIntersection)
 }
 
-pub trait GenericSpectrometer<V: Vector<DIM, Scalar = Self::Scalar>, const DIM: usize> {
-    type Scalar;
-    type Q: QuasiRandom<Scalar = Self::Scalar>;
+pub trait GenericSpectrometer<V: Vector<DIM>, const DIM: usize> {
+    type Q: QuasiRandom<Scalar = V::Scalar>;
     type PropagationPathIter<'p>: 'p + Iterator<Item = GeometricRay<V, DIM>>
     where
         Self: 'p;
-    fn sample_wavelength(&self, p: Self::Scalar) -> Self::Scalar;
+    fn sample_wavelength(&self, p: V::Scalar) -> V::Scalar;
     fn sample_ray(&self, q: Self::Q) -> Ray<V, DIM>;
     fn detector_bin_count(&self) -> u32;
     fn propagate(
         &self,
         ray: Ray<V, DIM>,
-        wavelength: Self::Scalar,
-    ) -> Result<(u32, Self::Scalar), RayTraceError>;
-    fn size_and_deviation(&self) -> (Self::Scalar, Self::Scalar);
+        wavelength: V::Scalar,
+    ) -> Result<(u32, V::Scalar), RayTraceError>;
+    fn size_and_deviation(&self) -> (V::Scalar, V::Scalar);
     fn propagation_path<'s>(
         &'s self,
         ray: Ray<V, DIM>,
-        wavelength: Self::Scalar,
+        wavelength: V::Scalar,
     ) -> Self::PropagationPathIter<'s>;
 }
 
@@ -402,7 +401,6 @@ impl<
         const D: usize,
     > GenericSpectrometer<V, D> for Spectrometer<T, V, W, B, C>
 {
-    type Scalar = T;
     type Q = B::Quasi;
     type PropagationPathIter<'p> = impl 'p + Iterator<Item = GeometricRay<V, D>> where Self: 'p;
 
