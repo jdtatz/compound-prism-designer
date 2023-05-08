@@ -1,10 +1,14 @@
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::ops::Range;
+
 use darling::{ast, util, FromDeriveInput, ToTokens};
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
-use std::hash::{Hash, Hasher};
-use std::{collections::HashMap, ops::Range};
-use syn::{fold::Fold, spanned::Spanned, TypeParam, TypePath, WherePredicate};
-use syn::{punctuated::Punctuated, Ident, LitStr, Path, Token, Type};
+use syn::fold::Fold;
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::{Ident, LitStr, Path, Token, Type, TypeParam, TypePath, WherePredicate};
 
 fn associate_bounds(
     typ: &syn::Type,
@@ -446,9 +450,10 @@ impl ToTokens for WrappedFromTupleImplFn {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
     use std::process::{Command, Stdio};
+
+    use super::*;
 
     fn format_tokens(tokens: TokenStream) -> String {
         let tks = tokens.to_string();

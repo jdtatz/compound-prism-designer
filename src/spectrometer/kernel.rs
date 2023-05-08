@@ -1,6 +1,7 @@
-use crate::{FloatExt, GenericSpectrometer, Qrng, Vector, Welford};
 use core::ptr::NonNull;
 use core::slice::from_raw_parts_mut;
+
+use crate::{FloatExt, GenericSpectrometer, Qrng, Vector, Welford};
 
 pub trait GPU {
     /// Must be in the range `[0, 7]` as derived from the [GPU::warp_size] requirements

@@ -1,6 +1,7 @@
-use super::utils::*;
 use core::ops::*;
 use core::simd::*;
+
+use super::utils::*;
 
 impl<T: ConstZero + SimdElement, const N: usize> ConstZero for Simd<T, N>
 where
@@ -92,8 +93,9 @@ where
 
 #[cfg(target_arch = "nvptx64")]
 mod fast_nvptx {
-    use super::*;
     use nvptx_sys::{FastFloat, FastNum};
+
+    use super::*;
 
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -588,9 +590,9 @@ impl<T: ConstZero, const N: usize> ConstZero for SimpleVector<T, N> {
 }
 
 impl<
-        T: 'static + Copy + core::fmt::Debug + core::cmp::PartialEq + Ring + Div<Output = T>,
-        const DIM: usize,
-    > Vector<DIM> for SimpleVector<T, DIM>
+    T: 'static + Copy + core::fmt::Debug + core::cmp::PartialEq + Ring + Div<Output = T>,
+    const DIM: usize,
+> Vector<DIM> for SimpleVector<T, DIM>
 {
     type Scalar = T;
 

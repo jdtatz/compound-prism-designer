@@ -1,15 +1,17 @@
-use crate::fitness::DesignFitness;
-use crate::spectrometer::*;
+use std::ffi::CStr;
+use std::mem::{self, ManuallyDrop};
+use std::ptr::Pointee;
+use std::slice;
+
 use parking_lot::{const_mutex, Mutex};
 use rustacuda::context::ContextStack;
 use rustacuda::function::Function;
 use rustacuda::memory::{DeviceBuffer, DeviceCopy, DevicePointer};
 use rustacuda::prelude::*;
 use rustacuda::{launch, quick_init};
-use std::ffi::CStr;
-use std::mem::{self, ManuallyDrop};
-use std::ptr::Pointee;
-use std::slice;
+
+use crate::fitness::DesignFitness;
+use crate::spectrometer::*;
 
 macro_rules! cstr {
     ($s:expr) => {
@@ -422,12 +424,14 @@ pub fn cuda_fitness<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::ptr::NonNull;
+
     use rand::distributions::{Distribution, Standard};
     use rand::prelude::*;
     use rand_xoshiro::rand_core::SeedableRng;
     use rand_xoshiro::Xoshiro256StarStar;
-    use std::ptr::NonNull;
+
+    use super::*;
 
     #[test]
     fn test_propagation_with_known_prism() {

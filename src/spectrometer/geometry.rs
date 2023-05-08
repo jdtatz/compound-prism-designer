@@ -1,7 +1,8 @@
+use core::ops::*;
+
 use super::drawable::{Drawable, Path, Point};
 use super::utils::*;
 use super::vector::{UnitVector, Vector};
-use core::ops::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GeometricRay<V, const DIM: usize> {
@@ -114,11 +115,11 @@ pub struct HyperPlane<V> {
 }
 
 impl<
-        T: Copy + ConstZero + Neg<Output = T> + Float,
-        B: Bounds<V, DIM>,
-        V: Vector<DIM, Scalar = T>,
-        const DIM: usize,
-    > HyperSurface<V, B, DIM> for HyperPlane<V>
+    T: Copy + ConstZero + Neg<Output = T> + Float,
+    B: Bounds<V, DIM>,
+    V: Vector<DIM, Scalar = T>,
+    const DIM: usize,
+> HyperSurface<V, B, DIM> for HyperPlane<V>
 {
     fn intersection(
         &self,

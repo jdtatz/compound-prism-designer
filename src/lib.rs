@@ -62,11 +62,11 @@ pub trait SpectrometerFitness<V: Vector<DIM>, const DIM: usize>:
 
 #[cfg(feature = "std")]
 impl<
-        T: FloatExt + rustacuda::memory::DeviceCopy,
-        V: Vector<D, Scalar = T>,
-        S: ?Sized + GenericSpectrometer<V, D>,
-        const D: usize,
-    > SpectrometerFitness<V, D> for S
+    T: FloatExt + rustacuda::memory::DeviceCopy,
+    V: Vector<D, Scalar = T>,
+    S: ?Sized + GenericSpectrometer<V, D>,
+    const D: usize,
+> SpectrometerFitness<V, D> for S
 {
     fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<T> {
         crate::fitness::fitness(self, max_n, max_m)

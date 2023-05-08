@@ -4,10 +4,11 @@ use proc_macro::TokenStream;
 extern crate darling;
 
 mod core;
-use crate::core::{WrappedFromDerive, WrappedFromTupleImplFn};
 use darling::FromDeriveInput;
 use quote::ToTokens;
 use syn::parse_macro_input;
+
+use crate::core::{WrappedFromDerive, WrappedFromTupleImplFn};
 
 #[proc_macro]
 pub fn wrapped_from_tuples(input: TokenStream) -> TokenStream {

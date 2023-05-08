@@ -25,11 +25,7 @@ pub fn inv_cbrt_f32(x: f32) -> f32 {
     let c = 1_f32 - x * y * y * y;
     let res = y * (1_f32 + 0.333333333333_f32 * c);
     // let res = c.mul_add(0.333333333333_f32, 1_f32) * y;
-    if s {
-        res
-    } else {
-        -res
-    }
+    if s { res } else { -res }
 }
 
 #[cfg(test)]
@@ -47,11 +43,7 @@ pub fn cbrt_f32(x: f32) -> f32 {
     let d = x * y * y;
     let c = 1_f32 - d * y;
     let res = d * (1_f32 + 0.333333333333_f32 * c);
-    if s {
-        res
-    } else {
-        -res
-    }
+    if s { res } else { -res }
 }
 
 pub fn approx_cbrt<F: FloatExt>(x: F) -> F {
@@ -72,17 +64,14 @@ pub fn approx_cbrt<F: FloatExt>(x: F) -> F {
     let d = x * y * y;
     let c = F::ONE - d * y;
     let res = d * (F::ONE + one_third * c);
-    if s {
-        res
-    } else {
-        -res
-    }
+    if s { res } else { -res }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{approx_cbrt, cbrt_f32, inv_cbrt_f32};
     use float_eq::assert_float_eq;
+
+    use super::{approx_cbrt, cbrt_f32, inv_cbrt_f32};
 
     #[test]
     fn test_inv_cbrt_f32() {

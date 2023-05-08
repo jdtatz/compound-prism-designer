@@ -134,9 +134,10 @@ pub fn fast_norminv<F: FloatExt>(u: F) -> F {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use float_eq::assert_float_eq as assert_almost_eq;
     use statrs::distribution::{ContinuousCDF, Normal};
+
+    use super::*;
 
     #[test]
     fn test_shaw() {

@@ -1,12 +1,18 @@
-use crate::spectrometer::{
-    kernel::*, ArrayFamily, Beam, CulminatingToricCompoundPrism, CurvedPlane, FastSimdVector,
-    FiberBeam, FocusingPlanerCompoundPrism, GaussianBeam, GenericSpectrometer, Plane, SimpleVector,
-    SliceFamily, Spectrometer, ToricLens, UniformDistribution, Welford,
-};
-use core::{arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
+use core::arch::asm;
+use core::cell::UnsafeCell;
+use core::mem::MaybeUninit;
+use core::ptr::NonNull;
+
 use nvptx_sys::{
     blockDim, blockIdx, gridDim, laneid, syncthreads, threadIdx, vote_any, vote_ballot, warp_sync,
     warpsize, FastFloat, FastNum, Shuffle, ALL_MEMBER_MASK,
+};
+
+use crate::spectrometer::kernel::*;
+use crate::spectrometer::{
+    ArrayFamily, Beam, CulminatingToricCompoundPrism, CurvedPlane, FastSimdVector, FiberBeam,
+    FocusingPlanerCompoundPrism, GaussianBeam, GenericSpectrometer, Plane, SimpleVector,
+    SliceFamily, Spectrometer, ToricLens, UniformDistribution, Welford,
 };
 
 extern "C" {
@@ -26,15 +32,19 @@ impl GPU for CUDAGPU {
         // ilog2_u32(warpsize())
         WARP_SIZE_LG2
     }
+
     fn thread_id() -> u32 {
         threadIdx::x()
     }
+
     fn block_dim() -> u32 {
         blockDim::x()
     }
+
     fn block_id() -> u32 {
         blockIdx::x()
     }
+
     fn grid_dim() -> u32 {
         gridDim::x()
     }
@@ -46,9 +56,11 @@ impl GPU for CUDAGPU {
     fn sync_warp() {
         warp_sync(ALL_MEMBER_MASK)
     }
+
     fn warp_any(pred: bool) -> bool {
         vote_any(ALL_MEMBER_MASK, pred)
     }
+
     fn warp_ballot(pred: bool) -> u32 {
         vote_ballot(ALL_MEMBER_MASK, pred).count_ones()
     }

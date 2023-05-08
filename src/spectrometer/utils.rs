@@ -1,4 +1,5 @@
 use core::mem::swap;
+
 pub use num_traits::{Float, NumAssign, One, Zero};
 
 pub fn array_prepend<T, const N: usize>(first: T, mut rest: [T; N]) -> ([T; N], T) {
@@ -231,8 +232,9 @@ impl FloatExt for f64 {
 
 #[cfg(target_arch = "nvptx64")]
 mod fast_float {
-    use super::*;
     use nvptx_sys::{FastFloat, FastNum};
+
+    use super::*;
 
     impl<T, F: LossyFrom<T>> LossyFrom<T> for FastFloat<F> {
         fn lossy_from(v: T) -> Self {

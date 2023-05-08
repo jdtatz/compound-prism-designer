@@ -1,9 +1,10 @@
+use super::distribution::{Distribution, UniformDiscDistribution};
+use super::erf::norminv;
 use super::geometry::*;
 use super::qrng::QuasiRandom;
 use super::ray::GenericCompoundPrism;
 use super::utils::*;
-use super::{distribution::Distribution, UnitVector, Vector};
-use super::{distribution::UniformDiscDistribution, erf::norminv};
+use super::{UnitVector, Vector};
 use crate::{DetectorArray, Ray, RayTraceError};
 
 pub trait Beam<V: Vector<DIM>, const DIM: usize>: Distribution<Self::Quasi, Ray<V, DIM>> {
@@ -393,15 +394,16 @@ pub struct Spectrometer<T, V, W, B, C: ?Sized> {
 }
 
 impl<
-        T: FloatExt,
-        V: Vector<D, Scalar = T>,
-        W: Copy + Distribution<T>,
-        B: Copy + Beam<V, D>,
-        C: ?Sized + GenericCompoundPrism<V, D>,
-        const D: usize,
-    > GenericSpectrometer<V, D> for Spectrometer<T, V, W, B, C>
+    T: FloatExt,
+    V: Vector<D, Scalar = T>,
+    W: Copy + Distribution<T>,
+    B: Copy + Beam<V, D>,
+    C: ?Sized + GenericCompoundPrism<V, D>,
+    const D: usize,
+> GenericSpectrometer<V, D> for Spectrometer<T, V, W, B, C>
 {
     type Q = B::Quasi;
+
     type PropagationPathIter<'p> = impl 'p + Iterator<Item = GeometricRay<V, D>> where Self: 'p;
 
     fn sample_wavelength(&self, p: T) -> T {

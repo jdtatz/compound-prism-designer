@@ -1,0 +1,8 @@
+newline_style = "unix"
+use_field_init_shorthand = true
+
+unstable_features = true
+version = "Two"
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"
+reorder_impl_items = true

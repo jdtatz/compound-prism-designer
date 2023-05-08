@@ -1,7 +1,12 @@
-use crate::spectrometer::*;
 use core::convert::TryInto;
-use numpy::{ndarray::Array2, PyArray1, PyArray2, ToPyArray};
-use pyo3::{create_exception, gc::PyVisit, prelude::*, wrap_pyfunction, PyTraverseError};
+
+use numpy::ndarray::Array2;
+use numpy::{PyArray1, PyArray2, ToPyArray};
+use pyo3::gc::PyVisit;
+use pyo3::prelude::*;
+use pyo3::{create_exception, wrap_pyfunction, PyTraverseError};
+
+use crate::spectrometer::*;
 
 create_exception!(
     compound_prism_designer,
@@ -1141,6 +1146,7 @@ impl PySpectrometer {
             .direction;
         Ok((uv.x(), uv.y()))
     }
+
     fn __traverse__(&self, visit: PyVisit) -> Result<(), PyTraverseError> {
         visit.call(&self.compound_prism)?;
         visit.call(&self.detector_array)?;
@@ -1148,6 +1154,7 @@ impl PySpectrometer {
     }
 
     fn __clear__(&mut self) {}
+
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:#?}", self))
     }

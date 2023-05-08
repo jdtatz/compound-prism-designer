@@ -1,4 +1,5 @@
-use core::{marker::PhantomData, ops::*};
+use core::marker::PhantomData;
+use core::ops::*;
 
 use crate::FloatExt;
 

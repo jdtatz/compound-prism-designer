@@ -14,6 +14,7 @@ impl<F: FloatExt> Welford<F> {
         mean: F::ZERO,
         m2: F::ZERO,
     };
+
     pub fn new() -> Self {
         Welford {
             count: F::zero(),
@@ -21,6 +22,7 @@ impl<F: FloatExt> Welford<F> {
             m2: F::zero(),
         }
     }
+
     pub fn next_sample(&mut self, x: F) {
         self.count += F::one();
         let delta = x - self.mean;
@@ -28,6 +30,7 @@ impl<F: FloatExt> Welford<F> {
         let delta2 = x - self.mean;
         self.m2 += delta * delta2;
     }
+
     pub fn skip(&mut self, new_count: F) {
         if self.count < new_count {
             let zero_count = new_count - self.count;
@@ -37,19 +40,23 @@ impl<F: FloatExt> Welford<F> {
             self.count = count;
         }
     }
+
     pub fn sample_variance(&self) -> F {
         self.m2 / (self.count - F::one())
     }
+
     /// Standard Error of the Mean (SEM)
     pub fn sem(&self) -> F {
         (self.sample_variance() / self.count).sqrt()
     }
+
     /// Is the Standard Error of the Mean (SEM) less than the error threshold?
     /// Uses the square of the error for numerical stability (avoids sqrt)
     pub fn sem_le_error_threshold(&self, error_squared: F) -> bool {
         // SEM^2 = self.sample_variance() / self.count
         self.m2 < error_squared * (self.count * (self.count - F::one()))
     }
+
     pub fn combine(&mut self, other: Self) {
         let count = self.count + other.count;
         let delta = other.mean - self.mean;

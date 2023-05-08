@@ -1,9 +1,8 @@
 #![allow(clippy::excessive_precision)]
 #[macro_use]
 extern crate criterion;
-use criterion::Criterion;
-
 use compound_prism_designer::*;
+use criterion::Criterion;
 
 #[cfg(unix)]
 struct GProf(Option<pprof::ProfilerGuard<'static>>);

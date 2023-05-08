@@ -1,8 +1,11 @@
+use core::borrow::Borrow;
+
+use super::drawable::Polygon;
+use super::geometry::*;
 use super::glasscat::Glass;
 use super::utils::*;
 use super::vector::{UnitVector, Vector};
-use super::{drawable::Polygon, geometry::*, Drawable};
-use core::borrow::Borrow;
+use super::Drawable;
 
 #[derive(Debug, Display, Clone, Copy)]
 pub enum RayTraceError {
@@ -466,14 +469,14 @@ where
 }
 
 impl<
-        T: FloatExt,
-        V: Vector<DIM, Scalar = T>,
-        S0: Copy + Surface<V, DIM>,
-        SI: Copy + Surface<V, DIM>,
-        SN: Copy + Surface<V, DIM>,
-        L: ?Sized + Array<Item = PrismSurface<T, SI>>,
-        const DIM: usize,
-    > GenericCompoundPrism<V, DIM> for CompoundPrism<T, S0, SI, SN, L>
+    T: FloatExt,
+    V: Vector<DIM, Scalar = T>,
+    S0: Copy + Surface<V, DIM>,
+    SI: Copy + Surface<V, DIM>,
+    SN: Copy + Surface<V, DIM>,
+    L: ?Sized + Array<Item = PrismSurface<T, SI>>,
+    const DIM: usize,
+> GenericCompoundPrism<V, DIM> for CompoundPrism<T, S0, SI, SN, L>
 {
     type PropagateeTrace<'s, P: 's + Copy + CompoundPrismPropagatee<V, DIM>> = impl 's + Iterator<Item=P> where P: Sized, Self: 's;
 

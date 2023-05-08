@@ -224,7 +224,6 @@ where
     }
 }
 
-
 pub struct Qrng<Q: QuasiRandom> {
     state: Q,
 }
