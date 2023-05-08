@@ -1,22 +1,21 @@
-From 7524e634ae1d1276f73dc1947641f3f84a5fce05 Mon Sep 17 00:00:00 2001
+From 36134658271867405d4da26d9411170a7f5ddb0b Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Sun, 3 Jul 2022 13:48:14 -0400
-Subject: [PATCH 1/6] Can't bitcast pointers in diffrent address spaces Use
+Subject: [PATCH 1/7] Can't bitcast pointers in diffrent address spaces Use
  pointercast instead After llvm transitions to opaque pointers, this will not
  always be necessary Keeping asserts for now, but need to be removed
 
 ---
- compiler/rustc_codegen_llvm/src/builder.rs    | 24 +++++++++++++++++--
- compiler/rustc_codegen_llvm/src/intrinsic.rs  | 12 +++++-----
- compiler/rustc_codegen_ssa/src/base.rs        |  8 ++++++-
- compiler/rustc_codegen_ssa/src/mir/operand.rs | 18 ++++++++++----
- 4 files changed, 49 insertions(+), 13 deletions(-)
+ compiler/rustc_codegen_llvm/src/builder.rs   | 24 ++++++++++++++++++--
+ compiler/rustc_codegen_llvm/src/intrinsic.rs | 12 +++++-----
+ compiler/rustc_codegen_ssa/src/base.rs       |  8 ++++++-
+ 3 files changed, 35 insertions(+), 9 deletions(-)
 
 diff --git a/compiler/rustc_codegen_llvm/src/builder.rs b/compiler/rustc_codegen_llvm/src/builder.rs
-index 5e98deae48a..3e49ff099b3 100644
+index 2fd6db8cbfe..10f6e9d75f7 100644
 --- a/compiler/rustc_codegen_llvm/src/builder.rs
 +++ b/compiler/rustc_codegen_llvm/src/builder.rs
-@@ -837,6 +837,14 @@ fn inttoptr(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
+@@ -833,6 +833,14 @@ fn inttoptr(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
      }
  
      fn bitcast(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
@@ -31,7 +30,7 @@ index 5e98deae48a..3e49ff099b3 100644
          unsafe { llvm::LLVMBuildBitCast(self.llbuilder, val, dest_ty, UNNAMED) }
      }
  
-@@ -845,6 +853,14 @@ fn intcast(&mut self, val: &'ll Value, dest_ty: &'ll Type, is_signed: bool) -> &
+@@ -849,6 +857,14 @@ fn intcast(&mut self, val: &'ll Value, dest_ty: &'ll Type, is_signed: bool) -> &
      }
  
      fn pointercast(&mut self, val: &'ll Value, dest_ty: &'ll Type) -> &'ll Value {
@@ -46,7 +45,7 @@ index 5e98deae48a..3e49ff099b3 100644
          unsafe { llvm::LLVMBuildPointerCast(self.llbuilder, val, dest_ty, UNNAMED) }
      }
  
-@@ -1396,7 +1412,7 @@ fn check_store(&mut self, val: &'ll Value, ptr: &'ll Value) -> &'ll Value {
+@@ -1394,7 +1410,7 @@ fn check_store(&mut self, val: &'ll Value, ptr: &'ll Value) -> &'ll Value {
                      Expected {:?}, got {:?}; inserting bitcast",
                  dest_ptr_ty, stored_ptr_ty
              );
@@ -55,7 +54,7 @@ index 5e98deae48a..3e49ff099b3 100644
          }
      }
  
-@@ -1433,7 +1449,11 @@ fn check_call<'b>(
+@@ -1431,7 +1447,11 @@ fn check_call<'b>(
                              Expected {:?} for param {}, got {:?}; injecting bitcast",
                          llfn, expected_ty, i, actual_ty
                      );
@@ -69,10 +68,10 @@ index 5e98deae48a..3e49ff099b3 100644
                      actual_val
                  }
 diff --git a/compiler/rustc_codegen_llvm/src/intrinsic.rs b/compiler/rustc_codegen_llvm/src/intrinsic.rs
-index a6a75eff9a3..9bbaa1afdd2 100644
+index 00d1796f210..03fa0f19375 100644
 --- a/compiler/rustc_codegen_llvm/src/intrinsic.rs
 +++ b/compiler/rustc_codegen_llvm/src/intrinsic.rs
-@@ -316,15 +316,15 @@ fn codegen_intrinsic_call(
+@@ -318,15 +318,15 @@ fn codegen_intrinsic_call(
                  } else if use_integer_compare {
                      let integer_ty = self.type_ix(layout.size().bits());
                      let ptr_ty = self.type_ptr_to(integer_ty);
@@ -92,7 +91,7 @@ index a6a75eff9a3..9bbaa1afdd2 100644
                      let n = self.const_usize(layout.size().bytes());
                      let cmp = self.call_intrinsic("memcmp", &[a_ptr, b_ptr, n]);
                      match self.cx.sess().target.arch.as_ref() {
-@@ -409,7 +409,7 @@ fn type_test(&mut self, pointer: Self::Value, typeid: Self::Value) -> Self::Valu
+@@ -411,7 +411,7 @@ fn type_test(&mut self, pointer: Self::Value, typeid: Self::Value) -> Self::Valu
          // Test the called operand using llvm.type.test intrinsic. The LowerTypeTests link-time
          // optimization pass replaces calls to this intrinsic with code to test type membership.
          let i8p_ty = self.type_i8p();
@@ -101,7 +100,7 @@ index a6a75eff9a3..9bbaa1afdd2 100644
          self.call_intrinsic("llvm.type.test", &[bitcast, typeid])
      }
  
-@@ -746,7 +746,7 @@ fn codegen_emcc_try<'ll>(
+@@ -748,7 +748,7 @@ fn codegen_emcc_try<'ll>(
          let catch_data_1 =
              bx.inbounds_gep(catch_data_type, catch_data, &[bx.const_usize(0), bx.const_usize(1)]);
          bx.store(is_rust_panic, catch_data_1, i8_align);
@@ -109,9 +108,9 @@ index a6a75eff9a3..9bbaa1afdd2 100644
 +        let catch_data = bx.pointercast(catch_data, bx.type_i8p());
  
          let catch_ty = bx.type_func(&[bx.type_i8p(), bx.type_i8p()], bx.type_void());
-         bx.call(catch_ty, None, catch_func, &[data, catch_data], None);
+         bx.call(catch_ty, None, None, catch_func, &[data, catch_data], None);
 diff --git a/compiler/rustc_codegen_ssa/src/base.rs b/compiler/rustc_codegen_ssa/src/base.rs
-index 32d3cfe6fc6..7c08b8ed08a 100644
+index ae45ae9d802..639a7913c63 100644
 --- a/compiler/rustc_codegen_ssa/src/base.rs
 +++ b/compiler/rustc_codegen_ssa/src/base.rs
 @@ -254,7 +254,13 @@ pub fn unsize_ptr<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
@@ -129,52 +128,799 @@ index 32d3cfe6fc6..7c08b8ed08a 100644
          }
          _ => bug!("unsize_ptr: called on bad types"),
      }
-diff --git a/compiler/rustc_codegen_ssa/src/mir/operand.rs b/compiler/rustc_codegen_ssa/src/mir/operand.rs
-index 34a5b638d7e..02b0b452dc2 100644
---- a/compiler/rustc_codegen_ssa/src/mir/operand.rs
-+++ b/compiler/rustc_codegen_ssa/src/mir/operand.rs
-@@ -220,19 +220,29 @@ pub fn extract_field<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
-         };
- 
-         match (&mut val, field.abi) {
-+            // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
-+            (OperandValue::Immediate(llval), Abi::Scalar(v_abi))
-+                if matches!(v_abi.primitive(), rustc_target::abi::Primitive::Pointer) =>
-+            {
-+                *llval = bx.pointercast(*llval, bx.cx().immediate_backend_type(field));
-+            }
-             (OperandValue::Immediate(llval), _) => {
-                 // Bools in union fields needs to be truncated.
-                 *llval = bx.to_immediate(*llval, field);
--                // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
--                *llval = bx.bitcast(*llval, bx.cx().immediate_backend_type(field));
-             }
-             (OperandValue::Pair(a, b), Abi::ScalarPair(a_abi, b_abi)) => {
-                 // Bools in union fields needs to be truncated.
-                 *a = bx.to_immediate_scalar(*a, a_abi);
-                 *b = bx.to_immediate_scalar(*b, b_abi);
-                 // HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
--                *a = bx.bitcast(*a, bx.cx().scalar_pair_element_backend_type(field, 0, true));
--                *b = bx.bitcast(*b, bx.cx().scalar_pair_element_backend_type(field, 1, true));
-+                if let rustc_target::abi::Primitive::Pointer = a_abi.primitive() {
-+                    *a = bx
-+                        .pointercast(*a, bx.cx().scalar_pair_element_backend_type(field, 0, true));
-+                }
-+                if let rustc_target::abi::Primitive::Pointer = b_abi.primitive() {
-+                    *b = bx
-+                        .pointercast(*b, bx.cx().scalar_pair_element_backend_type(field, 1, true));
-+                }
-             }
-             (OperandValue::Pair(..), _) => bug!(),
-             (OperandValue::Ref(..), _) => bug!(),
 -- 
-2.39.1
+2.40.1
 
 
-From 612d419fa0a4447d966996e3a809fd71ba044baa Mon Sep 17 00:00:00 2001
+From d3df384758e09eacd7f5505cda023c823c0b91ff Mon Sep 17 00:00:00 2001
+From: Julia Tatz <tatz.j@northeastern.edu>
+Date: Mon, 12 Sep 2022 17:45:02 -0400
+Subject: [PATCH 2/7] Fix const ptr casts too
+
+---
+ compiler/rustc_codegen_llvm/src/common.rs |  8 ++++----
+ compiler/rustc_codegen_llvm/src/consts.rs | 20 ++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/common.rs b/compiler/rustc_codegen_llvm/src/common.rs
+index 9127fba388b..6c8a0918bbc 100644
+--- a/compiler/rustc_codegen_llvm/src/common.rs
++++ b/compiler/rustc_codegen_llvm/src/common.rs
+@@ -289,7 +289,7 @@ fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) ->
+                 let llval = unsafe {
+                     llvm::LLVMRustConstInBoundsGEP2(
+                         self.type_i8(),
+-                        self.const_bitcast(base_addr, self.type_i8p_ext(base_addr_space)),
++                        self.const_ptrcast(base_addr, self.type_i8p_ext(base_addr_space)),
+                         &self.const_usize(offset.bytes()),
+                         1,
+                     )
+@@ -297,7 +297,7 @@ fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) ->
+                 if !matches!(layout.primitive(), Pointer(_)) {
+                     unsafe { llvm::LLVMConstPtrToInt(llval, llty) }
+                 } else {
+-                    self.const_bitcast(llval, llty)
++                    self.const_ptrcast(llval, llty)
+                 }
+             }
+         }
+@@ -326,12 +326,12 @@ fn from_const_alloc(
+             let llval = unsafe {
+                 llvm::LLVMRustConstInBoundsGEP2(
+                     self.type_i8(),
+-                    self.const_bitcast(base_addr, self.type_i8p()),
++                    self.const_ptrcast(base_addr, self.type_i8p()),
+                     &self.const_usize(offset.bytes()),
+                     1,
+                 )
+             };
+-            self.const_bitcast(llval, llty)
++            self.const_ptrcast(llval, llty)
+         };
+         PlaceRef::new_sized(llval, layout)
+     }
+diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
+index 940358acde9..16df061fed4 100644
+--- a/compiler/rustc_codegen_llvm/src/consts.rs
++++ b/compiler/rustc_codegen_llvm/src/consts.rs
+@@ -185,11 +185,31 @@ fn check_and_apply_linkage<'ll, 'tcx>(
+ }
+ 
+ pub fn ptrcast<'ll>(val: &'ll Value, ty: &'ll Type) -> &'ll Value {
++    // FIXME: remove before merge
++    let val_ty_kind = unsafe { llvm::LLVMRustGetTypeKind(common::val_ty(val)).to_generic() };
++    let dest_ty_kind = unsafe { llvm::LLVMRustGetTypeKind(ty).to_generic() };
++    assert!(
++        (matches!(val_ty_kind, rustc_codegen_ssa::common::TypeKind::Pointer)
++            && matches!(dest_ty_kind, rustc_codegen_ssa::common::TypeKind::Pointer)),
++        "val ty is {:?}, dest_ty is {:?}",
++        val_ty_kind,
++        dest_ty_kind,
++    );
+     unsafe { llvm::LLVMConstPointerCast(val, ty) }
+ }
+ 
+ impl<'ll> CodegenCx<'ll, '_> {
+     pub(crate) fn const_bitcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
++        // FIXME: remove before merge
++        assert!(
++            !(matches!(
++                self.type_kind(self.val_ty(val)),
++                rustc_codegen_ssa::common::TypeKind::Pointer
++            ) || matches!(self.type_kind(ty), rustc_codegen_ssa::common::TypeKind::Pointer)),
++            "val ty is {:?}, dest_ty is {:?}",
++            self.type_kind(self.val_ty(val)),
++            self.type_kind(ty),
++        );
+         unsafe { llvm::LLVMConstBitCast(val, ty) }
+     }
+ 
+-- 
+2.40.1
+
+
+From 612be4673dd0bbc6473f9ef4573ad69bae57ec4b Mon Sep 17 00:00:00 2001
+From: Julia Tatz <tatz.j@northeastern.edu>
+Date: Mon, 9 Jan 2023 20:51:01 -0500
+Subject: [PATCH 3/7] Add new experimental #[address_space] built-in
+
+Only the skeleton for now, no codegen yet
+---
+ .../rustc_codegen_ssa/src/codegen_attrs.rs    | 43 +++++++++++++++++++
+ compiler/rustc_feature/src/active.rs          |  2 +
+ compiler/rustc_feature/src/builtin_attrs.rs   |  1 +
+ .../src/middle/codegen_fn_attrs.rs            |  4 ++
+ compiler/rustc_span/src/symbol.rs             |  1 +
+ .../feature-gate-address_space.rs             | 13 ++++++
+ .../feature-gate-address_space.stderr         | 38 ++++++++++++++++
+ 7 files changed, 102 insertions(+)
+ create mode 100644 tests/ui/feature-gates/feature-gate-address_space.rs
+ create mode 100644 tests/ui/feature-gates/feature-gate-address_space.stderr
+
+diff --git a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
+index 8dae5dab429..2eeb74fb36f 100644
+--- a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
++++ b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
+@@ -314,6 +314,11 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, did: LocalDefId) -> CodegenFnAttrs {
+                     codegen_fn_attrs.link_ordinal = ordinal;
+                 }
+             }
++            sym::address_space => {
++                if let address_space @ Some(_) = check_address_space(tcx, attr) {
++                    codegen_fn_attrs.address_space = address_space;
++                }
++            }
+             sym::no_sanitize => {
+                 no_sanitize_span = Some(attr.span);
+                 if let Some(list) = attr.meta_item_list() {
+@@ -649,6 +654,44 @@ fn check_link_name_xor_ordinal(
+     }
+ }
+ 
++fn check_address_space(tcx: TyCtxt<'_>, attr: &ast::Attribute) -> Option<u16> {
++    use rustc_ast::{LitIntType, LitKind, MetaItemLit};
++    let meta_item_list = attr.meta_item_list();
++    let meta_item_list = meta_item_list.as_deref();
++    let sole_meta_list = match meta_item_list {
++        Some([item]) => item.lit(),
++        Some(_) => {
++            tcx.sess
++                .struct_span_err(attr.span, "incorrect number of arguments to `#[address_space]`")
++                .note("the attribute requires exactly one argument")
++                .emit();
++            return None;
++        }
++        _ => None,
++    };
++    if let Some(MetaItemLit { kind: LitKind::Int(ordinal, LitIntType::Unsuffixed), .. }) =
++        sole_meta_list
++    {
++        if *ordinal <= u16::MAX as u128 {
++            Some(*ordinal as u16)
++        } else {
++            let msg =
++                format!("address space value in `address_space` is too large: `{}`", &ordinal);
++            tcx.sess
++                .struct_span_err(attr.span, &msg)
++                .note("the value may not exceed `u16::MAX`")
++                .emit();
++            None
++        }
++    } else {
++        tcx.sess
++            .struct_span_err(attr.span, "illegal address space format in `address_space`")
++            .note("an unsuffixed integer value, e.g., `1`, is expected")
++            .emit();
++        None
++    }
++}
++
+ pub fn provide(providers: &mut Providers) {
+     *providers = Providers { codegen_fn_attrs, should_inherit_track_caller, ..*providers };
+ }
+diff --git a/compiler/rustc_feature/src/active.rs b/compiler/rustc_feature/src/active.rs
+index 27d30c315af..9875a488d44 100644
+--- a/compiler/rustc_feature/src/active.rs
++++ b/compiler/rustc_feature/src/active.rs
+@@ -291,6 +291,8 @@ pub fn set(&self, features: &mut Features, span: Span) {
+     (active, abi_ptx, "1.15.0", Some(38788), None),
+     /// Allows `extern "x86-interrupt" fn()`.
+     (active, abi_x86_interrupt, "1.17.0", Some(40180), None),
++    /// Allows `#[address_space = "..."]` on static varibles.
++    (incomplete, address_space, "CURRENT_RUSTC_VERSION", Some(1), None),
+     /// Allows additional const parameter types, such as `&'static str` or user defined types
+     (incomplete, adt_const_params, "1.56.0", Some(95174), None),
+     /// Allows defining an `#[alloc_error_handler]`.
+diff --git a/compiler/rustc_feature/src/builtin_attrs.rs b/compiler/rustc_feature/src/builtin_attrs.rs
+index fe05d4590e7..4477e0b367a 100644
+--- a/compiler/rustc_feature/src/builtin_attrs.rs
++++ b/compiler/rustc_feature/src/builtin_attrs.rs
+@@ -398,6 +398,7 @@ pub struct BuiltinAttribute {
+         experimental!(no_sanitize)
+     ),
+     gated!(no_coverage, Normal, template!(Word), WarnFollowing, experimental!(no_coverage)),
++    gated!(address_space, Normal, template!(List: "space"), ErrorPreceding, experimental!(address_space)),
+ 
+     ungated!(
+         doc, Normal, template!(List: "hidden|inline|...", NameValueStr: "string"), DuplicatesOk
+diff --git a/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs b/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs
+index c4601a1fb41..da8b6420276 100644
+--- a/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs
++++ b/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs
+@@ -43,6 +43,9 @@ pub struct CodegenFnAttrs {
+     /// The `#[repr(align(...))]` attribute. Indicates the value of which the function should be
+     /// aligned to.
+     pub alignment: Option<u32>,
++    /// The `#[address_space = "..."]` attribute, indicating in which address space a
++    /// Rust-defined/foreign static value resides.
++    pub address_space: Option<u16>,
+ }
+ 
+ bitflags! {
+@@ -121,6 +124,7 @@ pub const fn new() -> CodegenFnAttrs {
+             no_sanitize: SanitizerSet::empty(),
+             instruction_set: None,
+             alignment: None,
++            address_space: None,
+         }
+     }
+ 
+diff --git a/compiler/rustc_span/src/symbol.rs b/compiler/rustc_span/src/symbol.rs
+index b97ec6c684b..0f977a853c3 100644
+--- a/compiler/rustc_span/src/symbol.rs
++++ b/compiler/rustc_span/src/symbol.rs
+@@ -334,6 +334,7 @@
+         add_assign,
+         add_with_overflow,
+         address,
++        address_space,
+         adt_const_params,
+         advanced_slice_patterns,
+         adx_target_feature,
+diff --git a/tests/ui/feature-gates/feature-gate-address_space.rs b/tests/ui/feature-gates/feature-gate-address_space.rs
+new file mode 100644
+index 00000000000..886c5b564a6
+--- /dev/null
++++ b/tests/ui/feature-gates/feature-gate-address_space.rs
+@@ -0,0 +1,13 @@
++#[address_space(0)] //~ ERROR the `#[address_space]` attribute is an experimental feature
++static FOO: usize = 42;
++
++extern "C" {
++    #[address_space(0)] //~ ERROR the `#[address_space]` attribute is an experimental feature
++    static EXTERN_FOO: usize;
++}
++
++#[address_space(65_536)] //~ ERROR the `#[address_space]` attribute is an experimental feature
++                         //~^ ERROR address space value in `address_space` is too large: `65536`
++static TOO_BIG: usize = 7;
++
++fn main() {}
+diff --git a/tests/ui/feature-gates/feature-gate-address_space.stderr b/tests/ui/feature-gates/feature-gate-address_space.stderr
+new file mode 100644
+index 00000000000..91eedd877ff
+--- /dev/null
++++ b/tests/ui/feature-gates/feature-gate-address_space.stderr
+@@ -0,0 +1,38 @@
++error[E0658]: the `#[address_space]` attribute is an experimental feature
++  --> $DIR/feature-gate-address_space.rs:1:1
++   |
++LL | #[address_space(0)]
++   | ^^^^^^^^^^^^^^^^^^^
++   |
++   = note: see issue #1 <https://github.com/rust-lang/rust/issues/1> for more information
++   = help: add `#![feature(address_space)]` to the crate attributes to enable
++
++error[E0658]: the `#[address_space]` attribute is an experimental feature
++  --> $DIR/feature-gate-address_space.rs:5:5
++   |
++LL |     #[address_space(0)]
++   |     ^^^^^^^^^^^^^^^^^^^
++   |
++   = note: see issue #1 <https://github.com/rust-lang/rust/issues/1> for more information
++   = help: add `#![feature(address_space)]` to the crate attributes to enable
++
++error[E0658]: the `#[address_space]` attribute is an experimental feature
++  --> $DIR/feature-gate-address_space.rs:9:1
++   |
++LL | #[address_space(65_536)]
++   | ^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: see issue #1 <https://github.com/rust-lang/rust/issues/1> for more information
++   = help: add `#![feature(address_space)]` to the crate attributes to enable
++
++error: address space value in `address_space` is too large: `65536`
++  --> $DIR/feature-gate-address_space.rs:9:1
++   |
++LL | #[address_space(65_536)]
++   | ^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: the value may not exceed `u16::MAX`
++
++error: aborting due to 4 previous errors
++
++For more information about this error, try `rustc --explain E0658`.
+-- 
+2.40.1
+
+
+From 5fc194e63504772afd07f9b2b8fc69ff50e7d598 Mon Sep 17 00:00:00 2001
+From: Julia Tatz <tatz.j@northeastern.edu>
+Date: Mon, 9 Jan 2023 21:01:37 -0500
+Subject: [PATCH 4/7] Initial codegen for #[address_space], without tests yet
+
+---
+ compiler/rustc_codegen_llvm/src/allocator.rs  |  9 +++-
+ compiler/rustc_codegen_llvm/src/common.rs     |  2 +-
+ compiler/rustc_codegen_llvm/src/consts.rs     | 21 ++++++----
+ compiler/rustc_codegen_llvm/src/context.rs    |  2 +-
+ .../src/coverageinfo/mod.rs                   |  5 ++-
+ .../rustc_codegen_llvm/src/debuginfo/gdb.rs   |  2 +-
+ compiler/rustc_codegen_llvm/src/declare.rs    | 38 ++++++++++++++---
+ compiler/rustc_codegen_llvm/src/intrinsic.rs  |  4 +-
+ compiler/rustc_codegen_llvm/src/llvm/ffi.rs   | 15 ++++++-
+ compiler/rustc_codegen_llvm/src/llvm/mod.rs   | 15 ++++++-
+ compiler/rustc_codegen_llvm/src/mono_item.rs  |  2 +-
+ .../rustc_llvm/llvm-wrapper/RustWrapper.cpp   | 41 ++++++++++++++++---
+ 12 files changed, 124 insertions(+), 32 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/allocator.rs b/compiler/rustc_codegen_llvm/src/allocator.rs
+index 668d9292705..ea82d45bf24 100644
+--- a/compiler/rustc_codegen_llvm/src/allocator.rs
++++ b/compiler/rustc_codegen_llvm/src/allocator.rs
+@@ -148,7 +148,14 @@ pub(crate) unsafe fn codegen(
+ 
+     // __rust_alloc_error_handler_should_panic
+     let name = OomStrategy::SYMBOL;
+-    let ll_g = llvm::LLVMRustGetOrInsertGlobal(llmod, name.as_ptr().cast(), name.len(), i8);
++    let ll_g = llvm::LLVMRustGetOrInsertGlobal(
++        llmod,
++        name.as_ptr().cast(),
++        name.len(),
++        i8,
++        false,
++        0 as c_uint,
++    );
+     if tcx.sess.target.default_hidden_visibility {
+         llvm::LLVMRustSetVisibility(ll_g, llvm::Visibility::Hidden);
+     }
+diff --git a/compiler/rustc_codegen_llvm/src/common.rs b/compiler/rustc_codegen_llvm/src/common.rs
+index 6c8a0918bbc..ba1599deb9f 100644
+--- a/compiler/rustc_codegen_llvm/src/common.rs
++++ b/compiler/rustc_codegen_llvm/src/common.rs
+@@ -196,7 +196,7 @@ fn const_str(&self, s: &str) -> (&'ll Value, &'ll Value) {
+             .or_insert_with(|| {
+                 let sc = self.const_bytes(s.as_bytes());
+                 let sym = self.generate_local_symbol_name("str");
+-                let g = self.define_global(&sym, self.val_ty(sc)).unwrap_or_else(|| {
++                let g = self.define_global(&sym, self.val_ty(sc), None).unwrap_or_else(|| {
+                     bug!("symbol `{}` is already defined", sym);
+                 });
+                 unsafe {
+diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
+index 16df061fed4..5ec22a1c8d7 100644
+--- a/compiler/rustc_codegen_llvm/src/consts.rs
++++ b/compiler/rustc_codegen_llvm/src/consts.rs
+@@ -152,7 +152,7 @@ fn check_and_apply_linkage<'ll, 'tcx>(
+ 
+         unsafe {
+             // Declare a symbol `foo` with the desired linkage.
+-            let g1 = cx.declare_global(sym, cx.type_i8());
++            let g1 = cx.declare_global(sym, cx.type_i8(), attrs.address_space);
+             llvm::LLVMRustSetLinkage(g1, base::linkage_to_llvm(linkage));
+ 
+             // Declare an internal global `extern_with_linkage_foo` which
+@@ -163,7 +163,7 @@ fn check_and_apply_linkage<'ll, 'tcx>(
+             // zero.
+             let mut real_name = "_rust_extern_with_linkage_".to_string();
+             real_name.push_str(sym);
+-            let g2 = cx.define_global(&real_name, llty).unwrap_or_else(|| {
++            let g2 = cx.define_global(&real_name, llty, attrs.address_space).unwrap_or_else(|| {
+                 cx.sess().emit_fatal(SymbolAlreadyDefined {
+                     span: cx.tcx.def_span(def_id),
+                     symbol_name: sym,
+@@ -176,11 +176,11 @@ fn check_and_apply_linkage<'ll, 'tcx>(
+     } else if cx.tcx.sess.target.arch == "x86" &&
+         let Some(dllimport) = common::get_dllimport(cx.tcx, def_id, sym)
+     {
+-        cx.declare_global(&common::i686_decorated_name(&dllimport, common::is_mingw_gnu_toolchain(&cx.tcx.sess.target), true), llty)
++        cx.declare_global(&common::i686_decorated_name(&dllimport, common::is_mingw_gnu_toolchain(&cx.tcx.sess.target), true), llty, attrs.address_space)
+     } else {
+         // Generate an external declaration.
+         // FIXME(nagisa): investigate whether it can be changed into define_global
+-        cx.declare_global(sym, llty)
++        cx.declare_global(sym, llty, attrs.address_space)
+     }
+ }
+ 
+@@ -223,13 +223,14 @@ pub(crate) fn static_addr_of_mut(
+             let gv = match kind {
+                 Some(kind) if !self.tcx.sess.fewer_names() => {
+                     let name = self.generate_local_symbol_name(kind);
+-                    let gv = self.define_global(&name, self.val_ty(cv)).unwrap_or_else(|| {
+-                        bug!("symbol `{}` is already defined", name);
+-                    });
++                    let gv =
++                        self.define_global(&name, self.val_ty(cv), None).unwrap_or_else(|| {
++                            bug!("symbol `{}` is already defined", name);
++                        });
+                     llvm::LLVMRustSetLinkage(gv, llvm::Linkage::PrivateLinkage);
+                     gv
+                 }
+-                _ => self.define_private_global(self.val_ty(cv)),
++                _ => self.define_private_global(self.val_ty(cv), None),
+             };
+             llvm::LLVMSetInitializer(gv, cv);
+             set_global_alignment(self, gv, align);
+@@ -267,7 +268,7 @@ pub(crate) fn get_static(&self, def_id: DefId) -> &'ll Value {
+                 }
+             }
+ 
+-            let g = self.declare_global(sym, llty);
++            let g = self.declare_global(sym, llty, fn_attrs.address_space);
+ 
+             if !self.tcx.is_reachable_non_generic(def_id) {
+                 unsafe {
+@@ -412,6 +413,8 @@ fn codegen_static(&self, def_id: DefId, is_mutable: bool) {
+                     name.as_ptr().cast(),
+                     name.len(),
+                     val_llty,
++                    attrs.address_space.is_some(),
++                    attrs.address_space.unwrap_or_default() as c_uint,
+                 );
+ 
+                 llvm::LLVMRustSetLinkage(new_g, linkage);
+diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
+index 83101a85435..90fc22b25da 100644
+--- a/compiler/rustc_codegen_llvm/src/context.rs
++++ b/compiler/rustc_codegen_llvm/src/context.rs
+@@ -911,7 +911,7 @@ pub(crate) fn eh_catch_typeinfo(&self) -> &'ll Value {
+             _ => {
+                 let ty = self
+                     .type_struct(&[self.type_ptr_to(self.type_isize()), self.type_i8p()], false);
+-                self.declare_global("rust_eh_catch_typeinfo", ty)
++                self.declare_global("rust_eh_catch_typeinfo", ty, None)
+             }
+         };
+         let eh_catch_typeinfo = self.const_bitcast(eh_catch_typeinfo, self.type_i8p());
+diff --git a/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs b/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs
+index 3dc0ac03312..3c9cb312ab1 100644
+--- a/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs
++++ b/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs
+@@ -337,7 +337,7 @@ pub(crate) fn save_cov_data_to_mod<'ll, 'tcx>(
+     .expect("Rust Coverage section name failed UTF-8 conversion");
+     debug!("covmap section name: {:?}", covmap_section_name);
+ 
+-    let llglobal = llvm::add_global(cx.llmod, cx.val_ty(cov_data_val), &covmap_var_name);
++    let llglobal = llvm::add_global(cx.llmod, cx.val_ty(cov_data_val), &covmap_var_name, None);
+     llvm::set_initializer(llglobal, cov_data_val);
+     llvm::set_global_constant(llglobal, true);
+     llvm::set_linkage(llglobal, llvm::Linkage::PrivateLinkage);
+@@ -370,7 +370,8 @@ pub(crate) fn save_func_record_to_mod<'ll, 'tcx>(
+     .expect("Rust Coverage function record section name failed UTF-8 conversion");
+     debug!("function record section name: {:?}", func_record_section_name);
+ 
+-    let llglobal = llvm::add_global(cx.llmod, cx.val_ty(func_record_val), &func_record_var_name);
++    let llglobal =
++        llvm::add_global(cx.llmod, cx.val_ty(func_record_val), &func_record_var_name, None);
+     llvm::set_initializer(llglobal, func_record_val);
+     llvm::set_global_constant(llglobal, true);
+     llvm::set_linkage(llglobal, llvm::Linkage::LinkOnceODRLinkage);
+diff --git a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
+index aaf5dbd9930..7ce19079383 100644
+--- a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
++++ b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
+@@ -70,7 +70,7 @@ pub fn get_or_insert_gdb_debug_scripts_section_global<'ll>(cx: &CodegenCx<'ll, '
+             let llvm_type = cx.type_array(cx.type_i8(), section_contents.len() as u64);
+ 
+             let section_var = cx
+-                .define_global(section_var_name, llvm_type)
++                .define_global(section_var_name, llvm_type, None)
+                 .unwrap_or_else(|| bug!("symbol `{}` is already defined", section_var_name));
+             llvm::LLVMSetSection(section_var, section_name.as_ptr().cast());
+             llvm::LLVMSetInitializer(section_var, cx.const_bytes(section_contents));
+diff --git a/compiler/rustc_codegen_llvm/src/declare.rs b/compiler/rustc_codegen_llvm/src/declare.rs
+index cc2a5d158be..849f7162264 100644
+--- a/compiler/rustc_codegen_llvm/src/declare.rs
++++ b/compiler/rustc_codegen_llvm/src/declare.rs
+@@ -62,9 +62,23 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
+     ///
+     /// If there’s a value with the same name already declared, the function will
+     /// return its Value instead.
+-    pub fn declare_global(&self, name: &str, ty: &'ll Type) -> &'ll Value {
++    pub fn declare_global(
++        &self,
++        name: &str,
++        ty: &'ll Type,
++        address_space: Option<u16>,
++    ) -> &'ll Value {
+         debug!("declare_global(name={:?})", name);
+-        unsafe { llvm::LLVMRustGetOrInsertGlobal(self.llmod, name.as_ptr().cast(), name.len(), ty) }
++        unsafe {
++            llvm::LLVMRustGetOrInsertGlobal(
++                self.llmod,
++                name.as_ptr().cast(),
++                name.len(),
++                ty,
++                address_space.is_some(),
++                address_space.unwrap_or_default() as _,
++            )
++        }
+     }
+ 
+     /// Declare a C ABI function.
+@@ -169,19 +183,31 @@ pub fn declare_fn(&self, name: &str, fn_abi: &FnAbi<'tcx, Ty<'tcx>>) -> &'ll Val
+     /// return `None` if the name already has a definition associated with it. In that
+     /// case an error should be reported to the user, because it usually happens due
+     /// to user’s fault (e.g., misuse of `#[no_mangle]` or `#[export_name]` attributes).
+-    pub fn define_global(&self, name: &str, ty: &'ll Type) -> Option<&'ll Value> {
++    pub fn define_global(
++        &self,
++        name: &str,
++        ty: &'ll Type,
++        address_space: Option<u16>,
++    ) -> Option<&'ll Value> {
+         if self.get_defined_value(name).is_some() {
+             None
+         } else {
+-            Some(self.declare_global(name, ty))
++            Some(self.declare_global(name, ty, address_space))
+         }
+     }
+ 
+     /// Declare a private global
+     ///
+     /// Use this function when you intend to define a global without a name.
+-    pub fn define_private_global(&self, ty: &'ll Type) -> &'ll Value {
+-        unsafe { llvm::LLVMRustInsertPrivateGlobal(self.llmod, ty) }
++    pub fn define_private_global(&self, ty: &'ll Type, address_space: Option<u16>) -> &'ll Value {
++        unsafe {
++            llvm::LLVMRustInsertPrivateGlobal(
++                self.llmod,
++                ty,
++                address_space.is_some(),
++                address_space.unwrap_or_default() as _,
++            )
++        }
+     }
+ 
+     /// Gets declared value by name.
+diff --git a/compiler/rustc_codegen_llvm/src/intrinsic.rs b/compiler/rustc_codegen_llvm/src/intrinsic.rs
+index 03fa0f19375..c2b1350907c 100644
+--- a/compiler/rustc_codegen_llvm/src/intrinsic.rs
++++ b/compiler/rustc_codegen_llvm/src/intrinsic.rs
+@@ -566,11 +566,11 @@ fn codegen_msvc_try<'ll>(
+         //
+         // When modifying, make sure that the type_name string exactly matches
+         // the one used in library/panic_unwind/src/seh.rs.
+-        let type_info_vtable = bx.declare_global("??_7type_info@@6B@", bx.type_i8p());
++        let type_info_vtable = bx.declare_global("??_7type_info@@6B@", bx.type_i8p(), None);
+         let type_name = bx.const_bytes(b"rust_panic\0");
+         let type_info =
+             bx.const_struct(&[type_info_vtable, bx.const_null(bx.type_i8p()), type_name], false);
+-        let tydesc = bx.declare_global("__rust_panic_type_info", bx.val_ty(type_info));
++        let tydesc = bx.declare_global("__rust_panic_type_info", bx.val_ty(type_info), None);
+         unsafe {
+             llvm::LLVMRustSetLinkage(tydesc, llvm::Linkage::LinkOnceODRLinkage);
+             llvm::SetUniqueComdat(bx.llmod, tydesc);
+diff --git a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
+index 61365e6dc4b..d7e4a1a9895 100644
+--- a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
+@@ -1167,14 +1167,27 @@ pub fn LLVMRustConstInBoundsGEP2<'a>(
+     // Operations on global variables
+     pub fn LLVMIsAGlobalVariable(GlobalVar: &Value) -> Option<&Value>;
+     pub fn LLVMAddGlobal<'a>(M: &'a Module, Ty: &'a Type, Name: *const c_char) -> &'a Value;
++    pub fn LLVMAddGlobalInAddressSpace<'a>(
++        M: &'a Module,
++        Ty: &'a Type,
++        Name: *const c_char,
++        AddressSpace: c_uint,
++    ) -> &'a Value;
+     pub fn LLVMGetNamedGlobal(M: &Module, Name: *const c_char) -> Option<&Value>;
+     pub fn LLVMRustGetOrInsertGlobal<'a>(
+         M: &'a Module,
+         Name: *const c_char,
+         NameLen: size_t,
+         T: &'a Type,
++        InAddressSpace: bool,
++        AddressSpace: c_uint,
++    ) -> &'a Value;
++    pub fn LLVMRustInsertPrivateGlobal<'a>(
++        M: &'a Module,
++        T: &'a Type,
++        InAddressSpace: bool,
++        AddressSpace: c_uint,
+     ) -> &'a Value;
+-    pub fn LLVMRustInsertPrivateGlobal<'a>(M: &'a Module, T: &'a Type) -> &'a Value;
+     pub fn LLVMGetFirstGlobal(M: &Module) -> Option<&Value>;
+     pub fn LLVMGetNextGlobal(GlobalVar: &Value) -> Option<&Value>;
+     pub fn LLVMDeleteGlobal(GlobalVar: &Value);
+diff --git a/compiler/rustc_codegen_llvm/src/llvm/mod.rs b/compiler/rustc_codegen_llvm/src/llvm/mod.rs
+index 4f5cc575da6..c32f13aa10b 100644
+--- a/compiler/rustc_codegen_llvm/src/llvm/mod.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm/mod.rs
+@@ -200,9 +200,20 @@ pub fn set_section(llglobal: &Value, section_name: &str) {
+     }
+ }
+ 
+-pub fn add_global<'a>(llmod: &'a Module, ty: &'a Type, name: &str) -> &'a Value {
++pub fn add_global<'a>(
++    llmod: &'a Module,
++    ty: &'a Type,
++    name: &str,
++    address_space: Option<u16>,
++) -> &'a Value {
+     let name_cstr = CString::new(name).expect("unexpected CString error");
+-    unsafe { LLVMAddGlobal(llmod, ty, name_cstr.as_ptr()) }
++    if let Some(address_space) = address_space {
++        unsafe {
++            LLVMAddGlobalInAddressSpace(llmod, ty, name_cstr.as_ptr(), address_space as c_uint)
++        }
++    } else {
++        unsafe { LLVMAddGlobal(llmod, ty, name_cstr.as_ptr()) }
++    }
+ }
+ 
+ pub fn set_initializer(llglobal: &Value, constant_val: &Value) {
+diff --git a/compiler/rustc_codegen_llvm/src/mono_item.rs b/compiler/rustc_codegen_llvm/src/mono_item.rs
+index 59bdc60830f..e1f4ac70878 100644
+--- a/compiler/rustc_codegen_llvm/src/mono_item.rs
++++ b/compiler/rustc_codegen_llvm/src/mono_item.rs
+@@ -25,7 +25,7 @@ fn predefine_static(
+         let ty = instance.ty(self.tcx, ty::ParamEnv::reveal_all());
+         let llty = self.layout_of(ty).llvm_type(self);
+ 
+-        let g = self.define_global(symbol_name, llty).unwrap_or_else(|| {
++        let g = self.define_global(symbol_name, llty, None).unwrap_or_else(|| {
+             self.sess()
+                 .emit_fatal(SymbolAlreadyDefined { span: self.tcx.def_span(def_id), symbol_name })
+         });
+diff --git a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
+index 49acd71b3e1..6b09a6f525a 100644
+--- a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
++++ b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
+@@ -127,8 +127,27 @@ extern "C" LLVMValueRef LLVMRustGetOrInsertFunction(LLVMModuleRef M,
+   );
+ }
+ 
++
++#if LLVM_VERSION_LT(16, 0)
++static Optional<unsigned> wrap_opt_address_space(bool InAddressSpace, unsigned AddressSpace) {
++#else
++static std::optional<unsigned> wrap_opt_address_space(bool InAddressSpace, unsigned AddressSpace) {
++#endif
++  if (InAddressSpace) {
++    return AddressSpace;
++  } else {
++#if LLVM_VERSION_LT(16, 0)
++    return None;
++#else
++    return std::nullopt;
++#endif
++  }
++}
++
++
+ extern "C" LLVMValueRef
+-LLVMRustGetOrInsertGlobal(LLVMModuleRef M, const char *Name, size_t NameLen, LLVMTypeRef Ty) {
++LLVMRustGetOrInsertGlobal(LLVMModuleRef M, const char *Name, size_t NameLen, LLVMTypeRef Ty,
++                          bool InAddressSpace, unsigned AddressSpace) {
+   Module *Mod = unwrap(M);
+   StringRef NameRef(Name, NameLen);
+ 
+@@ -138,18 +157,30 @@ LLVMRustGetOrInsertGlobal(LLVMModuleRef M, const char *Name, size_t NameLen, LLV
+   // GlobalVariable* so we can access linkage, visibility, etc.
+   GlobalVariable *GV = Mod->getGlobalVariable(NameRef, true);
+   if (!GV)
+-    GV = new GlobalVariable(*Mod, unwrap(Ty), false,
+-                            GlobalValue::ExternalLinkage, nullptr, NameRef);
++    GV = new GlobalVariable(*Mod,
++                            unwrap(Ty),
++                            false,
++                            GlobalValue::ExternalLinkage,
++                            nullptr,
++                            NameRef,
++                            nullptr,
++                            GlobalValue::NotThreadLocal,
++                            wrap_opt_address_space(InAddressSpace, AddressSpace));
+   return wrap(GV);
+ }
+ 
+ extern "C" LLVMValueRef
+-LLVMRustInsertPrivateGlobal(LLVMModuleRef M, LLVMTypeRef Ty) {
++LLVMRustInsertPrivateGlobal(LLVMModuleRef M, LLVMTypeRef Ty,
++                            bool InAddressSpace, unsigned AddressSpace) {
+   return wrap(new GlobalVariable(*unwrap(M),
+                                  unwrap(Ty),
+                                  false,
+                                  GlobalValue::PrivateLinkage,
+-                                 nullptr));
++                                 nullptr,
++                                 "",
++                                 nullptr,
++                                 GlobalValue::NotThreadLocal,
++                                 wrap_opt_address_space(InAddressSpace, AddressSpace)));
+ }
+ 
+ static Attribute::AttrKind fromRust(LLVMRustAttribute Kind) {
+-- 
+2.40.1
+
+
+From 4e96e533f8c481e0950f340d0382bed676d6fe60 Mon Sep 17 00:00:00 2001
+From: Julia Tatz <julia.tatz@childrens.harvard.edu>
+Date: Wed, 25 Jan 2023 20:05:28 -0500
+Subject: [PATCH 5/7] Fix eh_catch_typeinfo, debug_gdb_scripts, & va-arg
+ bitcasts -> pointercasts
+
+---
+ compiler/rustc_codegen_llvm/src/context.rs       |  2 +-
+ compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs |  2 +-
+ compiler/rustc_codegen_llvm/src/va_arg.rs        | 12 ++++++------
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
+index 90fc22b25da..83b8920b0c6 100644
+--- a/compiler/rustc_codegen_llvm/src/context.rs
++++ b/compiler/rustc_codegen_llvm/src/context.rs
+@@ -914,7 +914,7 @@ pub(crate) fn eh_catch_typeinfo(&self) -> &'ll Value {
+                 self.declare_global("rust_eh_catch_typeinfo", ty, None)
+             }
+         };
+-        let eh_catch_typeinfo = self.const_bitcast(eh_catch_typeinfo, self.type_i8p());
++        let eh_catch_typeinfo = self.const_ptrcast(eh_catch_typeinfo, self.type_i8p());
+         self.eh_catch_typeinfo.set(Some(eh_catch_typeinfo));
+         eh_catch_typeinfo
+     }
+diff --git a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
+index 7ce19079383..615a8ff07b7 100644
+--- a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
++++ b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
+@@ -19,7 +19,7 @@
+ pub fn insert_reference_to_gdb_debug_scripts_section_global(bx: &mut Builder<'_, '_, '_>) {
+     if needs_gdb_debug_scripts_section(bx) {
+         let gdb_debug_scripts_section =
+-            bx.const_bitcast(get_or_insert_gdb_debug_scripts_section_global(bx), bx.type_i8p());
++            bx.const_ptrcast(get_or_insert_gdb_debug_scripts_section_global(bx), bx.type_i8p());
+         // Load just the first byte as that's all that's necessary to force
+         // LLVM to keep around the reference to the global.
+         let volatile_load_instruction = bx.volatile_load(bx.type_i8(), gdb_debug_scripts_section);
+diff --git a/compiler/rustc_codegen_llvm/src/va_arg.rs b/compiler/rustc_codegen_llvm/src/va_arg.rs
+index b19398e68c2..f261b0b5193 100644
+--- a/compiler/rustc_codegen_llvm/src/va_arg.rs
++++ b/compiler/rustc_codegen_llvm/src/va_arg.rs
+@@ -35,7 +35,7 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
+     let va_list_ty = bx.type_i8p();
+     let va_list_ptr_ty = bx.type_ptr_to(va_list_ty);
+     let va_list_addr = if list.layout.llvm_type(bx.cx) != va_list_ptr_ty {
+-        bx.bitcast(list.immediate(), va_list_ptr_ty)
++        bx.pointercast(list.immediate(), va_list_ptr_ty)
+     } else {
+         list.immediate()
+     };
+@@ -56,9 +56,9 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
+     if size.bytes() < slot_size.bytes() && bx.tcx().sess.target.endian == Endian::Big {
+         let adjusted_size = bx.cx().const_i32((slot_size.bytes() - size.bytes()) as i32);
+         let adjusted = bx.inbounds_gep(bx.type_i8(), addr, &[adjusted_size]);
+-        (bx.bitcast(adjusted, bx.cx().type_ptr_to(llty)), addr_align)
++        (bx.pointercast(adjusted, bx.cx().type_ptr_to(llty)), addr_align)
+     } else {
+-        (bx.bitcast(addr, bx.cx().type_ptr_to(llty)), addr_align)
++        (bx.pointercast(addr, bx.cx().type_ptr_to(llty)), addr_align)
+     }
+ }
+ 
+@@ -158,7 +158,7 @@ fn emit_aapcs_va_arg<'ll, 'tcx>(
+         reg_addr = bx.gep(bx.type_i8(), reg_addr, &[offset]);
+     }
+     let reg_type = layout.llvm_type(bx);
+-    let reg_addr = bx.bitcast(reg_addr, bx.cx.type_ptr_to(reg_type));
++    let reg_addr = bx.pointercast(reg_addr, bx.cx.type_ptr_to(reg_type));
+     let reg_value = bx.load(reg_type, reg_addr, layout.align.abi);
+     bx.br(end);
+ 
+@@ -250,10 +250,10 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
+     let val_type = layout.llvm_type(bx);
+     let val_addr = if indirect {
+         let ptr_type = bx.cx.type_ptr_to(val_type);
+-        let ptr_addr = bx.bitcast(val_addr, bx.cx.type_ptr_to(ptr_type));
++        let ptr_addr = bx.pointercast(val_addr, bx.cx.type_ptr_to(ptr_type));
+         bx.load(ptr_type, ptr_addr, bx.tcx().data_layout.pointer_align.abi)
+     } else {
+-        bx.bitcast(val_addr, bx.cx.type_ptr_to(val_type))
++        bx.pointercast(val_addr, bx.cx.type_ptr_to(val_type))
+     };
+     bx.load(val_type, val_addr, layout.align.abi)
+ }
+-- 
+2.40.1
+
+
+From 5b4cb4764e528be496f59eccb483eec2d061a6a0 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
 Date: Sun, 3 Jul 2022 22:32:56 -0400
-Subject: [PATCH 2/6] nvptx fixes
+Subject: [PATCH 6/7] nvptx fixes
 
 ---
  compiler/rustc_target/src/abi/call/nvptx64.rs | 59 ++-----------------
@@ -313,790 +1059,45 @@ index c319946b5f5..6282ee7ba88 100644
  // CHECK-LABEL: .visible .func sym_fn()
  // CHECK: // begin inline asm
 -- 
-2.39.1
+2.40.1
 
 
-From 366e123f3e6e215bda68d913880c9776455acad4 Mon Sep 17 00:00:00 2001
+From 31c89828122353fbbab9a334b4267dacc8dab119 Mon Sep 17 00:00:00 2001
 From: Julia Tatz <tatz.j@northeastern.edu>
-Date: Mon, 12 Sep 2022 17:45:02 -0400
-Subject: [PATCH 3/6] Fix const ptr casts too
+Date: Tue, 25 Apr 2023 11:15:22 -0400
+Subject: [PATCH 7/7] Fix broken cast
 
 ---
- compiler/rustc_codegen_llvm/src/common.rs |  8 ++++----
- compiler/rustc_codegen_llvm/src/consts.rs | 20 ++++++++++++++++++++
- 2 files changed, 24 insertions(+), 4 deletions(-)
+ compiler/rustc_codegen_llvm/src/consts.rs       | 2 +-
+ compiler/rustc_codegen_ssa/src/codegen_attrs.rs | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
 
-diff --git a/compiler/rustc_codegen_llvm/src/common.rs b/compiler/rustc_codegen_llvm/src/common.rs
-index acee9134fb9..c80d36f1f29 100644
---- a/compiler/rustc_codegen_llvm/src/common.rs
-+++ b/compiler/rustc_codegen_llvm/src/common.rs
-@@ -279,7 +279,7 @@ fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) ->
-                 let llval = unsafe {
-                     llvm::LLVMRustConstInBoundsGEP2(
-                         self.type_i8(),
--                        self.const_bitcast(base_addr, self.type_i8p_ext(base_addr_space)),
-+                        self.const_ptrcast(base_addr, self.type_i8p_ext(base_addr_space)),
-                         &self.const_usize(offset.bytes()),
-                         1,
-                     )
-@@ -287,7 +287,7 @@ fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) ->
-                 if layout.primitive() != Pointer {
-                     unsafe { llvm::LLVMConstPtrToInt(llval, llty) }
-                 } else {
--                    self.const_bitcast(llval, llty)
-+                    self.const_ptrcast(llval, llty)
-                 }
-             }
-         }
-@@ -316,12 +316,12 @@ fn from_const_alloc(
-             let llval = unsafe {
-                 llvm::LLVMRustConstInBoundsGEP2(
-                     self.type_i8(),
--                    self.const_bitcast(base_addr, self.type_i8p()),
-+                    self.const_ptrcast(base_addr, self.type_i8p()),
-                     &self.const_usize(offset.bytes()),
-                     1,
-                 )
-             };
--            self.const_bitcast(llval, llty)
-+            self.const_ptrcast(llval, llty)
-         };
-         PlaceRef::new_sized(llval, layout)
-     }
 diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
-index 16467b614fe..5aab4efea9d 100644
+index 5ec22a1c8d7..ec7e73570e9 100644
 --- a/compiler/rustc_codegen_llvm/src/consts.rs
 +++ b/compiler/rustc_codegen_llvm/src/consts.rs
-@@ -200,11 +200,31 @@ fn check_and_apply_linkage<'ll, 'tcx>(
- }
- 
- pub fn ptrcast<'ll>(val: &'ll Value, ty: &'ll Type) -> &'ll Value {
-+    // FIXME: remove before merge
-+    let val_ty_kind = unsafe { llvm::LLVMRustGetTypeKind(common::val_ty(val)).to_generic() };
-+    let dest_ty_kind = unsafe { llvm::LLVMRustGetTypeKind(ty).to_generic() };
-+    assert!(
-+        (matches!(val_ty_kind, rustc_codegen_ssa::common::TypeKind::Pointer)
-+            && matches!(dest_ty_kind, rustc_codegen_ssa::common::TypeKind::Pointer)),
-+        "val ty is {:?}, dest_ty is {:?}",
-+        val_ty_kind,
-+        dest_ty_kind,
-+    );
-     unsafe { llvm::LLVMConstPointerCast(val, ty) }
- }
- 
- impl<'ll> CodegenCx<'ll, '_> {
-     pub(crate) fn const_bitcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
-+        // FIXME: remove before merge
-+        assert!(
-+            !(matches!(
-+                self.type_kind(self.val_ty(val)),
-+                rustc_codegen_ssa::common::TypeKind::Pointer
-+            ) || matches!(self.type_kind(ty), rustc_codegen_ssa::common::TypeKind::Pointer)),
-+            "val ty is {:?}, dest_ty is {:?}",
-+            self.type_kind(self.val_ty(val)),
-+            self.type_kind(ty),
-+        );
-         unsafe { llvm::LLVMConstBitCast(val, ty) }
-     }
- 
--- 
-2.39.1
-
-
-From f53723943a929dadb8cc0d2e3df43b47dd9fc5a3 Mon Sep 17 00:00:00 2001
-From: Julia Tatz <tatz.j@northeastern.edu>
-Date: Mon, 9 Jan 2023 20:51:01 -0500
-Subject: [PATCH 4/6] Add new experimental #[address_space] built-in
-
-Only the skeleton for now, no codegen yet
----
- .../rustc_codegen_ssa/src/codegen_attrs.rs    | 42 +++++++++++++++++++
- compiler/rustc_feature/src/active.rs          |  2 +
- compiler/rustc_feature/src/builtin_attrs.rs   |  2 +
- .../src/middle/codegen_fn_attrs.rs            |  4 ++
- compiler/rustc_span/src/symbol.rs             |  1 +
- .../feature-gate-address_space.rs             | 13 ++++++
- .../feature-gate-address_space.stderr         | 38 +++++++++++++++++
- 7 files changed, 102 insertions(+)
- create mode 100644 tests/ui/feature-gates/feature-gate-address_space.rs
- create mode 100644 tests/ui/feature-gates/feature-gate-address_space.stderr
-
-diff --git a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
-index 8808ad2dcd1..14c4183ae0c 100644
---- a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
-+++ b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
-@@ -334,6 +334,10 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, did: DefId) -> CodegenFnAttrs {
-             if let ordinal @ Some(_) = check_link_ordinal(tcx, attr) {
-                 codegen_fn_attrs.link_ordinal = ordinal;
-             }
-+        } else if attr.has_name(sym::address_space) {
-+            if let address_space @ Some(_) = check_address_space(tcx, attr) {
-+                codegen_fn_attrs.address_space = address_space;
-+            }
-         } else if attr.has_name(sym::no_sanitize) {
-             no_sanitize_span = Some(attr.span);
-             if let Some(list) = attr.meta_item_list() {
-@@ -704,6 +708,44 @@ fn check_link_name_xor_ordinal(
-     }
- }
- 
-+fn check_address_space(tcx: TyCtxt<'_>, attr: &ast::Attribute) -> Option<u16> {
-+    use rustc_ast::{LitIntType, LitKind, MetaItemLit};
-+    let meta_item_list = attr.meta_item_list();
-+    let meta_item_list = meta_item_list.as_deref();
-+    let sole_meta_list = match meta_item_list {
-+        Some([item]) => item.lit(),
-+        Some(_) => {
-+            tcx.sess
-+                .struct_span_err(attr.span, "incorrect number of arguments to `#[address_space]`")
-+                .note("the attribute requires exactly one argument")
-+                .emit();
-+            return None;
-+        }
-+        _ => None,
-+    };
-+    if let Some(MetaItemLit { kind: LitKind::Int(ordinal, LitIntType::Unsuffixed), .. }) =
-+        sole_meta_list
-+    {
-+        if *ordinal <= u16::MAX as u128 {
-+            Some(*ordinal as u16)
-+        } else {
-+            let msg =
-+                format!("address space value in `address_space` is too large: `{}`", &ordinal);
-+            tcx.sess
-+                .struct_span_err(attr.span, &msg)
-+                .note("the value may not exceed `u16::MAX`")
-+                .emit();
-+            None
-+        }
-+    } else {
-+        tcx.sess
-+            .struct_span_err(attr.span, "illegal address space format in `address_space`")
-+            .note("an unsuffixed integer value, e.g., `1`, is expected")
-+            .emit();
-+        None
-+    }
-+}
-+
- pub fn provide(providers: &mut Providers) {
-     *providers = Providers { codegen_fn_attrs, should_inherit_track_caller, ..*providers };
- }
-diff --git a/compiler/rustc_feature/src/active.rs b/compiler/rustc_feature/src/active.rs
-index 196c31302a0..26f3aa0936b 100644
---- a/compiler/rustc_feature/src/active.rs
-+++ b/compiler/rustc_feature/src/active.rs
-@@ -287,6 +287,8 @@ pub fn set(&self, features: &mut Features, span: Span) {
-     (active, abi_ptx, "1.15.0", Some(38788), None),
-     /// Allows `extern "x86-interrupt" fn()`.
-     (active, abi_x86_interrupt, "1.17.0", Some(40180), None),
-+    /// Allows `#[address_space = "..."]` on static varibles.
-+    (incomplete, address_space, "CURRENT_RUSTC_VERSION", Some(1), None),
-     /// Allows additional const parameter types, such as `&'static str` or user defined types
-     (incomplete, adt_const_params, "1.56.0", Some(95174), None),
-     /// Allows defining an `#[alloc_error_handler]`.
-diff --git a/compiler/rustc_feature/src/builtin_attrs.rs b/compiler/rustc_feature/src/builtin_attrs.rs
-index af56a0b2459..406f226b2f1 100644
---- a/compiler/rustc_feature/src/builtin_attrs.rs
-+++ b/compiler/rustc_feature/src/builtin_attrs.rs
-@@ -403,6 +403,8 @@ pub struct BuiltinAttribute {
-         doc, Normal, template!(List: "hidden|inline|...", NameValueStr: "string"), DuplicatesOk
-     ),
- 
-+    gated!(address_space, Normal, template!(List: "space"), ErrorPreceding, experimental!(address_space)),
-+
-     // ==========================================================================
-     // Unstable attributes:
-     // ==========================================================================
-diff --git a/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs b/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs
-index bea884c856a..2920a4eaed3 100644
---- a/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs
-+++ b/compiler/rustc_middle/src/middle/codegen_fn_attrs.rs
-@@ -43,6 +43,9 @@ pub struct CodegenFnAttrs {
-     /// The `#[repr(align(...))]` attribute. Indicates the value of which the function should be
-     /// aligned to.
-     pub alignment: Option<u32>,
-+    /// The `#[address_space = "..."]` attribute, indicating in which address space a
-+    /// Rust-defined/foreign static value resides.
-+    pub address_space: Option<u16>,
- }
- 
- bitflags! {
-@@ -120,6 +123,7 @@ pub const fn new() -> CodegenFnAttrs {
-             no_sanitize: SanitizerSet::empty(),
-             instruction_set: None,
-             alignment: None,
-+            address_space: None,
-         }
-     }
- 
-diff --git a/compiler/rustc_span/src/symbol.rs b/compiler/rustc_span/src/symbol.rs
-index 7597b8d126a..53fa888e20f 100644
---- a/compiler/rustc_span/src/symbol.rs
-+++ b/compiler/rustc_span/src/symbol.rs
-@@ -332,6 +332,7 @@
-         add_assign,
-         add_with_overflow,
-         address,
-+        address_space,
-         adt_const_params,
-         advanced_slice_patterns,
-         adx_target_feature,
-diff --git a/tests/ui/feature-gates/feature-gate-address_space.rs b/tests/ui/feature-gates/feature-gate-address_space.rs
-new file mode 100644
-index 00000000000..886c5b564a6
---- /dev/null
-+++ b/tests/ui/feature-gates/feature-gate-address_space.rs
-@@ -0,0 +1,13 @@
-+#[address_space(0)] //~ ERROR the `#[address_space]` attribute is an experimental feature
-+static FOO: usize = 42;
-+
-+extern "C" {
-+    #[address_space(0)] //~ ERROR the `#[address_space]` attribute is an experimental feature
-+    static EXTERN_FOO: usize;
-+}
-+
-+#[address_space(65_536)] //~ ERROR the `#[address_space]` attribute is an experimental feature
-+                         //~^ ERROR address space value in `address_space` is too large: `65536`
-+static TOO_BIG: usize = 7;
-+
-+fn main() {}
-diff --git a/tests/ui/feature-gates/feature-gate-address_space.stderr b/tests/ui/feature-gates/feature-gate-address_space.stderr
-new file mode 100644
-index 00000000000..91eedd877ff
---- /dev/null
-+++ b/tests/ui/feature-gates/feature-gate-address_space.stderr
-@@ -0,0 +1,38 @@
-+error[E0658]: the `#[address_space]` attribute is an experimental feature
-+  --> $DIR/feature-gate-address_space.rs:1:1
-+   |
-+LL | #[address_space(0)]
-+   | ^^^^^^^^^^^^^^^^^^^
-+   |
-+   = note: see issue #1 <https://github.com/rust-lang/rust/issues/1> for more information
-+   = help: add `#![feature(address_space)]` to the crate attributes to enable
-+
-+error[E0658]: the `#[address_space]` attribute is an experimental feature
-+  --> $DIR/feature-gate-address_space.rs:5:5
-+   |
-+LL |     #[address_space(0)]
-+   |     ^^^^^^^^^^^^^^^^^^^
-+   |
-+   = note: see issue #1 <https://github.com/rust-lang/rust/issues/1> for more information
-+   = help: add `#![feature(address_space)]` to the crate attributes to enable
-+
-+error[E0658]: the `#[address_space]` attribute is an experimental feature
-+  --> $DIR/feature-gate-address_space.rs:9:1
-+   |
-+LL | #[address_space(65_536)]
-+   | ^^^^^^^^^^^^^^^^^^^^^^^^
-+   |
-+   = note: see issue #1 <https://github.com/rust-lang/rust/issues/1> for more information
-+   = help: add `#![feature(address_space)]` to the crate attributes to enable
-+
-+error: address space value in `address_space` is too large: `65536`
-+  --> $DIR/feature-gate-address_space.rs:9:1
-+   |
-+LL | #[address_space(65_536)]
-+   | ^^^^^^^^^^^^^^^^^^^^^^^^
-+   |
-+   = note: the value may not exceed `u16::MAX`
-+
-+error: aborting due to 4 previous errors
-+
-+For more information about this error, try `rustc --explain E0658`.
--- 
-2.39.1
-
-
-From 7e1d6e201603236d3fb75ae0915df9861c35a1a4 Mon Sep 17 00:00:00 2001
-From: Julia Tatz <tatz.j@northeastern.edu>
-Date: Mon, 9 Jan 2023 21:01:37 -0500
-Subject: [PATCH 5/6] Initial codegen for #[address_space], without tests yet
-
----
- compiler/rustc_codegen_llvm/src/allocator.rs  |  9 +++-
- compiler/rustc_codegen_llvm/src/common.rs     |  2 +-
- compiler/rustc_codegen_llvm/src/consts.rs     | 21 ++++++----
- compiler/rustc_codegen_llvm/src/context.rs    |  2 +-
- .../src/coverageinfo/mod.rs                   |  5 ++-
- .../rustc_codegen_llvm/src/debuginfo/gdb.rs   |  2 +-
- compiler/rustc_codegen_llvm/src/declare.rs    | 38 ++++++++++++++---
- compiler/rustc_codegen_llvm/src/intrinsic.rs  |  4 +-
- compiler/rustc_codegen_llvm/src/llvm/ffi.rs   | 15 ++++++-
- compiler/rustc_codegen_llvm/src/llvm/mod.rs   | 15 ++++++-
- compiler/rustc_codegen_llvm/src/mono_item.rs  |  2 +-
- .../rustc_llvm/llvm-wrapper/RustWrapper.cpp   | 41 ++++++++++++++++---
- 12 files changed, 124 insertions(+), 32 deletions(-)
-
-diff --git a/compiler/rustc_codegen_llvm/src/allocator.rs b/compiler/rustc_codegen_llvm/src/allocator.rs
-index 668d9292705..ea82d45bf24 100644
---- a/compiler/rustc_codegen_llvm/src/allocator.rs
-+++ b/compiler/rustc_codegen_llvm/src/allocator.rs
-@@ -148,7 +148,14 @@ pub(crate) unsafe fn codegen(
- 
-     // __rust_alloc_error_handler_should_panic
-     let name = OomStrategy::SYMBOL;
--    let ll_g = llvm::LLVMRustGetOrInsertGlobal(llmod, name.as_ptr().cast(), name.len(), i8);
-+    let ll_g = llvm::LLVMRustGetOrInsertGlobal(
-+        llmod,
-+        name.as_ptr().cast(),
-+        name.len(),
-+        i8,
-+        false,
-+        0 as c_uint,
-+    );
-     if tcx.sess.target.default_hidden_visibility {
-         llvm::LLVMRustSetVisibility(ll_g, llvm::Visibility::Hidden);
-     }
-diff --git a/compiler/rustc_codegen_llvm/src/common.rs b/compiler/rustc_codegen_llvm/src/common.rs
-index c80d36f1f29..53d94dcb0e6 100644
---- a/compiler/rustc_codegen_llvm/src/common.rs
-+++ b/compiler/rustc_codegen_llvm/src/common.rs
-@@ -191,7 +191,7 @@ fn const_str(&self, s: &str) -> (&'ll Value, &'ll Value) {
-             .or_insert_with(|| {
-                 let sc = self.const_bytes(s.as_bytes());
-                 let sym = self.generate_local_symbol_name("str");
--                let g = self.define_global(&sym, self.val_ty(sc)).unwrap_or_else(|| {
-+                let g = self.define_global(&sym, self.val_ty(sc), None).unwrap_or_else(|| {
-                     bug!("symbol `{}` is already defined", sym);
-                 });
-                 unsafe {
-diff --git a/compiler/rustc_codegen_llvm/src/consts.rs b/compiler/rustc_codegen_llvm/src/consts.rs
-index 5aab4efea9d..5f9106d0141 100644
---- a/compiler/rustc_codegen_llvm/src/consts.rs
-+++ b/compiler/rustc_codegen_llvm/src/consts.rs
-@@ -167,7 +167,7 @@ fn check_and_apply_linkage<'ll, 'tcx>(
- 
-         unsafe {
-             // Declare a symbol `foo` with the desired linkage.
--            let g1 = cx.declare_global(sym, cx.type_i8());
-+            let g1 = cx.declare_global(sym, cx.type_i8(), attrs.address_space);
-             llvm::LLVMRustSetLinkage(g1, base::linkage_to_llvm(linkage));
- 
-             // Declare an internal global `extern_with_linkage_foo` which
-@@ -178,7 +178,7 @@ fn check_and_apply_linkage<'ll, 'tcx>(
-             // zero.
-             let mut real_name = "_rust_extern_with_linkage_".to_string();
-             real_name.push_str(sym);
--            let g2 = cx.define_global(&real_name, llty).unwrap_or_else(|| {
-+            let g2 = cx.define_global(&real_name, llty, attrs.address_space).unwrap_or_else(|| {
-                 cx.sess().emit_fatal(SymbolAlreadyDefined {
-                     span: cx.tcx.def_span(def_id),
-                     symbol_name: sym,
-@@ -191,11 +191,11 @@ fn check_and_apply_linkage<'ll, 'tcx>(
-     } else if cx.tcx.sess.target.arch == "x86" &&
-         let Some(dllimport) = common::get_dllimport(cx.tcx, def_id, sym)
-     {
--        cx.declare_global(&common::i686_decorated_name(&dllimport, common::is_mingw_gnu_toolchain(&cx.tcx.sess.target), true), llty)
-+        cx.declare_global(&common::i686_decorated_name(&dllimport, common::is_mingw_gnu_toolchain(&cx.tcx.sess.target), true), llty, attrs.address_space)
-     } else {
-         // Generate an external declaration.
-         // FIXME(nagisa): investigate whether it can be changed into define_global
--        cx.declare_global(sym, llty)
-+        cx.declare_global(sym, llty, attrs.address_space)
-     }
- }
- 
-@@ -238,13 +238,14 @@ pub(crate) fn static_addr_of_mut(
-             let gv = match kind {
-                 Some(kind) if !self.tcx.sess.fewer_names() => {
-                     let name = self.generate_local_symbol_name(kind);
--                    let gv = self.define_global(&name, self.val_ty(cv)).unwrap_or_else(|| {
--                        bug!("symbol `{}` is already defined", name);
--                    });
-+                    let gv =
-+                        self.define_global(&name, self.val_ty(cv), None).unwrap_or_else(|| {
-+                            bug!("symbol `{}` is already defined", name);
-+                        });
-                     llvm::LLVMRustSetLinkage(gv, llvm::Linkage::PrivateLinkage);
-                     gv
-                 }
--                _ => self.define_private_global(self.val_ty(cv)),
-+                _ => self.define_private_global(self.val_ty(cv), None),
-             };
-             llvm::LLVMSetInitializer(gv, cv);
-             set_global_alignment(self, gv, align);
-@@ -282,7 +283,7 @@ pub(crate) fn get_static(&self, def_id: DefId) -> &'ll Value {
-                 }
-             }
- 
--            let g = self.declare_global(sym, llty);
-+            let g = self.declare_global(sym, llty, fn_attrs.address_space);
- 
-             if !self.tcx.is_reachable_non_generic(def_id) {
-                 unsafe {
-@@ -427,6 +428,8 @@ fn codegen_static(&self, def_id: DefId, is_mutable: bool) {
-                     name.as_ptr().cast(),
+@@ -414,7 +414,7 @@ fn codegen_static(&self, def_id: DefId, is_mutable: bool) {
                      name.len(),
                      val_llty,
-+                    attrs.address_space.is_some(),
-+                    attrs.address_space.unwrap_or_default() as c_uint,
+                     attrs.address_space.is_some(),
+-                    attrs.address_space.unwrap_or_default() as c_uint,
++                    attrs.address_space.unwrap_or_default() as _,
                  );
  
                  llvm::LLVMRustSetLinkage(new_g, linkage);
-diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
-index d9ccba07a34..73012d6fd6f 100644
---- a/compiler/rustc_codegen_llvm/src/context.rs
-+++ b/compiler/rustc_codegen_llvm/src/context.rs
-@@ -914,7 +914,7 @@ pub(crate) fn eh_catch_typeinfo(&self) -> &'ll Value {
-             _ => {
-                 let ty = self
-                     .type_struct(&[self.type_ptr_to(self.type_isize()), self.type_i8p()], false);
--                self.declare_global("rust_eh_catch_typeinfo", ty)
-+                self.declare_global("rust_eh_catch_typeinfo", ty, None)
-             }
-         };
-         let eh_catch_typeinfo = self.const_bitcast(eh_catch_typeinfo, self.type_i8p());
-diff --git a/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs b/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs
-index ace15cfb024..54edfd9e40a 100644
---- a/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs
-+++ b/compiler/rustc_codegen_llvm/src/coverageinfo/mod.rs
-@@ -339,7 +339,7 @@ pub(crate) fn save_cov_data_to_mod<'ll, 'tcx>(
-     .expect("Rust Coverage section name failed UTF-8 conversion");
-     debug!("covmap section name: {:?}", covmap_section_name);
- 
--    let llglobal = llvm::add_global(cx.llmod, cx.val_ty(cov_data_val), &covmap_var_name);
-+    let llglobal = llvm::add_global(cx.llmod, cx.val_ty(cov_data_val), &covmap_var_name, None);
-     llvm::set_initializer(llglobal, cov_data_val);
-     llvm::set_global_constant(llglobal, true);
-     llvm::set_linkage(llglobal, llvm::Linkage::PrivateLinkage);
-@@ -372,7 +372,8 @@ pub(crate) fn save_func_record_to_mod<'ll, 'tcx>(
-     .expect("Rust Coverage function record section name failed UTF-8 conversion");
-     debug!("function record section name: {:?}", func_record_section_name);
- 
--    let llglobal = llvm::add_global(cx.llmod, cx.val_ty(func_record_val), &func_record_var_name);
-+    let llglobal =
-+        llvm::add_global(cx.llmod, cx.val_ty(func_record_val), &func_record_var_name, None);
-     llvm::set_initializer(llglobal, func_record_val);
-     llvm::set_global_constant(llglobal, true);
-     llvm::set_linkage(llglobal, llvm::Linkage::LinkOnceODRLinkage);
-diff --git a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
-index 80fd9726fc7..1be6c3a6c97 100644
---- a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
-+++ b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
-@@ -70,7 +70,7 @@ pub fn get_or_insert_gdb_debug_scripts_section_global<'ll>(cx: &CodegenCx<'ll, '
-             let llvm_type = cx.type_array(cx.type_i8(), section_contents.len() as u64);
- 
-             let section_var = cx
--                .define_global(section_var_name, llvm_type)
-+                .define_global(section_var_name, llvm_type, None)
-                 .unwrap_or_else(|| bug!("symbol `{}` is already defined", section_var_name));
-             llvm::LLVMSetSection(section_var, section_name.as_ptr().cast());
-             llvm::LLVMSetInitializer(section_var, cx.const_bytes(section_contents));
-diff --git a/compiler/rustc_codegen_llvm/src/declare.rs b/compiler/rustc_codegen_llvm/src/declare.rs
-index 6a575095f7e..c3f0b766f70 100644
---- a/compiler/rustc_codegen_llvm/src/declare.rs
-+++ b/compiler/rustc_codegen_llvm/src/declare.rs
-@@ -62,9 +62,23 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
-     ///
-     /// If there’s a value with the same name already declared, the function will
-     /// return its Value instead.
--    pub fn declare_global(&self, name: &str, ty: &'ll Type) -> &'ll Value {
-+    pub fn declare_global(
-+        &self,
-+        name: &str,
-+        ty: &'ll Type,
-+        address_space: Option<u16>,
-+    ) -> &'ll Value {
-         debug!("declare_global(name={:?})", name);
--        unsafe { llvm::LLVMRustGetOrInsertGlobal(self.llmod, name.as_ptr().cast(), name.len(), ty) }
-+        unsafe {
-+            llvm::LLVMRustGetOrInsertGlobal(
-+                self.llmod,
-+                name.as_ptr().cast(),
-+                name.len(),
-+                ty,
-+                address_space.is_some(),
-+                address_space.unwrap_or_default() as _,
-+            )
-+        }
-     }
- 
-     /// Declare a C ABI function.
-@@ -150,19 +164,31 @@ pub fn declare_fn(&self, name: &str, fn_abi: &FnAbi<'tcx, Ty<'tcx>>) -> &'ll Val
-     /// return `None` if the name already has a definition associated with it. In that
-     /// case an error should be reported to the user, because it usually happens due
-     /// to user’s fault (e.g., misuse of `#[no_mangle]` or `#[export_name]` attributes).
--    pub fn define_global(&self, name: &str, ty: &'ll Type) -> Option<&'ll Value> {
-+    pub fn define_global(
-+        &self,
-+        name: &str,
-+        ty: &'ll Type,
-+        address_space: Option<u16>,
-+    ) -> Option<&'ll Value> {
-         if self.get_defined_value(name).is_some() {
+diff --git a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
+index 2eeb74fb36f..460f963482a 100644
+--- a/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
++++ b/compiler/rustc_codegen_ssa/src/codegen_attrs.rs
+@@ -678,7 +678,7 @@ fn check_address_space(tcx: TyCtxt<'_>, attr: &ast::Attribute) -> Option<u16> {
+             let msg =
+                 format!("address space value in `address_space` is too large: `{}`", &ordinal);
+             tcx.sess
+-                .struct_span_err(attr.span, &msg)
++                .struct_span_err(attr.span, msg)
+                 .note("the value may not exceed `u16::MAX`")
+                 .emit();
              None
-         } else {
--            Some(self.declare_global(name, ty))
-+            Some(self.declare_global(name, ty, address_space))
-         }
-     }
- 
-     /// Declare a private global
-     ///
-     /// Use this function when you intend to define a global without a name.
--    pub fn define_private_global(&self, ty: &'ll Type) -> &'ll Value {
--        unsafe { llvm::LLVMRustInsertPrivateGlobal(self.llmod, ty) }
-+    pub fn define_private_global(&self, ty: &'ll Type, address_space: Option<u16>) -> &'ll Value {
-+        unsafe {
-+            llvm::LLVMRustInsertPrivateGlobal(
-+                self.llmod,
-+                ty,
-+                address_space.is_some(),
-+                address_space.unwrap_or_default() as _,
-+            )
-+        }
-     }
- 
-     /// Gets declared value by name.
-diff --git a/compiler/rustc_codegen_llvm/src/intrinsic.rs b/compiler/rustc_codegen_llvm/src/intrinsic.rs
-index 9bbaa1afdd2..72c55fddd51 100644
---- a/compiler/rustc_codegen_llvm/src/intrinsic.rs
-+++ b/compiler/rustc_codegen_llvm/src/intrinsic.rs
-@@ -564,11 +564,11 @@ fn codegen_msvc_try<'ll>(
-         //
-         // When modifying, make sure that the type_name string exactly matches
-         // the one used in library/panic_unwind/src/seh.rs.
--        let type_info_vtable = bx.declare_global("??_7type_info@@6B@", bx.type_i8p());
-+        let type_info_vtable = bx.declare_global("??_7type_info@@6B@", bx.type_i8p(), None);
-         let type_name = bx.const_bytes(b"rust_panic\0");
-         let type_info =
-             bx.const_struct(&[type_info_vtable, bx.const_null(bx.type_i8p()), type_name], false);
--        let tydesc = bx.declare_global("__rust_panic_type_info", bx.val_ty(type_info));
-+        let tydesc = bx.declare_global("__rust_panic_type_info", bx.val_ty(type_info), None);
-         unsafe {
-             llvm::LLVMRustSetLinkage(tydesc, llvm::Linkage::LinkOnceODRLinkage);
-             llvm::SetUniqueComdat(bx.llmod, tydesc);
-diff --git a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
-index 8b4861962b2..5f7fc75f16e 100644
---- a/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
-+++ b/compiler/rustc_codegen_llvm/src/llvm/ffi.rs
-@@ -1147,14 +1147,27 @@ pub fn LLVMRustConstInBoundsGEP2<'a>(
-     // Operations on global variables
-     pub fn LLVMIsAGlobalVariable(GlobalVar: &Value) -> Option<&Value>;
-     pub fn LLVMAddGlobal<'a>(M: &'a Module, Ty: &'a Type, Name: *const c_char) -> &'a Value;
-+    pub fn LLVMAddGlobalInAddressSpace<'a>(
-+        M: &'a Module,
-+        Ty: &'a Type,
-+        Name: *const c_char,
-+        AddressSpace: c_uint,
-+    ) -> &'a Value;
-     pub fn LLVMGetNamedGlobal(M: &Module, Name: *const c_char) -> Option<&Value>;
-     pub fn LLVMRustGetOrInsertGlobal<'a>(
-         M: &'a Module,
-         Name: *const c_char,
-         NameLen: size_t,
-         T: &'a Type,
-+        InAddressSpace: bool,
-+        AddressSpace: c_uint,
-+    ) -> &'a Value;
-+    pub fn LLVMRustInsertPrivateGlobal<'a>(
-+        M: &'a Module,
-+        T: &'a Type,
-+        InAddressSpace: bool,
-+        AddressSpace: c_uint,
-     ) -> &'a Value;
--    pub fn LLVMRustInsertPrivateGlobal<'a>(M: &'a Module, T: &'a Type) -> &'a Value;
-     pub fn LLVMGetFirstGlobal(M: &Module) -> Option<&Value>;
-     pub fn LLVMGetNextGlobal(GlobalVar: &Value) -> Option<&Value>;
-     pub fn LLVMDeleteGlobal(GlobalVar: &Value);
-diff --git a/compiler/rustc_codegen_llvm/src/llvm/mod.rs b/compiler/rustc_codegen_llvm/src/llvm/mod.rs
-index f820e752371..c2f8b213f3a 100644
---- a/compiler/rustc_codegen_llvm/src/llvm/mod.rs
-+++ b/compiler/rustc_codegen_llvm/src/llvm/mod.rs
-@@ -199,9 +199,20 @@ pub fn set_section(llglobal: &Value, section_name: &str) {
-     }
- }
- 
--pub fn add_global<'a>(llmod: &'a Module, ty: &'a Type, name: &str) -> &'a Value {
-+pub fn add_global<'a>(
-+    llmod: &'a Module,
-+    ty: &'a Type,
-+    name: &str,
-+    address_space: Option<u16>,
-+) -> &'a Value {
-     let name_cstr = CString::new(name).expect("unexpected CString error");
--    unsafe { LLVMAddGlobal(llmod, ty, name_cstr.as_ptr()) }
-+    if let Some(address_space) = address_space {
-+        unsafe {
-+            LLVMAddGlobalInAddressSpace(llmod, ty, name_cstr.as_ptr(), address_space as c_uint)
-+        }
-+    } else {
-+        unsafe { LLVMAddGlobal(llmod, ty, name_cstr.as_ptr()) }
-+    }
- }
- 
- pub fn set_initializer(llglobal: &Value, constant_val: &Value) {
-diff --git a/compiler/rustc_codegen_llvm/src/mono_item.rs b/compiler/rustc_codegen_llvm/src/mono_item.rs
-index 76f692b2016..b9bafd180d6 100644
---- a/compiler/rustc_codegen_llvm/src/mono_item.rs
-+++ b/compiler/rustc_codegen_llvm/src/mono_item.rs
-@@ -25,7 +25,7 @@ fn predefine_static(
-         let ty = instance.ty(self.tcx, ty::ParamEnv::reveal_all());
-         let llty = self.layout_of(ty).llvm_type(self);
- 
--        let g = self.define_global(symbol_name, llty).unwrap_or_else(|| {
-+        let g = self.define_global(symbol_name, llty, None).unwrap_or_else(|| {
-             self.sess()
-                 .emit_fatal(SymbolAlreadyDefined { span: self.tcx.def_span(def_id), symbol_name })
-         });
-diff --git a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
-index 87b0e1273eb..589eaafaae7 100644
---- a/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
-+++ b/compiler/rustc_llvm/llvm-wrapper/RustWrapper.cpp
-@@ -131,8 +131,27 @@ extern "C" LLVMValueRef LLVMRustGetOrInsertFunction(LLVMModuleRef M,
-   );
- }
- 
-+
-+#if LLVM_VERSION_LT(16, 0)
-+static Optional<unsigned> wrap_opt_address_space(bool InAddressSpace, unsigned AddressSpace) {
-+#else
-+static std::optional<unsigned> wrap_opt_address_space(bool InAddressSpace, unsigned AddressSpace) {
-+#endif
-+  if (InAddressSpace) {
-+    return AddressSpace;
-+  } else {
-+#if LLVM_VERSION_LT(16, 0)
-+    return None;
-+#else
-+    return std::nullopt;
-+#endif
-+  }
-+}
-+
-+
- extern "C" LLVMValueRef
--LLVMRustGetOrInsertGlobal(LLVMModuleRef M, const char *Name, size_t NameLen, LLVMTypeRef Ty) {
-+LLVMRustGetOrInsertGlobal(LLVMModuleRef M, const char *Name, size_t NameLen, LLVMTypeRef Ty,
-+                          bool InAddressSpace, unsigned AddressSpace) {
-   Module *Mod = unwrap(M);
-   StringRef NameRef(Name, NameLen);
- 
-@@ -142,18 +161,30 @@ LLVMRustGetOrInsertGlobal(LLVMModuleRef M, const char *Name, size_t NameLen, LLV
-   // GlobalVariable* so we can access linkage, visibility, etc.
-   GlobalVariable *GV = Mod->getGlobalVariable(NameRef, true);
-   if (!GV)
--    GV = new GlobalVariable(*Mod, unwrap(Ty), false,
--                            GlobalValue::ExternalLinkage, nullptr, NameRef);
-+    GV = new GlobalVariable(*Mod,
-+                            unwrap(Ty),
-+                            false,
-+                            GlobalValue::ExternalLinkage,
-+                            nullptr,
-+                            NameRef,
-+                            nullptr,
-+                            GlobalValue::NotThreadLocal,
-+                            wrap_opt_address_space(InAddressSpace, AddressSpace));
-   return wrap(GV);
- }
- 
- extern "C" LLVMValueRef
--LLVMRustInsertPrivateGlobal(LLVMModuleRef M, LLVMTypeRef Ty) {
-+LLVMRustInsertPrivateGlobal(LLVMModuleRef M, LLVMTypeRef Ty,
-+                            bool InAddressSpace, unsigned AddressSpace) {
-   return wrap(new GlobalVariable(*unwrap(M),
-                                  unwrap(Ty),
-                                  false,
-                                  GlobalValue::PrivateLinkage,
--                                 nullptr));
-+                                 nullptr,
-+                                 "",
-+                                 nullptr,
-+                                 GlobalValue::NotThreadLocal,
-+                                 wrap_opt_address_space(InAddressSpace, AddressSpace)));
- }
- 
- extern "C" LLVMTypeRef LLVMRustMetadataTypeInContext(LLVMContextRef C) {
 -- 
-2.39.1
-
-
-From 75c460fc27885cac796fd469e80d80b5d31fba44 Mon Sep 17 00:00:00 2001
-From: Julia Tatz <julia.tatz@childrens.harvard.edu>
-Date: Wed, 25 Jan 2023 20:05:28 -0500
-Subject: [PATCH 6/6] Fix eh_catch_typeinfo, debug_gdb_scripts, & va-arg
- bitcasts -> pointercasts
-
----
- compiler/rustc_codegen_llvm/src/context.rs       |  2 +-
- compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs |  2 +-
- compiler/rustc_codegen_llvm/src/va_arg.rs        | 12 ++++++------
- 3 files changed, 8 insertions(+), 8 deletions(-)
-
-diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
-index 73012d6fd6f..c7aac98f4fc 100644
---- a/compiler/rustc_codegen_llvm/src/context.rs
-+++ b/compiler/rustc_codegen_llvm/src/context.rs
-@@ -917,7 +917,7 @@ pub(crate) fn eh_catch_typeinfo(&self) -> &'ll Value {
-                 self.declare_global("rust_eh_catch_typeinfo", ty, None)
-             }
-         };
--        let eh_catch_typeinfo = self.const_bitcast(eh_catch_typeinfo, self.type_i8p());
-+        let eh_catch_typeinfo = self.const_ptrcast(eh_catch_typeinfo, self.type_i8p());
-         self.eh_catch_typeinfo.set(Some(eh_catch_typeinfo));
-         eh_catch_typeinfo
-     }
-diff --git a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
-index 1be6c3a6c97..9acd35f61d6 100644
---- a/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
-+++ b/compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs
-@@ -19,7 +19,7 @@
- pub fn insert_reference_to_gdb_debug_scripts_section_global(bx: &mut Builder<'_, '_, '_>) {
-     if needs_gdb_debug_scripts_section(bx) {
-         let gdb_debug_scripts_section =
--            bx.const_bitcast(get_or_insert_gdb_debug_scripts_section_global(bx), bx.type_i8p());
-+            bx.const_ptrcast(get_or_insert_gdb_debug_scripts_section_global(bx), bx.type_i8p());
-         // Load just the first byte as that's all that's necessary to force
-         // LLVM to keep around the reference to the global.
-         let volative_load_instruction = bx.volatile_load(bx.type_i8(), gdb_debug_scripts_section);
-diff --git a/compiler/rustc_codegen_llvm/src/va_arg.rs b/compiler/rustc_codegen_llvm/src/va_arg.rs
-index b19398e68c2..f261b0b5193 100644
---- a/compiler/rustc_codegen_llvm/src/va_arg.rs
-+++ b/compiler/rustc_codegen_llvm/src/va_arg.rs
-@@ -35,7 +35,7 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
-     let va_list_ty = bx.type_i8p();
-     let va_list_ptr_ty = bx.type_ptr_to(va_list_ty);
-     let va_list_addr = if list.layout.llvm_type(bx.cx) != va_list_ptr_ty {
--        bx.bitcast(list.immediate(), va_list_ptr_ty)
-+        bx.pointercast(list.immediate(), va_list_ptr_ty)
-     } else {
-         list.immediate()
-     };
-@@ -56,9 +56,9 @@ fn emit_direct_ptr_va_arg<'ll, 'tcx>(
-     if size.bytes() < slot_size.bytes() && bx.tcx().sess.target.endian == Endian::Big {
-         let adjusted_size = bx.cx().const_i32((slot_size.bytes() - size.bytes()) as i32);
-         let adjusted = bx.inbounds_gep(bx.type_i8(), addr, &[adjusted_size]);
--        (bx.bitcast(adjusted, bx.cx().type_ptr_to(llty)), addr_align)
-+        (bx.pointercast(adjusted, bx.cx().type_ptr_to(llty)), addr_align)
-     } else {
--        (bx.bitcast(addr, bx.cx().type_ptr_to(llty)), addr_align)
-+        (bx.pointercast(addr, bx.cx().type_ptr_to(llty)), addr_align)
-     }
- }
- 
-@@ -158,7 +158,7 @@ fn emit_aapcs_va_arg<'ll, 'tcx>(
-         reg_addr = bx.gep(bx.type_i8(), reg_addr, &[offset]);
-     }
-     let reg_type = layout.llvm_type(bx);
--    let reg_addr = bx.bitcast(reg_addr, bx.cx.type_ptr_to(reg_type));
-+    let reg_addr = bx.pointercast(reg_addr, bx.cx.type_ptr_to(reg_type));
-     let reg_value = bx.load(reg_type, reg_addr, layout.align.abi);
-     bx.br(end);
- 
-@@ -250,10 +250,10 @@ fn emit_s390x_va_arg<'ll, 'tcx>(
-     let val_type = layout.llvm_type(bx);
-     let val_addr = if indirect {
-         let ptr_type = bx.cx.type_ptr_to(val_type);
--        let ptr_addr = bx.bitcast(val_addr, bx.cx.type_ptr_to(ptr_type));
-+        let ptr_addr = bx.pointercast(val_addr, bx.cx.type_ptr_to(ptr_type));
-         bx.load(ptr_type, ptr_addr, bx.tcx().data_layout.pointer_align.abi)
-     } else {
--        bx.bitcast(val_addr, bx.cx.type_ptr_to(val_type))
-+        bx.pointercast(val_addr, bx.cx.type_ptr_to(val_type))
-     };
-     bx.load(val_type, val_addr, layout.align.abi)
- }
--- 
-2.39.1
+2.40.1
 
