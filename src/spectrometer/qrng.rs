@@ -215,7 +215,7 @@ where
     }
 
     fn iadd_mod_1(&mut self, rhs: Self) {
-        *self = self.zip(rhs).map(|(l, r)| (l + r).fract());
+        *self = array_zip_map(*self, rhs, |l, r| (l + r).fract());
     }
 
     fn mul_by_int(self, rhs: u32) -> Self {

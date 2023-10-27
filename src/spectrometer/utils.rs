@@ -11,6 +11,26 @@ pub fn array_prepend<T, const N: usize>(first: T, mut rest: [T; N]) -> ([T; N], 
     (rest, last)
 }
 
+pub fn array_zip_map<T, U, R, F: FnMut(T, U) -> R, const N: usize>(
+    lhs: [T; N],
+    rhs: [U; N],
+    mut func: F,
+) -> [R; N] {
+    use core::mem::MaybeUninit;
+
+    let mut array: [MaybeUninit<R>; N] = MaybeUninit::uninit_array();
+
+    lhs.into_iter()
+        .zip(rhs.into_iter())
+        .zip(array.iter_mut())
+        .for_each(|((l, r), out)| {
+            out.write(func(l, r));
+        });
+
+    // SAFETY: Now safe as we initialised all elements
+    unsafe { MaybeUninit::array_assume_init(array) }
+}
+
 pub trait LossyFrom<T>: Sized {
     fn lossy_from(_: T) -> Self;
 }

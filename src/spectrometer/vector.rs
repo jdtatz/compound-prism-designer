@@ -570,18 +570,17 @@ impl<T, const N: usize> SimpleVector<T, N> {
         let SimpleVector(array) = self;
         SimpleVector(array.map(f))
     }
-
-    fn zip<U>(self, other: SimpleVector<U, N>) -> SimpleVector<(T, U), N> {
-        let SimpleVector(lhs) = self;
-        let SimpleVector(rhs) = other;
-        SimpleVector(lhs.zip(rhs))
-    }
 }
 
-impl<L, R, const N: usize> SimpleVector<(L, R), N> {
-    fn map2<T, F: FnMut(L, R) -> T>(self, mut f: F) -> SimpleVector<T, N> {
-        let SimpleVector(array) = self;
-        SimpleVector(array.map(move |(l, r)| f(l, r)))
+impl<L, const N: usize> SimpleVector<L, N> {
+    fn zip_map2<R, T, F: FnMut(L, R) -> T>(
+        self,
+        rhs: SimpleVector<R, N>,
+        f: F,
+    ) -> SimpleVector<T, N> {
+        let SimpleVector(lhs) = self;
+        let SimpleVector(rhs) = rhs;
+        SimpleVector(array_zip_map(lhs, rhs, f))
     }
 }
 
@@ -605,7 +604,7 @@ impl<
     }
 
     fn hadamard_product(self, rhs: Self) -> Self {
-        self.zip(rhs).map2(Mul::mul)
+        self.zip_map2(rhs, Mul::mul)
     }
 
     fn reduce_sum(self) -> Self::Scalar {
@@ -616,7 +615,7 @@ impl<
     where
         Self::Scalar: Float,
     {
-        self.zip(c).map(|(a, c)| a.mul_add(b, c))
+        self.zip_map2(c, |a: T, c| a.mul_add(b, c))
     }
 
     fn x(self) -> Self::Scalar {
@@ -647,8 +646,7 @@ impl<T: Add<Output = T>, const N: usize> Add<SimpleVector<T, N>> for SimpleVecto
     type Output = SimpleVector<T, N>;
 
     fn add(self, rhs: SimpleVector<T, N>) -> Self::Output {
-        // Self(self.0.zip(rhs.0).map(|(l, r)| l + r))
-        self.zip(rhs).map2(Add::add)
+        self.zip_map2(rhs, Add::add)
     }
 }
 
@@ -656,8 +654,7 @@ impl<T: Sub<Output = T>, const N: usize> Sub<SimpleVector<T, N>> for SimpleVecto
     type Output = SimpleVector<T, N>;
 
     fn sub(self, rhs: SimpleVector<T, N>) -> Self::Output {
-        // Self(self.0.zip(rhs.0).map(|(l, r)| l - r))
-        self.zip(rhs).map2(Sub::sub)
+        self.zip_map2(rhs, Sub::sub)
     }
 }
 

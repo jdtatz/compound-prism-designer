@@ -465,7 +465,7 @@ pub(crate) fn create_joined_trapezoids<
     let mut prev_sign = normal.y().is_sign_positive();
     let mut d1 = first.point.x();
     let mut mx = first.point.x();
-    let mut next_plane = |(angle, sep_len): (T, T)| {
+    let mut next_plane = |angle, sep_len| {
         let normal = UnitVector::new(V::angled_xy(angle).rot_180_xy());
         let sign = normal.y().is_sign_positive();
         let d2 = normal.tan_xy().abs() * h2;
@@ -483,8 +483,8 @@ pub(crate) fn create_joined_trapezoids<
             normal,
         }
     };
-    let inter: [HyperPlane<V>; N] = angles.zip(sep_lengths).map(&mut next_plane);
-    let last = (&mut next_plane)((last_angle, last_sep_length));
+    let inter: [HyperPlane<V>; N] = array_zip_map(angles, sep_lengths, &mut next_plane);
+    let last = (&mut next_plane)(last_angle, last_sep_length);
     (first, inter, last)
 }
 

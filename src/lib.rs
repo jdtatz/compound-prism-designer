@@ -7,8 +7,13 @@
     feature(abi_ptx, platform_intrinsics, address_space, link_llvm_intrinsics)
 )]
 #![feature(portable_simd)]
-#![feature(array_zip, type_alias_impl_trait, impl_trait_in_assoc_type)]
-#![feature(array_methods, ptr_metadata)]
+#![feature(type_alias_impl_trait, impl_trait_in_assoc_type)]
+#![feature(
+    maybe_uninit_uninit_array,
+    maybe_uninit_array_assume_init,
+    array_methods,
+    ptr_metadata
+)]
 #![allow(
     clippy::blocks_in_if_conditions,
     clippy::range_plus_one,

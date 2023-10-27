@@ -166,9 +166,11 @@ where
             surface: surface0,
         };
         let isurfaces = isurfaces.map(|s| Plane::new(s, prism_bounds));
-        let prisms = glasses
-            .zip(isurfaces)
-            .map(|(glass, surface)| PrismSurface { glass, surface });
+        let prisms: [PrismSurface<T, BoundedHyperSurface<V, HyperPlane<V>, PrismBounds<T>, DIM>>;
+            N] = array_zip_map(glasses, isurfaces, |glass, surface| PrismSurface {
+            glass,
+            surface,
+        });
         let final_surface = SN::from_hyperplane(last_surface, sn_parametrization);
         Self {
             initial_prism,
