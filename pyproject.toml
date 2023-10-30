@@ -19,3 +19,11 @@ build-backend = "maturin"
 bindings = "pyo3"
 features = ["pyext", "cuda"]
 rustc-args = ["-C", "target-feature=+fma", "-C", "target-cpu=native"]
+
+[tool.black]
+line-length = 120
+target-version = ['py37']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
