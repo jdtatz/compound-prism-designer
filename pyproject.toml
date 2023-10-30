@@ -3,9 +3,9 @@ name = "compound_prism_designer"
 license = {file = "LICENSE.md"}
 requires-python = ">=3.7"
 dependencies = [
-  "numpy~=1.20",
-  "matplotlib~=3.5",
-  "pyserde[toml]~=0.8.3",
+  "numpy>=1.20",
+  "matplotlib>=3.5",
+  "pyserde[toml]>=0.8.3",
   "pymoo @ git+https://github.com/anyoptimization/pymoo.git",
   "pywin32 >= 1.0;platform_system=='Windows'"
 ]

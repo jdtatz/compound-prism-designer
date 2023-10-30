@@ -89,7 +89,6 @@ command = "maturin"
 args = [
     "develop",
     "--release",
-    "--rustc-extra-args=-Ctarget-feature=+fma -Ctarget-cpu=native",
 ]
 
 [tasks.flow-build]
