@@ -1,12 +1,15 @@
 from __future__ import annotations
-import numpy as np
-from typing import Optional, Iterable
-from .compound_prism_designer import Spectrometer, Vector2D
+
 from platform import system
+from typing import Iterable, Optional
+
+import numpy as np
+
+from .compound_prism_designer import Spectrometer, Vector2D
 
 if system() == "Windows":
-    from win32com.client.gencache import EnsureDispatch, EnsureModule
     from win32com.client import CastTo, constants
+    from win32com.client.gencache import EnsureDispatch, EnsureModule
 
 
 class ZemaxException(Exception):
@@ -46,7 +49,9 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
     # fields = system.SystemData.Fields
 
     surfaces = cmpnd.surfaces()
-    assert all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None, "Only 2D CompoundPrism designs can be translated to Zemax"
+    assert (
+        all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None
+    ), "Only 2D CompoundPrism designs can be translated to Zemax"
     midpts = [np.array(((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2)) for s in surfaces]
     thickness = [m1[0] - m0[0] for m0, m1 in zip(midpts[:-1], midpts[1:])]
     angles = cmpnd.angles
@@ -64,7 +69,11 @@ def create_zemax_file(spec: Spectrometer, zemax_file: str):
     _create_coord_break(system, decenter_y=cmpnd.height / 2 - beam.y_mean)
     for g, y, t in zip(cmpnd.glasses, ytans, thickness):
         _create_tilt(
-            system, thickness=t, semi_diameter=cmpnd.height / 2, glass=g.name, y_tangent=-y
+            system,
+            thickness=t,
+            semi_diameter=cmpnd.height / 2,
+            glass=g.name,
+            y_tangent=-y,
         )
 
     _create_coord_break(system, tilt_about_x=-np.rad2deg(angles[-1]))

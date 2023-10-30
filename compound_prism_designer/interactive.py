@@ -37,26 +37,18 @@ class Interactive:
         self.pareto_ax = fig.add_subplot(gs[:, 0])
 
         x, y, c = np.array(
-            [
-                (design.fitness.size, design.fitness.info, design.fitness.deviation)
-                for design in self.designs
-            ]
+            [(design.fitness.size, design.fitness.info, design.fitness.deviation) for design in self.designs]
         ).T
         c = np.rad2deg(np.arcsin(c))
 
         cm = mpl.cm.ScalarMappable(mpl.colors.Normalize(0, 90, clip=True), "PuRd")
-        sc = self.pareto_ax.scatter(
-            x, y, c=c, cmap=cm.cmap.reversed(), norm=cm.norm, picker=True
-        )
+        sc = self.pareto_ax.scatter(x, y, c=c, cmap=cm.cmap.reversed(), norm=cm.norm, picker=True)
         clb = fig.colorbar(sc)
         clb.ax.set_ylabel("Deviation (deg)")
         self.pareto_ax.set_xlabel(f"Size (a.u.)")
         self.pareto_ax.set_ylabel("Mutual Information (bits)")
 
-        max_info = max(
-            np.log2(design.spectrometer.detector_array.bin_count)
-            for design in self.designs
-        )
+        max_info = max(np.log2(design.spectrometer.detector_array.bin_count) for design in self.designs)
         secondary_y = self.pareto_ax.secondary_yaxis(
             "right",
             functions=(lambda i: 100 * i / max_info, lambda e: e * max_info / 100),
@@ -72,9 +64,7 @@ class Interactive:
         self.selected_design: Optional[Design] = None
         fig.canvas.mpl_connect("pick_event", self.pick_design)
 
-        fig.canvas.manager.toolmanager.add_tool(
-            "SaveDesigns", SaveDesignsTool, designs=self.designs
-        )
+        fig.canvas.manager.toolmanager.add_tool("SaveDesigns", SaveDesignsTool, designs=self.designs)
         fig.canvas.manager.toolbar.add_tool("SaveDesigns", "io", -1)
 
         fig.canvas.manager.toolmanager.add_tool(
@@ -83,9 +73,7 @@ class Interactive:
         fig.canvas.manager.toolbar.add_tool("ExportASAP", "io", -1)
 
     def pick_design(self, event):
-        design = self.selected_design = sorted(
-            (self.designs[i] for i in event.ind), key=lambda s: -s.fitness.info
-        )[0]
+        design = self.selected_design = sorted((self.designs[i] for i in event.ind), key=lambda s: -s.fitness.info)[0]
         spectrometer = design.spectrometer
         waves = np.linspace(*spectrometer.wavelengths.bounds, 200)
 
@@ -122,9 +110,7 @@ class Interactive:
         parts = self.violin_ax.violin(vpstats, showextrema=False, widths=1)
         for pc in parts["bodies"]:
             pc.set_facecolor("black")
-        self.violin_ax.plot(
-            [1, len(p_det)], spectrometer.wavelengths.bounds, "k--"
-        )
+        self.violin_ax.plot([1, len(p_det)], spectrometer.wavelengths.bounds, "k--")
         self.det_ax.scatter(1 + np.arange(len(p_det)), p_det * 100, color="k")
         self.trans_ax.plot(waves, p_w_l_D * 100, "k")
         self.trans_ax.axhline(np.mean(p_w_l_D) * 100, color="k", linestyle="--")
@@ -146,7 +132,10 @@ class Interactive:
 
 
 def get_save_file_name(
-    caption: str, filter_name: str, filter_ext: str, default_name: str,
+    caption: str,
+    filter_name: str,
+    filter_ext: str,
+    default_name: str,
 ) -> Optional[str]:
     # interactive frameworks = Qt, Gtk, Wx, Tk, macosx, WebAgg, & nbAgg
     bknd = plt.get_backend().lower()
@@ -155,9 +144,7 @@ def get_save_file_name(
         from matplotlib.backends.backend_qt import QtWidgets
 
         filter = f"{filter_name} (*.{filter_ext})"
-        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
-            caption=caption, filter=filter, dir=default_fname
-        )
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(caption=caption, filter=filter, dir=default_fname)
         return filename
     elif "gtk" in bknd:
         from gi.repository import Gtk
@@ -196,6 +183,7 @@ def get_save_file_name(
     else:
         # raise NotImplementedError("The only supported backends for saving are: Qt & Gtk")
         import warnings
+
         warnings.warn("The only supported backends for choosing save path are: Qt & Gtk")
         return default_fname
 
@@ -256,10 +244,10 @@ class ExportDesignTool(ToolBase):
 
 
 def interactive_show(designs: Sequence[Design]):
+    assert mpl.rcParams["toolbar"] == "toolmanager", "Compound Prism Spectrometer Designer requires toolmanager"
     assert (
-        mpl.rcParams["toolbar"] == "toolmanager"
-    ), "Compound Prism Spectrometer Designer requires toolmanager"
-    assert mpl.get_backend() in mpl.rcsetup.interactive_bk, "Compound Prism Spectrometer Designer requires interactive backend"
+        mpl.get_backend() in mpl.rcsetup.interactive_bk
+    ), "Compound Prism Spectrometer Designer requires interactive backend"
     fig = plt.figure(constrained_layout=True)
     fig.canvas.manager.set_window_title("Compound Prism Spectrometer Designer")
     interactive = Interactive(fig, designs)

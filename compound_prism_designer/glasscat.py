@@ -88,9 +88,7 @@ class AbstractGlass(metaclass=ABCMeta):
         wavelength_range: Tuple[float, float] = (0, np.inf),
     ):
         self.name = name
-        if len(coefficents) < self.ncoeff or any(
-            c != 0.0 for c in coefficents[self.ncoeff :]
-        ):
+        if len(coefficents) < self.ncoeff or any(c != 0.0 for c in coefficents[self.ncoeff :]):
             raise GlassCatalogError(GlassCatalogErrorReason.InvalidGlassDescription)
         self.coefficents = coefficents[: self.ncoeff]
         self.wavelength_range = wavelength_range
@@ -113,20 +111,15 @@ class AbstractGlass(metaclass=ABCMeta):
         ).all()
         return self.index_of_refraction(wavelength)
 
-    def horner_polynomial_fit(
-        self, limits: Tuple[float, float], n: int
-    ) -> Tuple[Tuple[float, ...], float]:
+    def horner_polynomial_fit(self, limits: Tuple[float, float], n: int) -> Tuple[Tuple[float, ...], float]:
         assert limits[0] < limits[1]
-        assert (
-            self.wavelength_range[0] < limits[0]
-            and limits[1] < self.wavelength_range[1]
-        )
+        assert self.wavelength_range[0] < limits[0] and limits[1] < self.wavelength_range[1]
         x = np.linspace(*limits, 100)
         y = self(x)
         f = lambda x, *coeffs: reduce(lambda a, c: a * x + c, coeffs)
         popt, pcov = curve_fit(f, x, y, p0=np.ones(1 + n))
         r = y - f(x, *popt)
-        chisq = np.sum(r ** 2)
+        chisq = np.sum(r**2)
         return popt, chisq
 
     def into_glass(self, limits: Tuple[float, float]) -> Tuple[Glass, float]:
@@ -156,9 +149,7 @@ class Sellmeier1(AbstractGlass):
         w = np.asarray(wavelength)
         b1, c1, b2, c2, b3, c3 = self.coefficents
         w2 = w * w
-        return np.sqrt(
-            1 + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3)
-        )
+        return np.sqrt(1 + b1 * w2 / (w2 - c1) + b2 * w2 / (w2 - c2) + b3 * w2 / (w2 - c3))
 
 
 class Sellmeier2(AbstractGlass):
@@ -182,13 +173,7 @@ class Sellmeier3(AbstractGlass):
         w = np.asarray(wavelength)
         k1, l1, k2, l2, k3, l3, k4, l4 = self.coefficents
         w2 = w * w
-        return np.sqrt(
-            1
-            + k1 * w2 / (w2 - l1)
-            + k2 * w2 / (w2 - l2)
-            + k3 * w2 / (w2 - l3)
-            + k4 * w2 / (w2 - l4)
-        )
+        return np.sqrt(1 + k1 * w2 / (w2 - l1) + k2 * w2 / (w2 - l2) + k3 * w2 / (w2 - l3) + k4 * w2 / (w2 - l4))
 
 
 class Sellmeier4(AbstractGlass):
@@ -281,9 +266,7 @@ class Extended1(AbstractGlass):
         w8 = w2 * w6
         w10 = w2 * w8
         w12 = w2 * w10
-        return np.sqrt(
-            a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 / w10 + a7 / w12
-        )
+        return np.sqrt(a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 / w10 + a7 / w12)
 
 
 class Extended2(AbstractGlass):
@@ -297,9 +280,7 @@ class Extended2(AbstractGlass):
         w4 = w2 * w2
         w6 = w2 * w4
         w8 = w2 * w6
-        return np.sqrt(
-            a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 * w4 + a7 * w6
-        )
+        return np.sqrt(a0 + a1 * w2 + a2 / w2 + a3 / w4 + a4 / w6 + a5 / w8 + a6 * w4 + a7 * w6)
 
 
 class Extended3(AbstractGlass):
@@ -315,17 +296,7 @@ class Extended3(AbstractGlass):
         w8 = w2 * w6
         w10 = w2 * w8
         w12 = w2 * w10
-        return np.sqrt(
-            a0
-            + a1 * w2
-            + a2 * w4
-            + a3 / w2
-            + a4 / w4
-            + a5 / w6
-            + a6 / w8
-            + a7 / w10
-            + a8 / w12
-        )
+        return np.sqrt(a0 + a1 * w2 + a2 * w4 + a3 / w2 + a4 / w4 + a5 / w6 + a6 / w8 + a7 / w10 + a8 / w12)
 
 
 def new_catalog(file: str) -> Iterator[AbstractGlass]:
@@ -336,9 +307,7 @@ def new_catalog(file: str) -> Iterator[AbstractGlass]:
         line = line.strip()
         if line.startswith("NM"):
             if name_glcs is not None:
-                raise GlassCatalogError(
-                    GlassCatalogErrorReason.GlassDescriptionNotFound
-                )
+                raise GlassCatalogError(GlassCatalogErrorReason.GlassDescriptionNotFound)
             nm, name, dform, *_ = line.split(" ")
             dispersion_form = int(dform)
             gcls = _glass_registry.get(dispersion_form, None)
@@ -351,16 +320,10 @@ def new_catalog(file: str) -> Iterator[AbstractGlass]:
             coeffs = tuple(map(float, line.split(" ")[1:]))
         elif line.startswith("LD"):
             if wavelength_range is not None:
-                raise GlassCatalogError(
-                    GlassCatalogErrorReason.GlassDescriptionNotFound
-                )
+                raise GlassCatalogError(GlassCatalogErrorReason.GlassDescriptionNotFound)
             _, l, u = line.split(" ")
             wavelength_range = float(l), float(u)
-        if (
-            name_glcs is not None
-            and coeffs is not None
-            and wavelength_range is not None
-        ):
+        if name_glcs is not None and coeffs is not None and wavelength_range is not None:
             name, gcls = name_glcs
             yield gcls(name, coeffs, wavelength_range)
             name_glcs = None

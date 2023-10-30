@@ -1,11 +1,15 @@
 from __future__ import annotations
+
 import numpy as np
+
 from .compound_prism_designer import Spectrometer, Vector2D
 
 
 def create_asap_macro(spectrometer: Spectrometer) -> str:
     surfaces = spectrometer.compound_prism.surfaces()
-    assert all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None, "Only 2D CompoundPrism designs can be translated to ASAP"
+    assert (
+        all(s.radius is None for s in surfaces[:-1]) and surfaces[-1].radius is not None
+    ), "Only 2D CompoundPrism designs can be translated to ASAP"
     midpts = [np.array(((s.lower_pt.x + s.upper_pt.x) / 2, (s.lower_pt.y + s.upper_pt.y) / 2)) for s in surfaces]
 
     lengths = [np.linalg.norm((s.upper_pt.x - s.lower_pt.x, s.upper_pt.y - s.lower_pt.y)) for s in surfaces]
@@ -14,17 +18,30 @@ def create_asap_macro(spectrometer: Spectrometer) -> str:
     lens_radius = surfaces[-1].radius
 
     glass_names = ["AIR"] + [g.name.replace("-", "_") for g in spectrometer.compound_prism.glasses] + ["AIR"]
-    planes = '\n'.join(f"""\
+    planes = "\n".join(
+        f"""\
 SURFACE
     PLANE X {midpt[0]} RECT {l/2} {spectrometer.compound_prism.width/2}
 OBJECT
     ROTATE Z {np.rad2deg(angle)}
     INTERFACE COATING {"AR" if spectrometer.compound_prism.ar_coated else "BARE"} {g1} {g2}
-""" for (angle, midpt, l, g1, g2) in zip(spectrometer.compound_prism.angles, midpts, lengths, glass_names[:-1], glass_names[1:]))
-    det_midpt = np.asarray(spectrometer.position) + np.asarray(spectrometer.direction) * spectrometer.detector_array.length / 2
+"""
+        for (angle, midpt, l, g1, g2) in zip(
+            spectrometer.compound_prism.angles,
+            midpts,
+            lengths,
+            glass_names[:-1],
+            glass_names[1:],
+        )
+    )
+    det_midpt = (
+        np.asarray(spectrometer.position) + np.asarray(spectrometer.direction) * spectrometer.detector_array.length / 2
+    )
     wi, wf = spectrometer.wavelengths.bounds
     wm = (wi + wf) / 2
-    media = "\n".join(f"    {g(wi)} {g(wm)} {g(wf)} '{g.name.replace('-', '_')}'" for g in set(spectrometer.compound_prism.glasses))
+    media = "\n".join(
+        f"    {g(wi)} {g(wm)} {g(wf)} '{g.name.replace('-', '_')}'" for g in set(spectrometer.compound_prism.glasses)
+    )
     return f"""\
 SYSTEM NEW
 RESET
