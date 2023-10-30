@@ -16,8 +16,8 @@ num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 rustacuda_core = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update" }
 rustacuda = { git = "https://github.com/jdtatz/RustaCUDA.git", branch = "driver_update", optional = true }
 parking_lot = { version = "0.12", optional = true }
-pyo3 = { version="0.18", features = ["extension-module", "abi3-py37"], optional = true }
-numpy = { version="0.18", optional = true }
+pyo3 = { version="0.20", features = ["extension-module", "abi3-py37"], optional = true }
+numpy = { version="0.20", optional = true }
 paste = "1.0"
 derive-wrapped-from = { path = "./derive-wrapped-from" }
 float_eq = { version = "1.0", default-features = false }
