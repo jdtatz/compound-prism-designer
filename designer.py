@@ -98,16 +98,12 @@ class CompoundPrismSpectrometerProblemConfig:
 
     def __post_init__(self):
         if self.nglass is None and self.glass_names is None:
-            raise NotImplementedError(
-                "One of `nglass` or `glass-names` must be defined"
-            )
+            raise NotImplementedError("One of `nglass` or `glass-names` must be defined")
 
     @property
     def nglass_or_const_glasses(self) -> Union[int, Sequence[str]]:
         if self.nglass is None and self.glass_names is None:
-            raise NotImplementedError(
-                "One of `nglass` or `glass-names` must be defined"
-            )
+            raise NotImplementedError("One of `nglass` or `glass-names` must be defined")
         elif self.glass_names is not None:
             return self.glass_names
         else:
@@ -137,17 +133,11 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         nglass_or_const_glasses = config.nglass_or_const_glasses
         self.use_gaussian_beam = config.spectrometer.beam_width is not None
         self.use_fiber_beam = (
-            config.spectrometer.fiber_core_radius is not None
-            and config.spectrometer.numerical_aperture is not None
+            config.spectrometer.fiber_core_radius is not None and config.spectrometer.numerical_aperture is not None
         )
-        self.auto_position_detector_acceptance = (
-            config.auto_position_detector_acceptance
-        )
+        self.auto_position_detector_acceptance = config.auto_position_detector_acceptance
         assert self.use_gaussian_beam or self.use_fiber_beam
-        assert (
-            self.auto_position_detector_acceptance is None
-            or 0 < self.auto_position_detector_acceptance <= 1
-        )
+        assert self.auto_position_detector_acceptance is None or 0 < self.auto_position_detector_acceptance <= 1
 
         if isinstance(nglass_or_const_glasses, int):
             nglass = nglass_or_const_glasses
@@ -187,17 +177,10 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
             dtype_fields.append(("position", (np.float64, (2,))))
             bounds["position"] = position_bounds
         self._numpy_dtype = np.dtype(dtype_fields)
-        xl, xu = zip(
-            *itertools.chain.from_iterable(
-                map(lambda v: v if isinstance(v, list) else [v], bounds.values())
-            )
-        )
+        xl, xu = zip(*itertools.chain.from_iterable(map(lambda v: v if isinstance(v, list) else [v], bounds.values())))
 
         fix_indicies = np.add.accumulate(
-            [
-                np.prod(self._numpy_dtype[n].shape, dtype=np.int64)
-                for n in self._numpy_dtype.names
-            ]
+            [np.prod(self._numpy_dtype[n].shape, dtype=np.int64) for n in self._numpy_dtype.names]
         )[:-1]
         self._fix_params = lambda *params: np.array(
             tuple(a.squeeze() for a in np.split(params, fix_indicies)),
@@ -210,9 +193,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
 
         super().__init__(
             n_var=len(xl),
-            n_obj=1
-            + int(config.optimizer.optimize_size)
-            + int(config.optimizer.optimize_deviation),
+            n_obj=1 + int(config.optimizer.optimize_size) + int(config.optimizer.optimize_deviation),
             n_constr=1,
             xl=xl,
             xu=xu,
@@ -233,18 +214,14 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         compound_prism = CompoundPrism(
             glasses=glasses,
             angles=params["angles"],
-            lengths=np.arctanh(params["tanh_lengths"])
-            * self.config.spectrometer.max_height
-            / 4,
+            lengths=np.arctanh(params["tanh_lengths"]) * self.config.spectrometer.max_height / 4,
             curvature=curvature,
             height=params["height"],
             width=self.config.spectrometer.prism_width,
             ar_coated=self.config.spectrometer.ar_coated,
         )
         # print(compound_prism)
-        wavelengths = UniformWavelengthDistribution(
-            self.config.spectrometer.wavelength_range
-        )
+        wavelengths = UniformWavelengthDistribution(self.config.spectrometer.wavelength_range)
         if self.use_gaussian_beam:
             beam = GaussianBeam(
                 width=self.config.spectrometer.beam_width,
@@ -288,11 +265,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
         return Spectrometer(compound_prism, detector_array, wavelengths, beam)
 
     def _evaluate(self, x, out, *args, **kwargs):
-        max_size = (
-            (self.config.spectrometer.max_height * 40)
-            if self.config.optimizer.optimize_size
-            else np.inf
-        )
+        max_size = (self.config.spectrometer.max_height * 40) if self.config.optimizer.optimize_size else np.inf
         max_info = np.log2(self.config.spectrometer.bin_count)
         try:
             spectrometer = self.create_spectrometer(x)
@@ -300,9 +273,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
             if self.cpu_only:
                 fit = spectrometer.cpu_fitness()
             else:
-                fit = spectrometer.gpu_fitness(
-                    seeds=np.random.rand(1), max_n=128, max_eval=16_384 // 2
-                )
+                fit = spectrometer.gpu_fitness(seeds=np.random.rand(1), max_n=128, max_eval=16_384 // 2)
                 if fit is None:
                     raise RayTraceError()
             fit_info = np.log2(self.config.spectrometer.bin_count) - fit.info
@@ -314,9 +285,7 @@ class CompoundPrismSpectrometerProblem(ElementwiseProblem):
             if self.config.optimizer.optimize_deviation:
                 result.append(fit.deviation)
             out["F"] = result
-            feasable_size = np.logical_and(
-                self.config.spectrometer.max_height / 2 < fit.size, fit.size < max_size
-            )
+            feasable_size = np.logical_and(self.config.spectrometer.max_height / 2 < fit.size, fit.size < max_size)
             out["feasible"] = feasable_size
             out["G"] = np.where(feasable_size, 0, 1)
         except RayTraceError:
@@ -379,9 +348,7 @@ from pymoo.operators.mixed_variable_operator import (
 nglass = problem.config.nglass or 0
 mask = [*(["int"] * nglass), *(["real"] * (problem.n_var - nglass))]
 
-sampling = MixedVariableSampling(
-    mask, {"real": get_sampling("real_lhs"), "int": get_sampling("int_random")}
-)
+sampling = MixedVariableSampling(mask, {"real": get_sampling("real_lhs"), "int": get_sampling("int_random")})
 
 crossover = MixedVariableCrossover(
     mask,
@@ -421,9 +388,7 @@ else:
     algorithm = get_algorithm(method, ref_dirs=ref_dirs, **algorithm_kwargs)
 
 
-result = minimize(
-    problem, algorithm, termination=("n_gen", 200), verbose=True, save_history=True
-)
+result = minimize(problem, algorithm, termination=("n_gen", 200), verbose=True, save_history=True)
 
 if problem.n_obj == 1:
     spec = problem.create_spectrometer(result.X)
