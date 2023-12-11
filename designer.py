@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # from __future__ import annotations
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial, reduce
 from multiprocessing.pool import ThreadPool
 from operator import mul
@@ -90,7 +90,7 @@ class OptimizerConfig:
 @dataclass
 class CompoundPrismSpectrometerProblemConfig:
     spectrometer: CompoundPrismSpectrometerConfig
-    optimizer: OptimizerConfig = OptimizerConfig()
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
 
     auto_position_detector_acceptance: Optional[float] = None
     nglass: Optional[int] = None
