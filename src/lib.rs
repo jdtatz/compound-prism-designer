@@ -55,6 +55,7 @@ pub trait SpectrometerFitness<V: Vector<DIM>, const DIM: usize>:
         max_eval: u32,
     ) -> rustacuda::error::CudaResult<Option<DesignFitness<V::Scalar>>>
     where
+        V::Scalar: rustacuda::memory::DeviceCopy,
         Self: Kernel<V, DIM>;
 
     fn p_dets_l_wavelength(&self, wavelength: V::Scalar, max_n: usize) -> Vec<V::Scalar>;
@@ -66,14 +67,12 @@ pub trait SpectrometerFitness<V: Vector<DIM>, const DIM: usize>:
 }
 
 #[cfg(feature = "std")]
-impl<
-    T: FloatExt + rustacuda::memory::DeviceCopy,
-    V: Vector<D, Scalar = T>,
-    S: ?Sized + GenericSpectrometer<V, D>,
-    const D: usize,
-> SpectrometerFitness<V, D> for S
+impl<V: Vector<D>, S: ?Sized + GenericSpectrometer<V, D>, const D: usize> SpectrometerFitness<V, D>
+    for S
+where
+    V::Scalar: FloatExt,
 {
-    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<T> {
+    fn fitness(&self, max_n: usize, max_m: usize) -> DesignFitness<V::Scalar> {
         crate::fitness::fitness(self, max_n, max_m)
     }
 
@@ -84,18 +83,19 @@ impl<
         max_n: u32,
         nwarp: u32,
         max_eval: u32,
-    ) -> rustacuda::error::CudaResult<Option<DesignFitness<T>>>
+    ) -> rustacuda::error::CudaResult<Option<DesignFitness<V::Scalar>>>
     where
+        V::Scalar: rustacuda::memory::DeviceCopy,
         Self: Kernel<V, D>,
     {
         crate::cuda_fitness::cuda_fitness(self, seeds, max_n, nwarp, max_eval)
     }
 
-    fn p_dets_l_wavelength(&self, wavelength: T, max_n: usize) -> Vec<T> {
+    fn p_dets_l_wavelength(&self, wavelength: V::Scalar, max_n: usize) -> Vec<V::Scalar> {
         crate::fitness::p_dets_l_wavelength(self, wavelength, max_n).collect()
     }
 
-    fn propagation_path(&self, ray: Ray<V, D>, wavelength: T) -> Vec<GeometricRay<V, D>> {
+    fn propagation_path(&self, ray: Ray<V, D>, wavelength: V::Scalar) -> Vec<GeometricRay<V, D>> {
         self.propagation_path(ray, wavelength).collect()
     }
 }
